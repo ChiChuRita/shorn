@@ -7,3 +7,4 @@ coverage/
 
 # Scratch probes from debugging sessions. Never part of a change.
 probe*.mjs
+*.tgz
