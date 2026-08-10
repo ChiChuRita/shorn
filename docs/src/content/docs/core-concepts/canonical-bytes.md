@@ -52,7 +52,9 @@ Overlong varints are rejected: `1` must be `0x01`, never `0x81 0x00`. This keeps
 
 - **Floats.** `-0` and `0` are distinct byte strings. Validator-backed schemas refuse `NaN`; low-level `m.float32()` and `m.float64()` accept it, and multiple NaN bit patterns decode successfully. Do not use low-level NaN values for content addressing.
 - **String normalization.** `"é"` as one code point and as `e` plus a combining accent are different strings, both encoded faithfully. Normalize first if you need them equal.
-- **Decoded key order.** The bytes are canonical; the decoded object's key order is shorn's, not your original object's.
+- **Decoded key order.** The bytes are canonical; the decoded object's key order is shorn's, not your original object's. A decoded record is the same *value*, so `toEqual`, `isDeepStrictEqual` and any structural comparison pass — but `JSON.stringify(decoded) === JSON.stringify(original)` does not, because `JSON.stringify` is key-order sensitive. Compare values rather than serialized strings; a test suite that asserts on `JSON.stringify` output will report a difference where there is none.
+
+  Decoding in your declaration order instead was measured and rejected: the generated decoder builds one object literal, so emitting keys in a different order than they are read requires a temporary per field, which cost 6-15% of decode. Canonical order also mirrors the wire, which is the more useful thing for a reader to see.
 
 ## Round-tripping is a fixed point
 
