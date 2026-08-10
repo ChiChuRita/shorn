@@ -56,7 +56,7 @@ Between services you own, `unchecked(compile(schema))` writes the same bytes at 
 
 ## Runtime behavior
 
-Eligible object schemas use specialized runtime-generated encode and decode functions. Schemas with optional fields use the interpreted path. A strict Content Security Policy that blocks `new Function` also uses the interpreted path, with identical bytes and results. See [Compilation and Caching](/core-concepts/compile-and-caching/).
+Eligible object schemas use specialized runtime-generated encode and decode functions. **Decoding is generated for schemas with optional fields too** — each optional's position in the presence bitmap is fixed by the schema, so it compiles to a constant mask test. Encoding still takes the interpreted path when a schema has optional fields, as do both directions for a `__proto__` field, an open object, and an optional named after an `Object.prototype` member. A strict Content Security Policy that blocks `new Function` also uses the interpreted path, with identical bytes and results. See [Compilation and Caching](/core-concepts/compile-and-caching/).
 
 ## Methodology
 

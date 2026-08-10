@@ -372,6 +372,58 @@ describe("shorn core", () => {
       expect(() => buildUnderCsp(shape).encode(bad)).toThrow("at actor.age");
       expect(() => shape().encode(bad)).toThrow("at actor.age");
     });
+
+    // Optional fields decode through a generated function too, so the two paths have to
+    // agree about a presence bitmap as well as about a fixed field list. Every subset of
+    // the optionals is checked, because the generated function tests one constant mask
+    // per field and a wrong mask only shows up for the subsets that exercise that bit.
+    const optionalShape = () =>
+      m.object({
+        a: m.string().optional(),
+        b: m.uint(),
+        c: m.boolean().optional(),
+        d: m.array(m.string()).optional(),
+        e: m.string(),
+        f: m.float64().optional(),
+      });
+
+    it("agrees on every subset of the optional fields", () => {
+      const interpreted = buildUnderCsp(optionalShape);
+      const generated = optionalShape();
+      const optionals = { a: "x", c: true, d: ["p", "q"], f: 1.5 } as const;
+      const keys = Object.keys(optionals) as (keyof typeof optionals)[];
+
+      for (let mask = 0; mask < 1 << keys.length; mask++) {
+        const value: Record<string, unknown> = { b: 7, e: "req" };
+        for (const [bit, key] of keys.entries()) {
+          if (mask & (1 << bit)) value[key] = optionals[key];
+        }
+        const bytes = generated.encode(value as never);
+        expect([...interpreted.encode(value as never)]).toEqual([...bytes]);
+        expect(generated.decode(bytes)).toEqual(value);
+        expect(interpreted.decode(bytes)).toEqual(value);
+        // An absent optional must leave no key at all, not an `undefined` one.
+        expect(Object.keys(generated.decode(bytes) as object).sort()).toEqual(
+          Object.keys(value).sort(),
+        );
+      }
+    });
+
+    it("rejects non-canonical bitmap padding on both paths", () => {
+      // Six optionals in one byte leaves two spare bits; setting one must be refused, or
+      // two distinct payloads would decode to the same value.
+      const schema = () =>
+        m.object({
+          a: m.uint().optional(),
+          b: m.uint().optional(),
+          c: m.uint().optional(),
+        });
+      const payload = new Uint8Array([0b1000_0000]);
+      expect(() => schema().decode(payload)).toThrow(/Non-canonical presence bitmap padding/);
+      expect(() => buildUnderCsp(schema).decode(payload)).toThrow(
+        /Non-canonical presence bitmap padding/,
+      );
+    });
   });
 
   describe("error paths", () => {

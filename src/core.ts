@@ -1452,20 +1452,60 @@ function recordParts(fields: readonly ObjectField[], extra: readonly unknown[] =
  * *creation site*, so a shared `fields[i].schema._decode(r)` collects every object
  * schema's maps and goes megamorphic (2.7x with one schema loaded, 0.3x with a dozen).
  *
+ * Objects **with** optional fields are generated too, which they were not. The presence
+ * bitmap was read as making the field set ungeneratable, and that conflated two things:
+ * *which* fields arrive is dynamic, but each optional's byte and mask within the bitmap
+ * are fixed by the schema, so they emit as literals — `if(b[2]&16)` — and every field
+ * still gets its own monomorphic call site. Those objects are not an edge case:
+ * heterogeneous array elements are the normal shape of a real document, and shorn was
+ * decoding them 2.1x behind msgpackr's shared records on their own benchmark.
+ *
  * Keys are arguments, never interpolated: `compile()` may take a key from a fetched
  * JSON Schema, and 5% is cheap for never parsing one as code. Returns undefined under
  * a CSP without `unsafe-eval`, where the interpreted path below is complete.
  */
 function buildRecordDecoder(
   fields: readonly ObjectField[],
+  optionalCount: number,
+  bitmapWidth: number,
 ): ((reader: Reader) => Record<string, unknown>) | undefined {
   try {
-    const { parameters, args } = recordParts(fields);
-    const properties = fields.map((_, index) => `[k${index}]:s${index}._decode(r)`);
-    const make = new Function(
-      ...parameters,
-      `return function(r){return{${properties.join(",")}}}`,
-    ) as (...args: unknown[]) => (reader: Reader) => Record<string, unknown>;
+    // `DecodeError` arrives as `x0` rather than a capture, for `buildRecordEncoder`'s
+    // reason: a wrapper closure would be one creation site shared by every schema.
+    const { parameters, args } = recordParts(fields, optionalCount === 0 ? [] : [DecodeError]);
+    // All-required stays one object literal, which is measurably better than assigning
+    // into a fresh object and is the shape most schemas have.
+    let body: string;
+    if (optionalCount === 0) {
+      const properties = fields.map((_, index) => `[k${index}]:s${index}._decode(r)`);
+      body = `return{${properties.join(",")}}`;
+    } else {
+      const statements: string[] = [];
+      // The same rejection the interpreted path makes, before any field is read: padding
+      // above the last optional must be zero, or two payloads decode to one value.
+      const spare = optionalCount % 8;
+      if (spare !== 0) {
+        statements.push(
+          `if((b[${bitmapWidth - 1}]>>>${spare})!==0)throw new x0("Non-canonical presence bitmap padding",r.position)`,
+        );
+      }
+      statements.push("const o={}");
+      for (let index = 0; index < fields.length; index++) {
+        const { optionalIndex } = fields[index]!;
+        const read = `o[k${index}]=s${index}._decode(r)`;
+        // Byte and bit are fixed by the schema, so they are constants here rather than
+        // the shifts the interpreted loop recomputes per field on every decode.
+        statements.push(
+          optionalIndex < 0
+            ? read
+            : `if(b[${optionalIndex >> 3}]&${1 << (optionalIndex & 7)})${read}`,
+        );
+      }
+      body = `const b=r.bytes(${bitmapWidth});${statements.join(";")};return o`;
+    }
+    const make = new Function(...parameters, `return function(r){${body}}`) as (
+      ...args: unknown[]
+    ) => (reader: Reader) => Record<string, unknown>;
     return make(...args);
   } catch {
     return undefined;
@@ -1551,11 +1591,11 @@ class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     this._minWidth = width;
 
     // Own property, shadowing the prototype method, so the generated function is the
-    // whole decoder rather than a branch inside one. Gated as the interpreted fast path
-    // below is: a bitmap makes the field set dynamic, and `__proto__` needs
-    // defineProperty.
-    if (optionalIndex === 0 && !this.hasProtoField && this.tail === undefined) {
-      const generated = buildRecordDecoder(this.fields);
+    // whole decoder rather than a branch inside one. `__proto__` still needs
+    // defineProperty, and an `Object.prototype`-shadowing key needs a non-enumerable
+    // own undefined when its optional is absent; both stay interpreted.
+    if (!this.hasProtoField && this.tail === undefined && !(optionalIndex > 0 && this.inheritableField)) {
+      const generated = buildRecordDecoder(this.fields, optionalIndex, this.bitmapWidth);
       if (generated !== undefined) {
         this._decode = generated as (reader: Reader) => ObjectOutput<S>;
       }

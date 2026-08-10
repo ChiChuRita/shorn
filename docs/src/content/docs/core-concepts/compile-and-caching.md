@@ -28,7 +28,7 @@ There is no build step. `compile` builds the codec in memory and writes nothing 
 
 ## Runtime specialization
 
-For eligible object schemas, shorn creates specialized encode and decode functions with `new Function` when the codec is constructed. Schemas with optional fields use the interpreted path. Encoding also uses the interpreted path when it must reject unknown properties or handle a field that shadows `Object.prototype`.
+For eligible object schemas, shorn creates specialized encode and decode functions with `new Function` when the codec is constructed. Decoding is generated for schemas with optional fields as well: which fields arrive varies per payload, but each optional's byte and bit in the presence bitmap are fixed by the schema, so the generated function tests a constant mask. Encoding takes the interpreted path when a schema has optional fields, and also when it must reject unknown properties or handle a field that shadows `Object.prototype`; decoding does the same for a `__proto__` field, an open object, or an absent optional named after an `Object.prototype` member, each of which needs `defineProperty` rather than an assignment.
 
 Schema keys are passed as function arguments rather than inserted into generated source, so keys from external JSON Schemas are not executable code.
 
