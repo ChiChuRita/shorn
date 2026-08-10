@@ -10,7 +10,8 @@ validation schema is the codec.
 npm install shorn zod
 ```
 
-ESM only, Node 20 or newer. A CommonJS caller needs `await import("shorn")`.
+ESM only, Node 20 or newer. `require("shorn")` works from Node 20.19 and 22.12 on;
+before that a CommonJS caller needs `await import("shorn")`.
 
 ## Quick start
 

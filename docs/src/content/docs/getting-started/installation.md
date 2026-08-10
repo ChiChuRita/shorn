@@ -31,7 +31,7 @@ Any other validator that implements both interfaces works without an adapter.
 
 - **Node 20+**, or any runtime with `DataView`, `Uint8Array`, `TextDecoder` (with `fatal`) and `TextEncoder`, including `encodeInto`, which some React Native polyfills omit.
 - **TypeScript 5.x** for typed results: `decode` returns your schema's type instead of `unknown`.
-- **ESM.** There is no CommonJS build.
+- **ESM.** There is no CommonJS build, but `require("shorn")` still works from Node 20.19 and 22.12 on, where `require` loads an ES module directly. Below those versions, a CommonJS caller needs `await import("shorn")`.
 
 ## Verify
 
