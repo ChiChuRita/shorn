@@ -32,9 +32,30 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile
+
+      # Written by hand rather than by `setup-node`'s `registry-url`, which puts the
+      # token in a temp file and points npm at it via NPM_CONFIG_USERCONFIG — a path
+      # `pnpm publish` did not read, so it published unauthenticated and npm answered
+      # with its browser-auth fallback (ERR_PNPM_OTP_NON_INTERACTIVE). ~/.npmrc is the
+      # one location every tool in this job agrees on.
+      - name: Authenticate to npm
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is empty or unset"
+            exit 1
+          fi
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> ~/.npmrc
+
+      # Fail here, loudly, rather than fifteen lines into a publish. `whoami` is a
+      # read: it proves the token authenticates, and says nothing about whether it may
+      # publish, so a permissions problem still surfaces later — but an absent, typo'd
+      # or revoked token stops being indistinguishable from a 2FA wall.
+      - name: Prove the token authenticates
+        run: pnpm whoami --registry https://registry.npmjs.org
 
       # Two states, one job. With changesets pending, the action opens or updates a
       # "Version Packages" PR and publishes nothing. With none pending — i.e. that PR
@@ -50,9 +71,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
-          # Both spellings, because two tools read two different ones: setup-node's
-          # .npmrc expands NODE_AUTH_TOKEN, while changesets/action writes ~/.npmrc
-          # from NPM_TOKEN — and with only the former set it wrote an empty token,
-          # which npm answers with the non-interactive web-auth error.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Auth already lives in ~/.npmrc, written above. NPM_TOKEN stays so the
+          # action does not decide the file is missing and write its own over it.
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
