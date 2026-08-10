@@ -15,6 +15,7 @@ import { Packr, isNativeAccelerationEnabled } from "msgpackr";
 import protobuf from "protobufjs";
 import { z } from "zod";
 import { compile, m } from "../dist/index.js";
+import { documentValue } from "./document-value.mjs";
 import * as fixtures from "./fixtures.mjs";
 import { median } from "./measure.mjs";
 
@@ -101,7 +102,7 @@ const batch = Object.freeze(
   })),
 );
 
-const { person: Person, event: Event, batch: Batch } = fixtures;
+const { person: Person, event: Event, batch: Batch, document: Document } = fixtures;
 
 const personJsonSchema = z.object({
   age: z.int().nonnegative(),
@@ -202,17 +203,84 @@ const schemaPackBatch = schemapack.build([schemaPackEventShape], false);
 function createGenericCodecs() {
   const msgpack = new Packr({ useRecords: false });
   const msgpackRecords = new Packr({ useRecords: true, structures: [] });
+  // msgpackr's third mode, and the one that was missing from every published table
+  // here. It writes all string content into contiguous blocks and decodes it in one
+  // `TextDecoder` call instead of one per string, which makes it the fastest decoder
+  // measured on document-shaped data — faster than the shared records this suite had
+  // been treating as msgpackr's best case. Comparing against two of three modes and
+  // calling the result "vs msgpackr" was incomplete.
+  const msgpackBundled = new Packr({ useRecords: true, structures: [], bundleStrings: true });
   const cbor = new CborEncoder({ useRecords: false });
   const cborRecords = new CborEncoder({ useRecords: true, structures: [] });
-  return { msgpack, msgpackRecords, cbor, cborRecords };
+  return { msgpack, msgpackRecords, msgpackBundled, cbor, cborRecords };
+}
+
+/**
+ * The schemaless subset, for a fixture the schema codecs cannot express.
+ *
+ * SchemaPack has no optional field at all, and Avro and Protobuf would need a union or
+ * a presence flag per optional — which is a different wire shape, so the row would
+ * compare shorn against a schema nobody would write. Dropping them is honest; quietly
+ * flattening the fixture until they fit would not be, because the optional fields are
+ * the thing being measured.
+ */
+function makeSchemalessImplementations(value, schema) {
+  const { msgpack, msgpackRecords, msgpackBundled, cbor, cborRecords } = createGenericCodecs();
+  msgpackRecords.pack(value);
+  msgpackBundled.pack(value);
+  cborRecords.encode(value);
+
+  return [
+    {
+      name: "this library (schema)",
+      encode: (input) => schema.encode(input),
+      decode: (bytes) => schema.decode(bytes),
+    },
+    {
+      name: "msgpackr MessagePack",
+      encode: (input) => msgpack.pack(input),
+      decode: (bytes) => msgpack.unpack(bytes),
+    },
+    {
+      name: "msgpackr shared records†",
+      encode: (input) => msgpackRecords.pack(input),
+      decode: (bytes) => msgpackRecords.unpack(bytes),
+    },
+    {
+      name: "msgpackr bundled strings†",
+      encode: (input) => msgpackBundled.pack(input),
+      decode: (bytes) => msgpackBundled.unpack(bytes),
+    },
+    {
+      name: "@msgpack/msgpack",
+      encode: (input) => messagePackEncode(input),
+      decode: (bytes) => messagePackDecode(bytes),
+    },
+    {
+      name: "cbor-x CBOR",
+      encode: (input) => cbor.encode(input),
+      decode: (bytes) => cbor.decode(bytes),
+    },
+    {
+      name: "cbor-x shared records†",
+      encode: (input) => cborRecords.encode(input),
+      decode: (bytes) => cborRecords.decode(bytes),
+    },
+    {
+      name: "JSON bytes",
+      encode: (input) => textEncoder.encode(JSON.stringify(input)),
+      decode: (bytes) => JSON.parse(textDecoder.decode(bytes)),
+    },
+  ];
 }
 
 function makeImplementations(value, schema, avroType, protoType, schemaPackType, wrapProto = false) {
-  const { msgpack, msgpackRecords, cbor, cborRecords } = createGenericCodecs();
+  const { msgpack, msgpackRecords, msgpackBundled, cbor, cborRecords } = createGenericCodecs();
   const proto = protoCodec(protoType, wrapProto);
 
   // Establish the out-of-band record tables before measuring steady-state payloads.
   msgpackRecords.pack(value);
+  msgpackBundled.pack(value);
   cborRecords.encode(value);
 
   return [
@@ -245,6 +313,11 @@ function makeImplementations(value, schema, avroType, protoType, schemaPackType,
       name: "msgpackr shared records†",
       encode: (input) => msgpackRecords.pack(input),
       decode: (bytes) => msgpackRecords.unpack(bytes),
+    },
+    {
+      name: "msgpackr bundled strings†",
+      encode: (input) => msgpackBundled.pack(input),
+      decode: (bytes) => msgpackBundled.unpack(bytes),
     },
     {
       name: "@msgpack/msgpack",
@@ -517,6 +590,18 @@ const results = {
     "batch",
     batch,
     makeImplementations(batch, Batch, avroBatch, ProtoBatch, schemaPackBatch, true),
+  ),
+  // Document-shaped, and the reason it exists: every fixture above is a small flat
+  // all-required record, the shape the generated codecs are best at. Running shorn
+  // through msgpackr's own benchmark on a real document found decode 2.1x behind their
+  // shared records, and this suite could not see it. `documentSection` has optional
+  // fields, so it decodes on the interpreted path; the payload is 87% string bytes,
+  // which is content shorn does not shrink and cannot decode faster than the platform.
+  document: benchmarkFixture(
+    "Document — raw codec, schemaless comparison only",
+    "document",
+    documentValue,
+    makeSchemalessImplementations(documentValue, Document),
   ),
   validatedPerson: benchmarkValidatedPerson(),
 };

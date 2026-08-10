@@ -24,3 +24,82 @@ export const event = m.object({
   timestamp: m.uint(),
 });
 export const batch = m.array(event);
+
+/**
+ * A document, as opposed to a record — the shape class every fixture above misses.
+ *
+ * The four above are small, flat, all-required and short-stringed, which is exactly
+ * what the generated record codecs are best at. Running shorn through msgpackr's own
+ * benchmark (a 7.6 KB clinical-trial document) found decode 2.1x behind their shared
+ * records on data of this shape while our suite showed decode leading everything, and
+ * the suite could not see it because no fixture here had:
+ *
+ *   - **optional fields**, which make the field set dynamic and so keep an object on
+ *     the interpreted decode path — no `new Function` record decoder at all;
+ *   - **heterogeneous array elements**, where the same array holds objects with four
+ *     different key sets, which is normal in real documents and absent above;
+ *   - **string-dominated content**: three quarters of that payload was string bytes,
+ *     one `TextDecoder` call each, a cost shorn cannot shrink and does not win;
+ *   - **always-null fields**, which cost a marker byte and no value.
+ *
+ * Modeled rather than copied, so the fixture is ours to license and to keep stable,
+ * with the same four properties. `nullable(string)` and not `literal(null)` for the
+ * always-empty fields: a real schema author writes the nullable, and the literal would
+ * cost zero bytes and hand us a size win the data does not support.
+ */
+const nullableString = m.string().nullable();
+export const documentMetadata = m.object({
+  abstract: m.string(),
+  authors: m.array(m.string()),
+  canonicalUrl: nullableString,
+  created: m.string(),
+  digitized: m.boolean(),
+  doi: nullableString,
+  edition: nullableString,
+  identifier: m.string(),
+  issn: nullableString,
+  issue: nullableString,
+  keywords: m.array(m.string()),
+  language: m.string(),
+  license: nullableString,
+  pages: nullableString,
+  publisher: m.string(),
+  retracted: m.boolean(),
+  revision: m.uint(),
+  series: nullableString,
+  summary: m.string(),
+  title: m.string(),
+  volume: nullableString,
+  year: m.uint(),
+});
+
+/** Four key sets over one array: only `id` and `terms` are always present. */
+export const documentSection = m.object({
+  anchor: m.string().optional(),
+  body: m.string().optional(),
+  depth: m.uint().optional(),
+  id: m.string(),
+  ordinal: m.uint().optional(),
+  score: m.float64().optional(),
+  terms: m.array(m.array(m.string())),
+  title: m.string().optional(),
+});
+
+export const documentMeasure = m.object({
+  count: m.uint(),
+  label: m.string(),
+  mean: m.float64(),
+  stddev: m.float64(),
+  unit: m.string(),
+});
+
+export const document = m.object({
+  metadata: documentMetadata,
+  id: m.uint(),
+  measures: m.array(documentMeasure),
+  name: m.string(),
+  references: m.array(m.string()),
+  score: m.float64(),
+  sections: m.array(documentSection),
+  tags: m.array(m.string()),
+});

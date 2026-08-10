@@ -21,6 +21,7 @@ import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
 import { z } from "zod";
 import { compile, DecodeError, fingerprinted, m, unchecked } from "../dist/index.js";
+import { documentValue } from "./document-value.mjs";
 import * as fixtures from "./fixtures.mjs";
 import { nanosPerOp, median, readSink } from "./measure.mjs";
 
@@ -55,7 +56,7 @@ const skip = (group) => only !== undefined && only !== group;
 // Fixtures — the shapes the README and docs quote.
 // ---------------------------------------------------------------------------
 
-const { person, event, batch } = fixtures;
+const { person, event, batch, document } = fixtures;
 const personValue = { age: 25, name: "Rahul", sex: "M" };
 const eventValue = {
   active: true,
@@ -100,6 +101,11 @@ if (!skip("throughput")) {
     // `person` row above, which is only the same shape by construction.
     ["zod person (unchecked)", unchecked(zodCodec), personValue],
     ["fingerprinted zod person", framed, personValue],
+    // Document-shaped, and the only row here whose objects are not all on the
+    // generated decode path: `documentSection` has optional fields, so it decodes
+    // interpreted. Every other row above is a small all-required record, which is
+    // why they could not see the 2.1x decode gap msgpackr's own fixture exposed.
+    ["document", document, documentValue],
   ];
   for (const [name, schema, value] of cases) {
     const bytes = schema.encode(value);
@@ -183,6 +189,7 @@ if (!skip("size")) {
     ["unicode string", unicode, unicodeValue],
     ["500 ms timestamps", timestamps, timestampValues],
     ["fingerprinted person", framed, personValue],
+    ["document", document, documentValue],
   ]) {
     record("size", `${name} bytes`, schema.encode(value).length, "B", "lower", 0);
   }
