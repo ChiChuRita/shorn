@@ -1,0 +1,250 @@
+/* The byte strips: the characters JSON puts on the wire above, the bytes shorn writes
+   below. Global rather than scoped to one component because two places draw it: the
+   hero draws a fixed Person record, the playground draws whatever you type, and the
+   whole point is that they read as the same figure at two sizes.
+
+   Every rule is nested under `.bytes` so these generic names cannot leak.
+
+   No card: the panel is bare, like the page's other figures. That means the cells are
+   chips raised off the ground rather than slots cut into a surface, which is why the
+   fill below is `--shorn-surface` and the dim ink is `--shorn-ink-dim-raised`: ink-3
+   is only 4.22:1 on that fill and tokens.css records it as failing there. */
+
+.bytes {
+  overflow-x: auto;
+  font-family: var(--mono, ui-monospace), monospace;
+  font-size: 14px;
+}
+
+.bytes .lane {
+  margin: 0 0 14px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--shorn-ink-2);
+}
+
+.bytes .lane span {
+  color: var(--shorn-ink-dim-raised);
+}
+
+.bytes .strip {
+  display: flex;
+  /* 2.5px: 35 cells share 34 gaps, so every extra half-pixel costs the strip 17px and
+     the JSON run is what has to fit its column without clipping. */
+  gap: 2.5px;
+  width: max-content;
+}
+
+.bytes .tok {
+  display: inline-flex;
+  gap: 2.5px;
+}
+
+/* Every cell is the SAME width, including a two-glyph one like the varint `34` or a
+   hex pair. Sizing to content let those run wider than their neighbours, which made
+   the row ragged.
+
+   2.1ch, not 1.5: `ch` is the advance width in a monospace face, so two glyphs need a
+   flat 2ch, and `34` was being squeezed into a cell that could not hold it. Paying the
+   width everywhere keeps the grid even and lets every glyph render full size. The
+   strips wrap, so the extra width costs a wrapped row rather than a clipped one, and
+   both lanes keep a shared cell width, which is what makes their lengths comparable
+   at a glance. */
+.bytes .strip i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.1ch;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--shorn-surface);
+  font-style: normal;
+  color: var(--shorn-ink-dim-raised);
+}
+
+/* The characters that survive the trip. Ink, not inversion: inverting them put eight
+   white chips in the JSON strip and eight more on the wire, which at 15.9:1 against
+   this ground was the loudest thing on the page. Brightness against the dim cells
+   carries the same mapping, and it is the device the size table already uses. */
+.bytes .run i,
+.bytes .wire i {
+  color: var(--shorn-ink);
+}
+
+/* Inset rather than a border: a real border would add 2px to the cell and knock this
+   one out of the strip's rhythm. */
+.bytes .wire .len {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--shorn-rule);
+  color: var(--shorn-ink-dim-raised);
+}
+
+.bytes .wire {
+  gap: 16px;
+}
+
+.bytes .group {
+  display: flex;
+  flex-direction: column;
+}
+
+.bytes .cells {
+  display: flex;
+  gap: 2.5px;
+}
+
+/* A rule under the run it names, so the name reads as a bracket over those bytes
+   rather than as another value on the wire. */
+.bytes .field {
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 1px solid var(--shorn-rule);
+  text-align: center;
+  font-size: 0.85em;
+  color: var(--shorn-ink-dim-raised);
+}
+
+/* The delta rides the divider between the strips, where the bytes disappear. */
+.bytes .split {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 30px 0;
+  color: var(--shorn-ink-3);
+  font-size: 11.5px;
+}
+
+.bytes .split::before,
+.bytes .split::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--shorn-rule);
+}
+
+/* Truncation marker, when a payload has more bytes than the strip will draw. */
+.bytes .more {
+  align-self: center;
+  margin-left: 10px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--shorn-ink-3);
+}
+
+/* The payoff lane. Bigger than the JSON above it, because six cells beside ninety-eight
+   need the weight to read as the point rather than as a footnote. Lives here rather than
+   in the playground's scoped styles: Astro scopes with `:where()`, which adds no
+   specificity, so a rule there ties with `.bytes .strip i` and loses on source order.
+   The extra class settles it outright. */
+.bytes .wire.big i {
+  width: 2.6ch;
+  height: 34px;
+  font-size: 17px;
+}
+
+/* The playground draws whatever you paste, so its strips wrap rather than run off the
+   edge: a 98-byte payload is 98 cells and there is no column width that fits them on
+   one line. The hero's fixed 35 do fit, so it stays a single run. */
+.bytes.wrap .strip,
+.bytes.wrap .tok {
+  flex-wrap: wrap;
+  width: auto;
+  /* Wrapped rows would otherwise sit flush against each other. */
+  row-gap: 4px;
+}
+
+/* The hero draws the same figure at the size of a hero. It wraps too, which is what
+   buys the size: nothing has to fit 35 cells on one line any more, so the cells can be
+   read at arm's length instead of being shrunk to make the row fit its column. `ch`
+   scales with font-size, so the cells grow with it and only the height needs restating. */
+.bytes.lg {
+  font-size: 17px;
+}
+
+.bytes.lg .strip i {
+  height: 34px;
+}
+
+.bytes.lg .lane {
+  font-size: 13.5px;
+}
+
+/* Pretty-printed: the strip breaks where a formatter would break, one field per line.
+   The break and the indent are layout, not cells: no byte is spent on them, so the
+   figure is still one cell per byte and the count beside the lane is still the count.
+   Reading it is the point: `{"name":"Alice","age":34,"sex":"F"}` as a single 35-cell run
+   is a wall, and the wrap point was wherever the column happened to end. */
+.bytes .strip.lines {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  /* Tighter than the wrapped-row gap: these lines are one record, and the strip is the
+     tallest thing in the hero column now that it stacks. */
+  gap: 3px;
+  width: auto;
+}
+
+.bytes .strip.lines .line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2.5px;
+  row-gap: 4px;
+}
+
+/* Two cell slots wide: the two spaces a formatter would print, drawn as the space they
+   would take rather than as two more cells. */
+.bytes .strip.lines .line.in {
+  padding-left: calc(2 * (1.6ch + 2.5px));
+}
+
+/* One step down, so a small phone shows the whole JSON run rather than scrolling it. */
+@media (max-width: 560px) {
+  .bytes,
+  .bytes.lg {
+    font-size: 12px;
+  }
+
+  .bytes .strip i,
+  .bytes.lg .strip i {
+    width: 2ch;
+    height: 22px;
+  }
+
+  .bytes .strip,
+  .bytes .tok,
+  .bytes .cells {
+    gap: 1px;
+  }
+
+  /* Restated because the rule above also matches the wire strip, and collapsing the
+     space between its groups runs the field runs into one word. */
+  .bytes .wire {
+    gap: 10px;
+  }
+
+  .bytes .wire.big i {
+    width: 2.4ch;
+    height: 28px;
+    font-size: 14px;
+  }
+
+  /* At a 1px gap the hex pairs merge into one long number and stop reading as bytes. */
+  .bytes .wire.big .tok {
+    gap: 3px;
+  }
+
+  /* Same two restatements for the pretty-printed strip: the rule above collapses the
+     gap between its lines, and the indent has to follow the narrower cell. */
+  .bytes .strip.lines {
+    gap: 4px;
+  }
+
+  .bytes .strip.lines .line {
+    gap: 1px;
+  }
+
+  .bytes .strip.lines .line.in {
+    padding-left: calc(2 * (2ch + 1px));
+  }
+}

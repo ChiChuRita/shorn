@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+/internal/
+.astro/
+
+# Scratch probes from debugging sessions. Never part of a change.
+probe*.mjs

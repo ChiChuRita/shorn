@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="shorn-logo-title">
+  <title id="shorn-logo-title">shorn</title>
+  <!-- The same record twice: the outlined bar is what a self-describing format
+       spends on it, the filled bar is what shorn spends. Literal ink on purpose:
+       Starlight renders this file through <img> (SiteTitle), and an SVG loaded
+       that way is an isolated document, so CSS custom properties and
+       currentColor never reach it. Keep in sync with the shorn-ink token in
+       docs/src/styles/tokens.css. The favicon deliberately does NOT match: it
+       renders against unknown browser chrome and needs a mid grey instead. The
+       token is named here without its leading dashes because an XML comment may
+       not contain a double hyphen. -->
+  <rect x="7" y="14" width="50" height="13" rx="4" fill="none" stroke="#ededed" stroke-width="4"/>
+  <rect x="7" y="37" width="18" height="13" rx="4" fill="#ededed"/>
+</svg>

@@ -1,0 +1,562 @@
+import { type } from "arktype";
+import { describe, expect, it } from "vitest";
+import * as v from "valibot";
+import { toStandardJsonSchema } from "@valibot/to-json-schema";
+import { z } from "zod";
+import {
+  DecodeError,
+  EncodeError,
+  compile,
+  decode,
+  decodeAsync,
+  encode,
+  encodeAsync,
+  m,
+  safeEncode,
+} from "../src/index.js";
+
+describe("Standard Schema adapter", () => {
+  const value = { name: "Rahul", age: 25, sex: "M" as const };
+
+  const zodSchema = z.object({
+    name: z.string(),
+    age: z.int().nonnegative(),
+    sex: z.enum(["M", "F", "X"]),
+  });
+
+  const arkSchema = type({
+    name: "string",
+    age: "number.integer >= 0",
+    sex: "'M' | 'F' | 'X'",
+  });
+
+  const valibotSchema = toStandardJsonSchema(
+    v.object({
+      name: v.string(),
+      age: v.pipe(v.number(), v.integer(), v.minValue(0)),
+      sex: v.picklist(["M", "F", "X"]),
+    }),
+  );
+
+  const nativeValibotSchema = v.object({
+    name: v.string(),
+    age: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    sex: v.picklist(["M", "F", "X"]),
+  });
+
+  it("accepts Zod, ArkType, and Valibot without vendor adapters", () => {
+    for (const schema of [compile(zodSchema), compile(arkSchema), compile(valibotSchema)]) {
+      expect(schema.decode(schema.encode(value))).toEqual(value);
+    }
+  });
+
+  it("produces the same canonical bytes across schema vendors", () => {
+    const encodings = [compile(zodSchema), compile(arkSchema), compile(valibotSchema)].map((schema) =>
+      [...schema.encode(value)].join(","),
+    );
+    expect(new Set(encodings).size).toBe(1);
+  });
+
+  it("uses a functional API without replacing native validation APIs", () => {
+    const zodBytes = encode(zodSchema, zodSchema.parse(value));
+    expect(decode(zodSchema, zodBytes)).toEqual(value);
+
+    const valibotValue = v.parse(nativeValibotSchema, value);
+    const structure = toStandardJsonSchema(nativeValibotSchema);
+    const valibotBytes = encode(nativeValibotSchema, valibotValue, structure);
+    expect(decode(nativeValibotSchema, valibotBytes, structure)).toEqual(value);
+    expect([...valibotBytes]).toEqual([...zodBytes]);
+  });
+
+  it("caches compiled wire plans by schema identity", () => {
+    expect(compile(zodSchema)).toBe(compile(zodSchema));
+  });
+
+  describe("shapes read from the JSON Schema rather than from its type alone", () => {
+    const uuid = "0192e4c6-3c0e-7000-8000-0000000000ff";
+
+    it("stores a uuid format as its 16 bytes, not its 36 characters", () => {
+      const Id = compile(z.uuid());
+      expect(Id.encode(uuid)).toHaveLength(16);
+      expect(Id.decode(Id.encode(uuid))).toBe(uuid);
+      // The all-zero and all-f UUIDs are the two the pattern special-cases, and the
+      // two most likely to expose a padding bug in either direction.
+      for (const edge of ["00000000-0000-0000-0000-000000000000", "ffffffff-ffff-ffff-ffff-ffffffffffff"]) {
+        expect(Id.decode(Id.encode(edge))).toBe(edge);
+      }
+    });
+
+    it("refuses an uppercase uuid rather than returning a different string", () => {
+      // Valid to the validator, which accepts either case — and still refused,
+      // because 16 bytes cannot remember which case they were written in.
+      expect(z.uuid().safeParse(uuid.toUpperCase()).success).toBe(true);
+      expect(() => compile(z.uuid()).encode(uuid.toUpperCase())).toThrow(/Expected a lowercase UUID/);
+    });
+
+    it("indexes a numeric enum instead of writing a float", () => {
+      const Status = compile(z.enum({ Ok: 200, Missing: 404 }));
+      expect(Status.encode(404)).toHaveLength(1);
+      expect(Status.decode(Status.encode(404))).toBe(404);
+      expect(Status.decode(Status.encode(200))).toBe(200);
+    });
+
+    it("drops the length varint when minItems fixes the count", () => {
+      const Triple = compile(z.array(z.uint32()).length(3));
+      expect(Triple.encode([1, 2, 3])).toHaveLength(3);
+      expect(Triple.decode(Triple.encode([1, 2, 3]))).toEqual([1, 2, 3]);
+      expect(compile(z.array(z.uint32())).encode([1, 2, 3])).toHaveLength(4);
+    });
+
+    it("encodes a record, whose keys are data rather than schema", () => {
+      const Tags = compile(z.record(z.string(), z.int()));
+      const tags = { alpha: 1, beta: 2 };
+      expect(Tags.decode(Tags.encode(tags))).toEqual(tags);
+      expect(Tags.encode({})).toHaveLength(1);
+    });
+
+    it("writes a record's keys in canonical order whatever order they were built in", () => {
+      const Tags = compile(z.record(z.string(), z.int()));
+      expect([...Tags.encode({ a: 1, b: 2 })]).toEqual([...Tags.encode({ b: 2, a: 1 })]);
+    });
+
+    it("refuses record keys that arrive out of canonical order", () => {
+      // Sorting them on the way in instead would let two payloads decode to one
+      // record, and a duplicate key would quietly win over the key it repeats.
+      const Tags = compile(z.record(z.string(), z.int()));
+      const bytes = Tags.encode({ a: 1, b: 2 });
+      const swapped = Uint8Array.from(bytes);
+      [swapped[2], swapped[5]] = [swapped[5]!, swapped[2]!];
+      expect(() => Tags.decode(swapped)).toThrow(/out of canonical order/);
+    });
+
+    it("keeps a __proto__ key as a key", () => {
+      const Tags = compile(z.record(z.string(), z.int()));
+      const decoded = Tags.decode(Tags.encode({ ["__proto__"]: 1 }));
+      expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    });
+
+    it("bounds a record's declared size against the input it would have to fill", () => {
+      expect(() => compile(z.record(z.string(), z.string())).decode(new Uint8Array([200, 1, 2])))
+        .toThrow(/exceeds the remaining input/);
+    });
+
+    it("carries a dynamic value's own type, since the schema declined to", () => {
+      const Any = compile(z.any());
+      for (const value of [null, true, false, 0, -1, 1.5, -0, NaN, "hi", [1, ["a"]], { b: 2 }]) {
+        expect(Any.decode(Any.encode(value))).toEqual(value);
+      }
+      // A tag byte and nothing else for the values that are their own tag.
+      expect(Any.encode(null)).toHaveLength(1);
+      expect(Any.encode(true)).toHaveLength(1);
+    });
+
+    it("gives a dynamic value one encoding, not two", () => {
+      const Any = compile(z.any());
+      expect([...Any.encode({ b: 1, a: 2 })]).toEqual([...Any.encode({ a: 2, b: 1 })]);
+      // An integer takes the int tag, so the same integer under the float tag is a
+      // second spelling of a value that already had one.
+      const float = new Uint8Array(9);
+      float[0] = 4;
+      new DataView(float.buffer).setFloat64(1, 5, true);
+      expect(() => Any.decode(float)).toThrow(/Non-canonical dynamic number/);
+    });
+
+    it("bounds how deep a dynamic value may nest, on both sides", () => {
+      const Any = compile(z.any());
+      let deep: unknown = 1;
+      for (let level = 0; level < 70; level++) deep = [deep];
+      expect(() => Any.encode(deep)).toThrow(/nests deeper than/);
+
+      // The payload, not the schema, chooses the depth here — which is what makes a
+      // limit necessary at all — so a hostile one must land on a DecodeError rather
+      // than on the engine's stack limit.
+      expect(() => Any.decode(new Uint8Array(200).fill(6))).toThrow(DecodeError);
+
+      // And a refused encode must not leave the depth count raised behind it.
+      expect(Any.decode(Any.encode([[1]]))).toEqual([[1]]);
+    });
+
+    it("refuses a rich type wearing an object's shape rather than writing it empty", () => {
+      const Any = compile(z.any());
+      expect(() => Any.encode(new Date())).toThrow(/Cannot encode Date as a dynamic value/);
+      expect(() => Any.encode(new Map())).toThrow(/dynamic value/);
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      expect(() => Any.encode(cyclic)).toThrow(/nests deeper than/);
+    });
+
+    it("encodes a discriminated union as a branch index", () => {
+      const Event = compile(
+        z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("click"), x: z.int() }),
+          z.object({ kind: z.literal("key"), code: z.string() }),
+        ]),
+      );
+      for (const value of [{ kind: "click", x: 3 } as const, { kind: "key", code: "a" } as const]) {
+        expect(Event.decode(Event.encode(value))).toEqual(value);
+      }
+      // One byte for the index, none for the discriminant: it is a literal inside
+      // its branch, and a literal writes nothing.
+      expect(Event.encode({ kind: "click", x: 3 })).toHaveLength(2);
+    });
+
+    it("orders union branches by discriminant, not by declaration", () => {
+      const one = compile(
+        z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("a"), v: z.int() }),
+          z.object({ kind: z.literal("b"), v: z.int() }),
+        ]),
+      );
+      const other = compile(
+        z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("b"), v: z.int() }),
+          z.object({ kind: z.literal("a"), v: z.int() }),
+        ]),
+      );
+      expect([...one.encode({ kind: "a", v: 1 })]).toEqual([...other.encode({ kind: "a", v: 1 })]);
+    });
+
+    it("refuses a branch index no branch answers to", () => {
+      const Event = compile(
+        z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("a") }),
+          z.object({ kind: z.literal("b") }),
+        ]),
+      );
+      expect(() => Event.decode(new Uint8Array([9]))).toThrow(/Unknown union branch 9/);
+    });
+
+    it("encodes a tuple's rest elements after its fixed ones", () => {
+      const Row = compile(z.tuple([z.string()], z.int()));
+      const rows: [string, ...number[]][] = [["a"], ["a", 1, 2, 3]];
+      for (const value of rows) {
+        expect(Row.decode(Row.encode(value))).toEqual(value);
+      }
+      // Fixed part bare, then a count for the rest — so an empty rest costs one byte.
+      expect(Row.encode(["a"])).toHaveLength(3);
+      // And the rest's element budget is the array's, not a second copy of it.
+      expect(() => Row.decode(new Uint8Array([1, 97, 200, 1]))).toThrow(/remaining input/);
+    });
+
+    it("names a rest element by its position in the whole tuple", () => {
+      const Row = compile(z.tuple([z.string()], z.int()));
+      // Not `[0]`, which is where it sits within the rest.
+      expect(() => Row.encode(["a", 1, "no"] as never)).toThrow(/\[2\]/);
+    });
+
+    it("keeps an open object's declared fields as cheap as a closed one's", () => {
+      // Only the open half pays for its keys, and an object with nothing extra pays
+      // one byte for saying so.
+      expect(compile(z.looseObject({ a: z.string() })).encode({ a: "x" })).toHaveLength(3);
+      expect(compile(z.object({ a: z.string() })).encode({ a: "x" })).toHaveLength(2);
+    });
+
+    it("orders an open object's extras canonically, whatever order they were set in", () => {
+      const Loose = compile(z.looseObject({ a: z.string() }));
+      expect([...Loose.encode({ a: "x", z: 1, b: 2 })]).toEqual([
+        ...Loose.encode({ a: "x", b: 2, z: 1 }),
+      ]);
+    });
+
+    it("refuses an extra key that repeats a declared field", () => {
+      // Otherwise it would overwrite the field decoded moments earlier, and the two
+      // payloads — value in the field, value in the tail — would decode alike.
+      const Loose = compile(z.looseObject({ a: z.string() }));
+      expect(() => Loose.decode(Uint8Array.from([1, 120, 1, 1, 97, 1, 49]))).toThrow(
+        /repeats a declared field/,
+      );
+    });
+
+    it("keeps an open object's prototype when a __proto__ key arrives in the tail", () => {
+      const Loose = compile(z.looseObject({ a: z.string() }));
+      const decoded = Loose.decode(Loose.encode({ a: "x", ["__proto__"]: 1 }));
+      expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    });
+
+    it("does not re-type a recursive or union schema as a dynamic value", () => {
+      // Both reach the same typeless node the `any` mapping reads, and both keep the
+      // refusal they had: a `$ref` has no bounded width, and an undiscriminated
+      // union has no property that says which branch to read.
+      const Node = z.object({ value: z.int(), get children() { return z.array(Node); } });
+      expect(() => compile(Node)).toThrow(/Recursive schemas \(\$ref\) are not supported/);
+      expect(() => compile(z.union([z.object({ a: z.string() }), z.object({ b: z.int() })])))
+        .toThrow(/Only nullable and discriminated JSON Schema unions/);
+    });
+
+    it("names the combinator when one carries the refusal", () => {
+      // "Unsupported Standard JSON Schema type undefined" named neither the schema
+      // nor the reason; the keyword is the one thing the caller can act on.
+      expect(() => compile(z.intersection(z.object({ a: z.string() }), z.object({ b: z.int() }))))
+        .toThrow(/Unsupported JSON Schema combinator allOf/);
+      expect(() => compile(z.never())).toThrow(/Unsupported JSON Schema combinator not/);
+    });
+
+    it("compiles z.null() to the same wire shape as z.literal(null)", () => {
+      // The same schema written two ways: `{ type: "null" }` and `{ const: null }`.
+      const typed = compile(z.object({ error: z.null(), n: z.int() }));
+      const literal = compile(z.object({ error: z.literal(null), n: z.int() }));
+      const value = { error: null, n: 7 };
+      expect([...typed.encode(value)]).toEqual([...literal.encode(value)]);
+      expect(typed.decode(typed.encode(value))).toEqual(value);
+      // And it inherits the null-literal rules: zero width, no second null marker.
+      expect(compile(z.null()).encode(null)).toHaveLength(0);
+      expect(() => compile(z.null()).nullable()).toThrow(/already decodes to null/);
+    });
+
+    it("still bounds a fixed count against the input it would have to fill", () => {
+      // `minItems` may arrive from a fetched JSON Schema, so it buys no more trust
+      // than a length the payload declared for itself.
+      const Huge = compile(z.array(z.string()).length(1_000_000));
+      expect(() => Huge.decode(new Uint8Array([1, 2, 3]))).toThrow(/remaining input/);
+    });
+  });
+
+  it("keeps the selected library's validation behavior", () => {
+    const Positive = compile(z.int().positive());
+    expect(() => Positive.encode(-1)).toThrow(/Too small/);
+    expect(safeEncode(z.int().positive(), -1).success).toBe(false);
+  });
+
+  it("supports tuples and nullable values through the standard interface", () => {
+    const Value = compile(z.tuple([z.string(), z.int(), z.string().nullable()]));
+    const tuple: [string, number, string | null] = ["x", -2, null];
+    expect(Value.decode(Value.encode(tuple))).toEqual(tuple);
+  });
+
+  it("explains why validation-only Standard Schemas are insufficient", () => {
+    const validationOnly = {
+      "~standard": {
+        version: 1 as const,
+        vendor: "test",
+        validate: (input: unknown) => ({ value: input }),
+      },
+    };
+    expect(() => compile(validationOnly as never)).toThrow(/provides validation but not structure/);
+  });
+
+  it("supports asynchronous Standard Schema validation explicitly", async () => {
+    const asyncSchema = {
+      "~standard": {
+        version: 1 as const,
+        vendor: "test",
+        validate: async (input: unknown) =>
+          typeof input === "string" ? { value: input } : { issues: [{ message: "Expected string" }] },
+        jsonSchema: {
+          input: () => ({ type: "string" }),
+          output: () => ({ type: "string" }),
+        },
+      },
+    };
+    const Value = compile(asyncSchema);
+    await expect(decodeAsync(asyncSchema, await encodeAsync(asyncSchema, "hello"))).resolves.toBe(
+      "hello",
+    );
+    expect(() => Value.encode("hello")).toThrow(/validates asynchronously/);
+  });
+
+  it("detects promise-like validators without relying on Promise identity", () => {
+    const thenableSchema = {
+      "~standard": {
+        version: 1 as const,
+        vendor: "test",
+        validate: () => ({ then: () => undefined }),
+        jsonSchema: {
+          input: () => ({ type: "string" }),
+          output: () => ({ type: "string" }),
+        },
+      },
+    };
+
+    expect(() => compile(thenableSchema as never).encode("hello" as never)).toThrow(
+      /validates asynchronously/,
+    );
+  });
+
+  // Rich types are the validator's job; shorn encodes the wire shape.
+  // What is pinned here is that the caller is told so, rather than being handed the
+  // vendor's bare "cannot be represented in JSON Schema" with no way forward.
+  it("keeps the vendor's reason and names the remedy for types JSON Schema lacks", () => {
+    for (const schema of [
+      z.object({ v: z.date() }),
+      z.object({ v: z.bigint() }),
+      z.object({ v: z.map(z.string(), z.number()) }),
+      z.object({ v: z.set(z.string()) }),
+    ]) {
+      expect(() => compile(schema)).toThrow(EncodeError);
+      expect(() => compile(schema)).toThrow(/cannot be represented in JSON Schema/);
+      expect(() => compile(schema)).toThrow(/convert rich types at the edge/);
+    }
+  });
+
+  // The pairing the error points at, proven end to end: zod owns rich <-> wire via
+  // z.codec, shorn owns wire <-> bytes. Nothing in shorn knows about Date or bigint.
+  it("round-trips rich types when the validator converts at the edge", () => {
+    const Rich = z.object({
+      when: z.codec(z.iso.datetime(), z.date(), {
+        decode: (text) => new Date(text),
+        encode: (date) => date.toISOString(),
+      }),
+      id: z.codec(z.string(), z.bigint(), {
+        decode: (text) => BigInt(text),
+        encode: (big) => big.toString(),
+      }),
+    });
+    const Wire = z.object({ when: z.iso.datetime(), id: z.string() });
+    const wire = compile(Wire);
+
+    const original = { when: new Date("2026-08-07T10:00:00.000Z"), id: 9007199254740993n };
+    const restored = z.decode(Rich, wire.decode(wire.encode(z.encode(Rich, original))));
+
+    expect(restored.when).toBeInstanceOf(Date);
+    expect(restored.when.toISOString()).toBe(original.when.toISOString());
+    // Past Number.MAX_SAFE_INTEGER, so this fails if anything routes through a number.
+    expect(restored.id).toBe(9007199254740993n);
+  });
+
+  it("refuses an extra property only where the schema left nowhere to put it", () => {
+    // An open object has somewhere: `additionalProperties` names the value type, so
+    // the extras are written after the declared fields. ArkType emits no
+    // `additionalProperties` at all, which is a closed object with no tail — the one
+    // case where an extra can only be dropped, so it is refused instead.
+    expect(() => compile(arkSchema).encode({ ...value, extra: true } as never)).toThrow(
+      /Unknown object property "extra"/,
+    );
+  });
+
+  // Who polices extra properties depends on what the vendor emits, which is not
+  // obvious from either side alone: zod says `additionalProperties: false` for both
+  // `object` and `strictObject` and handles extras itself, so shorn stands back;
+  // arktype emits nothing, so shorn refuses (above). This pins both halves, because
+  // the encoder's own check reads as inverted until you know which is which.
+  it("leaves extra properties to the validator when the vendor declares the object closed", () => {
+    const Stripping = z.object({ name: z.string() });
+    const Strict = z.strictObject({ name: z.string() });
+    const extra = { name: "x", extra: true };
+
+    expect(decode(Stripping, encode(Stripping, extra as never))).toEqual({ name: "x" });
+    expect(() => encode(Strict, extra as never)).toThrow(/Unrecognized key/);
+  });
+
+  it("preserves a declared __proto__ field without mutating the decoded prototype", () => {
+    const jsonSchema = JSON.parse(
+      '{"type":"object","properties":{"__proto__":{"type":"string"}},"required":["__proto__"],"additionalProperties":false}',
+    );
+    const Proto = {
+      "~standard": {
+        version: 1 as const,
+        vendor: "test",
+        validate: (value: unknown) => ({ value }),
+        jsonSchema: {
+          input: () => jsonSchema,
+          output: () => jsonSchema,
+        },
+      },
+    };
+    const input = Object.defineProperty({}, "__proto__", {
+      enumerable: true,
+      value: "safe",
+    }) as { __proto__: string };
+
+    const Value = compile(Proto as never);
+    const decoded = Value.decode(Value.encode(input as never)) as { __proto__: string };
+    expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+    expect(Object.hasOwn(decoded, "__proto__")).toBe(true);
+    expect(decoded.__proto__).toBe("safe");
+  });
+
+  describe("error detail", () => {
+    const thrown = (act: () => unknown): Error => {
+      try {
+        act();
+      } catch (error) {
+        return error as Error;
+      }
+      throw new Error("expected a throw");
+    };
+
+    it("names the failing field through a compiled codec", () => {
+      // A lone surrogate is a well-formed JS string, so the validator passes it and
+      // only the writer refuses it. Without the delegation this wrapper swallowed
+      // the walk and every compiled codec — nearly every codec — lost its path.
+      const Note = compile(z.object({ user: z.object({ note: z.string() }) }));
+      const error = thrown(() => Note.encode({ user: { note: "\ud800" } })) as EncodeError;
+      expect(error.message).toBe("String contains an unpaired surrogate at user.note");
+      expect(error.path).toBe("user.note");
+    });
+
+    it("carries the validator's issues alongside the joined message", () => {
+      const Person = compile(z.object({ age: z.int().min(18), name: z.string().min(2) }));
+      const error = thrown(() => Person.encode({ age: 3, name: "x" })) as EncodeError;
+      expect(error.message).toMatch(/^age: .*; name: /);
+      expect(error.issues?.map((issue) => issue.path?.join("."))).toEqual(["age", "name"]);
+      expect(error.issues).toHaveLength(2);
+    });
+
+    it("keeps the issues when validation fails on the way out", () => {
+      const Age = compile(z.object({ age: z.int().min(18) }));
+      // Encoded by a shape that agrees on the wire and disagrees on the refinement,
+      // which is the only way to get bytes a validator will refuse.
+      const bytes = m.object({ age: m.int() }).encode({ age: 3 });
+      const error = thrown(() => Age.decode(bytes)) as DecodeError;
+      expect(error).toBeInstanceOf(DecodeError);
+      expect(error.issues?.map((issue) => issue.path?.join("."))).toEqual(["age"]);
+      expect(error.cause).toBeInstanceOf(EncodeError);
+    });
+
+    it("keeps the vendor's own error reachable behind a rich type", () => {
+      const error = thrown(() => compile(z.object({ when: z.date() }) as never));
+      expect(error.message).toMatch(/convert rich types at the edge/);
+      expect(error.cause).toBeInstanceOf(Error);
+    });
+  });
+
+  describe("rejects an argument that is not a Standard Schema", () => {
+    // Every public entry point funnels through the same guard, so `compile` stands
+    // in for all of them; the last case checks one other entry really does share it.
+    it("names a raw JSON Schema as the mistake it is", () => {
+      expect(() => compile({ type: "object", properties: {} } as never)).toThrow(
+        /received a raw JSON Schema/,
+      );
+      expect(() => compile({ $schema: "https://json-schema.org/draft/2020-12/schema" } as never))
+        .toThrow(/received a raw JSON Schema/);
+    });
+
+    it("tells an `m` schema to skip the adapter", () => {
+      expect(() => compile(m.object({ age: m.uint() }) as never)).toThrow(/already a codec/);
+    });
+
+    it("still admits a callable schema, which is how arktype ships one", () => {
+      expect(() => compile(arkSchema)).not.toThrow();
+    });
+
+    it("reports the type for anything else, without reading ~standard", () => {
+      expect(() => compile(null as never)).toThrow(/received null/);
+      expect(() => compile("nope" as never)).toThrow(/received string/);
+      expect(() => compile(undefined as never)).toThrow(/received undefined/);
+      expect(() => compile({} as never)).toThrow(/received object/);
+    });
+
+    it("throws EncodeError, not a TypeError, and does so from every entry point", () => {
+      expect(() => compile(null as never)).toThrow(EncodeError);
+      expect(() => encode({ type: "object" } as never, 1 as never)).toThrow(/raw JSON Schema/);
+      expect(safeEncode(null as never, 1 as never)).toMatchObject({ success: false });
+    });
+
+    it("gates the structure argument too, naming the remedy rather than a TypeError", () => {
+      // A raw JSON Schema, or the structure wrapped in an options object — either
+      // used to surface as "Cannot read properties of undefined (reading
+      // 'jsonSchema')" wrapped in the rich-types remedy, which points away from
+      // the fix.
+      const valibotSchema = v.object({ n: v.pipe(v.number(), v.integer()) });
+      const structure = toStandardJsonSchema(valibotSchema);
+      for (const wrong of [{ structure }, { type: "object" }, 42]) {
+        expect(() => compile(valibotSchema, wrong as never)).toThrow(
+          /second argument must be a Standard JSON Schema implementation/,
+        );
+      }
+      expect(() => compile(valibotSchema, structure)).not.toThrow();
+    });
+  });
+});

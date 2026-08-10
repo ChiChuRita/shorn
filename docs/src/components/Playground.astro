@@ -1,0 +1,383 @@
+---
+// Zod and shorn load only when the playground approaches the viewport.
+import { DEFAULT_PAYLOAD, DEFAULT_SCHEMA } from "./toy";
+// The same two strips the hero draws, here fed by whatever you type.
+import "../styles/strips.css";
+---
+
+<section data-playground aria-labelledby="toy">
+  <h2 id="toy">Try it</h2>
+  <p>Edit a Zod schema and payload. This runs the real encoder in your tab.</p>
+
+  <div class="io">
+    <label>
+      Zod schema
+      <textarea
+        data-schema
+        spellcheck="false"
+        rows="8"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off">{DEFAULT_SCHEMA}</textarea>
+    </label>
+    <label>
+      payload
+      <textarea
+        data-payload
+        spellcheck="false"
+        rows="8"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off">{DEFAULT_PAYLOAD}</textarea>
+    </label>
+  </div>
+
+  <p class="hint">Tab indents. Press Escape first to tab out of the box.</p>
+
+  {/* Same figure as the hero, live. Hidden until the first successful run so a failed
+      parse leaves the last good drawing up rather than an empty frame. */}
+  <div class="bytes wrap" data-diagram hidden>
+    <p class="lane">JSON<span data-json-count></span></p>
+    <div class="strip lines" data-json-strip></div>
+    <div class="split"><span data-delta></span></div>
+    <p class="lane">shorn, as hex<span data-wire-count></span></p>
+    <div class="strip wire hex big" data-wire-strip></div>
+    <p class="packed" data-packed></p>
+    <p class="stale" data-stale-note hidden>Showing the last input that parsed.</p>
+  </div>
+
+  <p data-out aria-live="polite">loading the encoder…</p>
+</section>
+
+<script>
+  import { compare, measure, type Codec } from "./toy";
+
+  const section = document.querySelector<HTMLElement>("[data-playground]");
+  if (section) {
+    const schemaEl = section.querySelector<HTMLTextAreaElement>("[data-schema]")!;
+    const payloadEl = section.querySelector<HTMLTextAreaElement>("[data-payload]")!;
+    const out = section.querySelector<HTMLElement>("[data-out]")!;
+    const diagram = section.querySelector<HTMLElement>("[data-diagram]")!;
+    const jsonStrip = section.querySelector<HTMLElement>("[data-json-strip]")!;
+    const wireStrip = section.querySelector<HTMLElement>("[data-wire-strip]")!;
+    const jsonCount = section.querySelector<HTMLElement>("[data-json-count]")!;
+    const wireCount = section.querySelector<HTMLElement>("[data-wire-count]")!;
+    const deltaEl = section.querySelector<HTMLElement>("[data-delta]")!;
+    const packed = section.querySelector<HTMLElement>("[data-packed]")!;
+    const staleNote = section.querySelector<HTMLElement>("[data-stale-note]")!;
+
+    // A 40 KB payload would otherwise draw 40,000 cells. High enough that an ordinary
+    // record draws in full (the default one is 98 bytes, and truncating it at 96 was
+    // absurd), and low enough that pasting a large array cannot lock the tab up.
+    const CAP = 320;
+
+    /** One cell per glyph, in a run that the caller can ink as key or as value. */
+    const runTo = (parent: Node, glyphs: string[], lift: boolean) => {
+      const run = document.createElement("span");
+      run.className = lift ? "tok run" : "tok";
+      for (const g of glyphs) {
+        const cell = document.createElement("i");
+        cell.textContent = g;
+        run.append(cell);
+      }
+      parent.appendChild(run);
+    };
+
+    const truncate = (parent: Node, hidden: number) => {
+      if (hidden <= 0) return;
+      const more = document.createElement("span");
+      more.className = "more";
+      more.textContent = `+${hidden} more`;
+      parent.appendChild(more);
+    };
+
+    // Two spaces, matching the indentation the defaults ship with and `tab-size: 2`.
+    const INDENT = "  ";
+
+    /** Write through the browser's own editing pipeline so undo still works. */
+    const type = (el: HTMLTextAreaElement, text: string) => {
+      // `execCommand` is deprecated but remains the only way to mutate a textarea and
+      // keep its native undo stack. Falling back loses undo, not the edit.
+      if (!document.execCommand("insertText", false, text)) {
+        const { selectionStart, selectionEnd } = el;
+        el.setRangeText(text, selectionStart, selectionEnd, "end");
+      }
+    };
+
+    // Trapping Tab inside a text box strands keyboard users, so Escape releases it: the
+    // next Tab then moves focus as usual. That pairing is the accessible version of this
+    // affordance, and the hint above the box says so.
+    const onKeydown = (event: KeyboardEvent) => {
+      const el = event.currentTarget as HTMLTextAreaElement;
+      if (event.key === "Escape") {
+        el.blur();
+        return;
+      }
+      if (event.key !== "Tab" || event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+
+      if (!event.shiftKey) {
+        type(el, INDENT);
+        return;
+      }
+      // Outdent: eat up to one indent of whitespace immediately before the caret.
+      const caret = el.selectionStart;
+      const lineStart = el.value.lastIndexOf("\n", caret - 1) + 1;
+      const before = el.value.slice(lineStart, caret);
+      const strip = Math.min(INDENT.length, before.length - before.trimEnd().length);
+      if (strip === 0) return;
+      el.setSelectionRange(caret - strip, caret);
+      if (!document.execCommand("delete")) el.setRangeText("", caret - strip, caret, "end");
+    };
+
+    /**
+     * Fit the taller of the two, and give both that height.
+     *
+     * Sizing each box to its own content made them disagree the moment their line counts
+     * did, which reads as one box shrinking rather than as two boxes fitting. They are a
+     * pair, so they get one height.
+     *
+     * Collapsing to 0 before measuring rather than to "auto": with `rows` set, `auto`
+     * resolves to the rows height, so `scrollHeight` never reports less than that and a
+     * box could grow but never come back down. `min-height` in the stylesheet keeps the
+     * pair from ever looking like single-line inputs.
+     */
+    const fit = () => {
+      const boxes = [schemaEl, payloadEl];
+      for (const el of boxes) el.style.height = "0";
+      // `scrollHeight` is content plus padding and excludes the border, but the box is
+      // `border-box`, so assigning it straight back leaves the content two pixels short
+      // and the browser answers with a scrollbar. Add the border the height has to cover.
+      const border = boxes.map((el) => {
+        const cs = getComputedStyle(el);
+        return parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+      });
+      const tallest = Math.min(Math.max(...boxes.map((el, i) => el.scrollHeight + border[i])), 520);
+      for (const el of boxes) el.style.height = `${tallest}px`;
+    };
+
+    let deps: ReturnType<typeof load> | null = null;
+
+    const load = () =>
+      Promise.all([import("zod"), import("shorn")]).then(([zod, shorn]) => ({
+        z: zod.z as unknown,
+        codec: { encode: shorn.encode, decode: shorn.decode } satisfies Codec,
+      }));
+
+    const run = async () => {
+      try {
+        // Inside the try: a failed dynamic import would otherwise escape, and the
+        // rejected promise cached in `deps` would keep every retry failing too.
+        const { z, codec } = await (deps ??= load()).catch((error) => {
+          deps = null;
+          throw error;
+        });
+        const { bytes, json, lines, jsonSize, roundTrips } = measure(
+          z,
+          codec,
+          schemaEl.value,
+          payloadEl.value,
+        );
+
+        // The JSON lane, one field per line, capped by character rather than by run so a
+        // single long value cannot blow past the cap on its own.
+        jsonStrip.replaceChildren();
+        let drawn = 0;
+        for (const line of lines) {
+          if (drawn >= CAP) break;
+          const row = document.createElement("div");
+          row.className = line.indent ? "line in" : "line";
+          for (const run of line.runs) {
+            if (drawn >= CAP) break;
+            const glyphs = [...run.text].slice(0, CAP - drawn);
+            runTo(row, glyphs, run.lift);
+            drawn += glyphs.length;
+          }
+          jsonStrip.append(row);
+        }
+        // On the last line drawn rather than under them all: the marker belongs at the
+        // point the drawing stops.
+        truncate(jsonStrip.lastElementChild ?? jsonStrip, [...json].length - drawn);
+
+        // Hex. Drawing the decoded values instead read better but
+        // lied about the size: `true` is four glyphs and one byte, so four boxes said
+        // four bytes. The hero is where the bytes get named; here they are counted.
+        wireStrip.replaceChildren();
+        runTo(wireStrip, [...bytes.slice(0, CAP)].map((b) => b.toString(16).padStart(2, "0")), true);
+        truncate(wireStrip, bytes.length - Math.min(bytes.length, CAP));
+
+        jsonCount.textContent = ` · ${jsonSize} bytes`;
+        wireCount.textContent = ` · ${bytes.length} bytes`;
+        packed.textContent =
+          `No field names in there; they stay in your schema, ` +
+          `which is where the saving comes from. Whole numbers are varints, enum members ` +
+          `an index, strings UTF-8 behind a length.`;
+        const saved = jsonSize - bytes.length;
+        deltaEl.textContent = saved === 0 ? "same size" : `${saved > 0 ? "−" : "+"}${Math.abs(saved)} bytes`;
+        diagram.hidden = false;
+        staleNote.hidden = true;
+        delete out.dataset.error;
+
+        const verdict = compare(bytes.length, jsonSize);
+        out.textContent = `${verdict.ratio} ${verdict.unit}, ${verdict.delta}. ${
+          roundTrips ? "Round-trips to identical bytes." : "Round-trip mismatch, please report it."
+        }`;
+      } catch (error) {
+        // The last good drawing stays up, dimmed, so you can see what you broke against
+        // what worked. The message is the one red thing on the page.
+        out.dataset.error = "";
+        // Only worth saying once there is a drawing to be stale.
+        staleNote.hidden = diagram.hidden;
+        out.textContent = error instanceof Error ? error.message : String(error);
+      }
+    };
+
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(run, 180);
+    };
+    for (const el of [schemaEl, payloadEl]) {
+      el.addEventListener("input", schedule);
+      el.addEventListener("keydown", onKeydown);
+      el.addEventListener("input", fit);
+    }
+    fit();
+    // Wrapping changes with the width, so a resize changes how tall "fits" is.
+    addEventListener("resize", fit);
+
+    // Nothing is imported until the toy is nearly on screen.
+    new IntersectionObserver(
+      (entries, self) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        self.disconnect();
+        void run();
+      },
+      { rootMargin: "300px" },
+    ).observe(section);
+  }
+</script>
+
+<style>
+  section {
+    padding: clamp(48px, 8vh, 80px) 0 clamp(36px, 5vh, 56px);
+    border-top: 1px solid var(--shorn-rule-soft);
+    --measure: 812px;
+  }
+
+  h2 {
+    margin: 0 0 6px;
+    font-size: 19px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  section > p {
+    margin: 0 0 20px;
+    font-size: 15px;
+    color: var(--shorn-ink-2);
+  }
+
+  .io {
+    display: grid;
+    gap: 12px;
+    /* Side by side when both fit, stacked when they don't. No breakpoint to maintain.
+       `min(260px, 100%)` rather than a bare 260px: below ~530px the bare version keeps
+       a 260px floor the container cannot pay for, and the page scrolls sideways. */
+    grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+    max-width: var(--measure);
+  }
+
+  label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--shorn-ink-3);
+  }
+
+  /* Plain bordered box. */
+  textarea {
+    display: block;
+    /* The `* { box-sizing }` reset lives in Landing.astro, and Astro scopes it to that
+       component, so this box was content-box, and `width: 100%` plus 28px of padding
+       made every viewport under ~530px scroll sideways. */
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 5px;
+    padding: 12px 14px;
+    resize: vertical;
+    /* The floor for the autosized height, and the size a no-JS reader gets. */
+    min-height: 132px;
+    background: var(--shorn-surface);
+    border: 1px solid var(--shorn-rule);
+    border-radius: var(--shorn-radius);
+    color: var(--shorn-ink);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    tab-size: 2;
+  }
+
+  /* The UA ring is drawn outside the border box, so the next grid item paints over
+     its right edge and the ring looks clipped. An inset ring cannot collide with a
+     neighbour at any gap, and it is ink, not the one blue on a monochrome page. */
+  textarea:focus-visible {
+    outline: 2px solid var(--shorn-ink);
+    outline-offset: -2px;
+  }
+
+  /* Keyboard affordance, stated because Tab in a text box is not what a browser does
+     by default and an undiscoverable shortcut is not one. */
+  .hint {
+    margin: 10px 0 0;
+    font-size: 12.5px;
+    color: var(--shorn-ink-3);
+  }
+
+  /* The live figure. `.bytes` in strips.css owns everything inside it; this only places
+     it, and holds it to the same measure as the inputs above. */
+  [data-diagram] {
+    margin-top: 26px;
+    max-width: var(--measure);
+  }
+
+  /* Said, not dimmed. The first version dropped the figure to 0.4 opacity, which put
+     its text at 1.77:1 against the page and made the thing you were meant to compare
+     against unreadable. A line at full contrast does the same job honestly. */
+  .stale {
+    margin: 12px 0 0;
+    font-size: 13.5px;
+    color: var(--shorn-ink-3);
+  }
+
+
+  /* Says what the readable lane is not: the cells above are values, and the byte count
+     comes from the encoding underneath them. */
+  .packed {
+    margin: 16px 0 0;
+    max-width: 68ch;
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--shorn-ink-3);
+  }
+
+  /* Program output: no box, no chrome, just the lines. Wraps rather than scrolls,
+     because a long hex string that runs off the edge is a string you cannot read. */
+  /* The one hue on the page, and only ever for a failure. Everything else here is
+     grey, so a red line is impossible to scroll past. */
+  [data-out][data-error] {
+    color: var(--shorn-danger);
+  }
+
+  [data-out] {
+    margin: 18px 0 0;
+    max-width: var(--measure);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.8;
+    color: var(--shorn-ink-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+</style>

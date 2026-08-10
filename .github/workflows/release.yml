@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  # Required for npm provenance. Without it `publishConfig.provenance` fails the
+  # publish rather than silently skipping the attestation.
+  id-token: write
+
+jobs:
+  release:
+    name: Version PR or publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # changesets needs the tags to work out what is already released.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # Two states, one job. With changesets pending, the action opens or updates a
+      # "Version Packages" PR and publishes nothing. With none pending — i.e. that PR
+      # just merged — `publish` runs instead. `pnpm release` gates on `pnpm check`, so
+      # a red test blocks the publish, and `changeset publish` skips versions already
+      # on npm, so a re-run after a partial failure is safe.
+      - uses: changesets/action@v1
+        with:
+          version: pnpm changeset:version
+          publish: pnpm release
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+          # Both spellings, because two tools read two different ones: setup-node's
+          # .npmrc expands NODE_AUTH_TOKEN, while changesets/action writes ~/.npmrc
+          # from NPM_TOKEN — and with only the former set it wrote an empty token,
+          # which npm answers with the non-interactive web-auth error.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

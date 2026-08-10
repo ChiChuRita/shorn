@@ -1,0 +1,512 @@
+---
+import "starlight-theme-next/fonts/geist-sans/index.css";
+// `index.css` ships weight 400 only. Every `font-weight: 500` below (headline,
+// brand, button, section headings) silently rendered as regular without this.
+import "starlight-theme-next/fonts/geist-sans/500.css";
+import "starlight-theme-next/fonts/geist-mono/index.css";
+// The same palette Starlight loads through customCss. This page renders outside
+// the Starlight shell, so it has to ask for the tokens itself.
+import "../styles/tokens.css";
+
+/**
+ * The minimalist landing shell, extracted so the message can vary without the
+ * surface varying with it. One nav, one headline, one sentence, one primary
+ * action, one footer line. A variant supplies text, never new elements.
+ *
+ * `size` exists because the one typographic moment has to survive a longer
+ * headline. It trades scale for character count rather than letting a long
+ * headline wrap to four lines at 208px.
+ */
+interface Props {
+  title: string;
+  description: string;
+  headline: string;
+  /** xl ≤ 12 chars · lg ≤ 34 · md for anything longer. */
+  size?: "xl" | "lg" | "md";
+  cta?: string;
+  /** Optional demonstration block. One element, not a section. See below. */
+  code?: readonly string[];
+}
+
+const { title, description, headline, size = "lg", cta = "Get started", code } = Astro.props;
+
+/**
+ * Split each line at its comment so the two can be inked differently.
+ *
+ * Deliberately not Shiki: syntax highlighting would put five hues on a page whose
+ * whole palette is grey, and the comments here *are* the message, and dimming them
+ * against bright code says "annotation" without spending a colour on it. Safe as a
+ * plain `indexOf` because the content is authored here, not user input, and
+ * contains no `//` inside a string or URL.
+ */
+const lines = (code ?? []).map((line) => {
+  const at = line.indexOf("//");
+  const source = at === -1 ? line : line.slice(0, at);
+  const comment = at === -1 ? "" : line.slice(at);
+  // Each line is its own block element rather than a newline text node, so a blank
+  // line has to be given something to hold its height open.
+  //
+  // The `<pre>` that renders these keeps every child on ONE source line on purpose:
+  // `.ln` is `white-space: pre`, so any newline or indentation in the markup becomes
+  // a rendered blank line. Reformatting that JSX across lines inflated the block
+  // from ~300px to 1316px.
+  return { source, comment, blank: line === "" };
+});
+
+// Astro's BASE_URL carries the configured `base` ("/shorn") with a trailing
+// slash. Strip it so the helper below never emits a doubled separator.
+const root = import.meta.env.BASE_URL.replace(/\/$/, "");
+const p = (slug: string) => `${root}/${slug}`;
+
+const install = "npm install shorn";
+
+// Absolute, because og:image is the one URL crawlers will not resolve relatively.
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const ogImage = new URL(`${root}/og.png`, Astro.site);
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" href={p("favicon.svg")} type="image/svg+xml" />
+    <link rel="alternate" type="text/plain" href={p("llms.txt")} title="LLMs.txt" />
+    <link rel="canonical" href={canonical} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+
+  <body>
+    <header>
+      <a class="brand" href={p("")}>
+        <svg viewBox="0 0 64 64" width="20" height="20" aria-hidden="true">
+          <rect
+            x="7"
+            y="14"
+            width="50"
+            height="13"
+            rx="4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="4"></rect>
+          <rect x="7" y="37" width="18" height="13" rx="4" fill="currentColor"></rect>
+        </svg>
+        shorn
+      </a>
+      <nav>
+        <a href={p("getting-started/introduction/")}>Docs</a>
+        <a href="https://github.com/ChiChuRita/shorn">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <h1 class:list={[size]}>{headline}</h1>
+      <p><slot /></p>
+      {/* One box, so the code and the actions form a column whose bottom can be matched
+          to the figure's. `display: contents` below dissolves it again when the hero
+          stacks, so the reading order there stays code, figure, actions. */}
+      <div class="demo">
+        {
+          lines.length > 0 && (
+            <pre>{lines.map((line) => <span class="ln">{line.blank ? " " : line.source}<span class="cm">{line.comment}</span></span>)}</pre>
+          )
+        }
+        <div class="actions">
+          <a class="btn" href={p("getting-started/quick-start/")}>{cta}</a>
+          <span class="cmd">
+            <code>{install}</code>
+            <button type="button" data-copy={install}>copy</button>
+          </span>
+        </div>
+      </div>
+      <slot name="figure" />
+    </main>
+
+    <slot name="after" />
+
+    <footer>MIT licensed. An experimental alpha.</footer>
+
+    <script>
+      document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          // Rejects outside a secure context and when the permission is denied.
+          // Unhandled, the label never changes and the button reads as broken.
+          try {
+            await navigator.clipboard.writeText(btn.dataset.copy ?? "");
+            btn.textContent = "copied";
+          } catch {
+            // Not a keyboard hint: the shortcut differs per platform, and the command
+            // is right there in the `<code>` beside it to select by hand.
+            btn.textContent = "copy failed";
+          }
+          setTimeout(() => {
+            btn.textContent = "copy";
+          }, 1600);
+        });
+      });
+    </script>
+
+    <style>
+      /* Minimalist by constraint on content, not on rendering: one nav, one
+         headline, one sentence, one primary action. Everything that was
+         decoration is deleted rather than flattened.
+
+         Monochrome: true neutral greys, no accent hue anywhere. Emphasis comes
+         from size and from inversion (the button is ink-on-ground). Nothing here
+         is coloured.
+
+         Greys checked against --shorn-bg: ink-2 is 7.66:1 and ink-3 is 4.61:1, so
+         both clear 4.5:1 at normal text size. */
+      :root {
+        --sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+        --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      /* The grid is what buys the negative space: the hero row takes every pixel
+         the header and footer do not, and centres one short block inside it. */
+      body {
+        /* Capped and centred rather than edge-to-edge. Padding alone left the page
+           growing with the monitor, so at 1920 the hero ran ~1730px wide and every
+           section rule stretched with it. A bounded measure is part of the minimal
+           setting, not a departure from it: the constraint is on content, and this is
+           the content's width. Above the cap the margin grows instead of the text.
+
+           1500px: wide enough that the cap reads as a margin rather than a column, and
+           still comfortably past the 1240px viewport where the two-column hero starts. */
+        margin: 0 auto;
+        max-width: 1500px;
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        padding: 0 clamp(24px, 7vw, 96px);
+        background: var(--shorn-bg);
+        color: var(--shorn-ink);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* Grid items otherwise keep the code block's min-content width and make the
+         whole page wider than a phone viewport. The code and byte figure own their
+         horizontal scrolling; the page itself must stay at the viewport width. */
+      :global(body > *) {
+        min-width: 0;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--shorn-ink);
+        outline-offset: 3px;
+        border-radius: 2px;
+      }
+
+      /* ---------- header: the one navigation ---------- */
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 28px 0;
+      }
+
+      /* Mark and wordmark are one ink weight, since there is no accent to split them
+         with, and the mark reads at 20px without one. */
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-weight: 500;
+        text-decoration: none;
+        color: var(--shorn-ink);
+      }
+      .brand svg {
+        flex: none;
+      }
+
+      nav {
+        display: flex;
+        gap: clamp(18px, 3vw, 32px);
+        font-size: 14.5px;
+        color: var(--shorn-ink-2);
+      }
+
+      /* Words, never mystery-meat icons: both destinations stay legible. */
+      nav a {
+        text-decoration: none;
+      }
+      nav a:hover {
+        color: var(--shorn-ink);
+      }
+
+      /* ---------- the message ---------- */
+      main {
+        align-self: center;
+        /* Capped at 64px rather than 88px so the full hero (headline, prose,
+           demonstration, figure, action) clears a 960px-tall viewport without a
+           scroll. The grid below is what made that possible. */
+        padding: clamp(28px, 4vh, 56px) 0;
+        /* Anything in the `after` slot adds a fourth body row, which would collapse
+           the 1fr hero to its content height. This keeps the hero a screenful either
+           way; 160px is the header and footer together. */
+        min-height: calc(100svh - 160px);
+        align-content: center;
+      }
+
+      /* Once there is room, the demonstration and the figure sit side by side
+         rather than stacking. Stacked they push the page 363px past the fold while
+         more than half the width sits unused, and the negative space is better spent
+         on breathing room than on a scroll. Below this width they stack.
+
+         1320px, not 1040px: at 1040 each column is ~426px, which leaves the code block
+         382px of text after its padding and quietly scrolls its longest comment out of
+         view. The comments here carry the argument, so the two-column layout only
+         starts once a column can hold the full 62ch block.
+
+         Back to 1240 from 1400: the byte table that needed the extra width has moved
+         out of the hero, and the strips that replaced it wrap, so a narrower column costs
+         a wrapped row rather than a clipped one. */
+      /* Stacked, the wrapper is not a box at all: its children become children of `main`
+         so the figure can be ordered between them and the reading order stays code,
+         figure, actions. `order` needs them to be items of the same formatting context,
+         which is what `display: contents` buys. */
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .demo {
+        display: contents;
+      }
+
+      main > .demo > pre {
+        order: 1;
+      }
+
+      main > :global(figure) {
+        order: 2;
+      }
+
+      main > .demo > .actions {
+        order: 3;
+      }
+
+      @media (min-width: 1240px) {
+        main {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          gap: clamp(22px, 3vh, 34px) clamp(32px, 4vw, 64px);
+          align-items: start;
+        }
+
+        /* Rows are placed by hand rather than auto-flowed. The actions belong under the
+           code block, and `grid-column: 1` alone does not get them there: auto-flow puts
+           them in the row after the demonstration, so the taller of the two columns (the
+           figure) still pushes them down and leaves a void under the snippet. Giving the
+           figure both of the bottom rows lets the actions sit directly beneath the code
+           they are the next step for. */
+        main > h1 {
+          grid-column: 1 / -1;
+          grid-row: 1;
+        }
+
+        main > p {
+          grid-column: 1 / -1;
+          grid-row: 2;
+        }
+
+        /* Stretched, not content-height: the row is as tall as the figure beside it, and
+           filling it squares the two columns off at the same baseline instead of leaving
+           the code block floating in a taller row. The slack lands inside the card, below
+           the last line, which reads as deliberate padding. */
+        /* A real box again, and the left column. A flex column with the code block
+           growing means the actions sit on its bottom edge, and the column as a whole is
+           the same height as the figure, so the button's bottom is the figure's bottom.
+           Grid rows alone could not do this: the figure sits at the top of whatever rows
+           it spans, so its bottom is never the row's bottom. */
+        .demo {
+          display: flex;
+          flex-direction: column;
+          gap: clamp(22px, 3vh, 34px);
+          grid-column: 1;
+          grid-row: 3;
+          /* The grid sets `align-items: start`, which would leave this column at content
+             height and the actions floating above the figure's bottom edge. */
+          align-self: stretch;
+        }
+
+        .demo > pre {
+          flex: 1;
+        }
+
+
+
+        /* `:global`, because the figure is slotted in from another component and so
+           does not carry this file's scope attribute. Without it the selector silently
+           matches nothing, which is what left the actions stranded at the bottom. */
+        /* `:global`, because the figure is slotted in from another component and so does
+           not carry this file's scope attribute; without it the selector silently matches
+           nothing, which is a quiet way to lose a rule. */
+        main > :global(figure) {
+          grid-column: 2;
+          grid-row: 3;
+        }
+
+        /* The grid owns vertical rhythm here. Leaving the stacked-layout bottom
+           margins on would double it and push the hero back past the fold. */
+        main > h1,
+        main > p,
+        .demo > pre,
+        main > :global(figure) {
+          margin-bottom: 0;
+        }
+      }
+
+      /* The headline is deliberately not held to the prose measure: it is the
+         one typographic moment, and the prose below it is the only other text. */
+      h1 {
+        margin: 0 0 clamp(20px, 3vh, 34px);
+        font-weight: 500;
+        letter-spacing: -0.04em;
+        text-wrap: balance;
+      }
+
+      h1.xl {
+        font-size: clamp(62px, 17vw, 208px);
+        line-height: 0.9;
+        letter-spacing: -0.05em;
+      }
+
+      h1.lg {
+        font-size: clamp(44px, 8.5vw, 104px);
+        line-height: 0.95;
+        max-width: 22ch;
+      }
+
+      h1.md {
+        font-size: clamp(36px, 6vw, 72px);
+        line-height: 1.02;
+        max-width: 26ch;
+      }
+
+      /* Prose keeps a readable measure even though the headline does not. */
+      main p {
+        margin: 0 0 clamp(28px, 4vh, 44px);
+        max-width: 52ch;
+        font-size: 17px;
+        color: var(--shorn-ink-2);
+      }
+
+      main p b {
+        color: var(--shorn-ink);
+        font-weight: 500;
+      }
+
+      main p code {
+        font-family: var(--mono);
+        font-size: 0.88em;
+      }
+
+      /* ---------- the demonstration ---------- */
+      /* One element, and the only one that earns a container: code needs to read
+         as code. Bright source against dim comments is the whole treatment. No
+         syntax colours, no window chrome, no tabs, no filename bar. */
+      pre {
+        margin: 0 0 clamp(28px, 4vh, 40px);
+        padding: 20px 22px;
+        /* 64ch, not 60ch: `box-sizing: border-box` means the cap includes the 44px of
+           padding, so 60ch left the 56-character comment with zero slack, so it fit in
+           Geist Mono and would have clipped in the fallback face. */
+        max-width: 64ch;
+        overflow-x: auto;
+        background: var(--shorn-surface);
+        border: 1px solid var(--shorn-rule);
+        border-radius: var(--shorn-radius);
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.75;
+        color: var(--shorn-ink);
+        tab-size: 2;
+      }
+
+      pre .ln {
+        display: block;
+        white-space: pre;
+      }
+
+      /* Not ink-3: that clears 4.5:1 on the page ground but only 4.22:1 on this
+         lighter surface. These comments carry the actual argument, so they use the
+         raised-surface dim instead, at 5.25:1 where they are really drawn. */
+      pre .cm {
+        color: var(--shorn-ink-dim-raised);
+      }
+
+      /* ---------- the one primary action ---------- */
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 14px 22px;
+      }
+
+      .btn {
+        padding: 11px 22px;
+        border-radius: var(--shorn-radius);
+        background: var(--shorn-ink);
+        color: var(--shorn-bg);
+        font-size: 15px;
+        font-weight: 500;
+        text-decoration: none;
+      }
+      .btn:hover {
+        filter: brightness(0.92);
+      }
+
+      .cmd {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 12px;
+        font-family: var(--mono);
+        font-size: 13.5px;
+        color: var(--shorn-ink-2);
+      }
+
+      .cmd button {
+        border: 0;
+        background: none;
+        padding: 0;
+        cursor: pointer;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--shorn-ink-3);
+      }
+      .cmd button:hover {
+        color: var(--shorn-ink);
+        text-decoration: underline;
+      }
+
+      footer {
+        padding: 28px 0;
+        font-size: 13.5px;
+        color: var(--shorn-ink-3);
+      }
+    </style>
+  </body>
+</html>

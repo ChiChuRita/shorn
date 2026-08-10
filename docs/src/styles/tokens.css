@@ -1,0 +1,57 @@
+/* The single source of truth for the shorn docs palette.
+
+   Loaded two ways, which is the whole point of the file existing: Starlight
+   pulls it in through `customCss` (ahead of custom.css, so the mappings there
+   can reference it), and the standalone landing page imports it directly. A
+   value that lives only in one of the two is a value the other cannot see.
+
+   Monochrome by constraint. The greys are true neutrals (no hue at all) and
+   there is no accent colour: the "brand" token below resolves to ink, so the
+   primary button is an inversion rather than a colour. Emphasis is carried by
+   size, weight, and inversion, never by hue.
+
+   Because links cannot be distinguished by colour under this palette, custom.css
+   underlines them permanently. That is the accessible affordance anyway.
+
+   Contrast against --shorn-bg: ink 15.9:1, ink-2 7.66:1, ink-3 4.61:1. All three
+   clear 4.5:1 at normal text size, ink-3 only just, so do not darken it. */
+:root {
+  /* Ground and structure, darkest to lightest. */
+  --shorn-bg: #0a0a0a;
+  --shorn-surface: #161616;
+  --shorn-rule: #272727;
+  --shorn-rule-soft: #1c1c1c;
+
+  /* Ink, lightest to dimmest. */
+  --shorn-ink: #ededed;
+  --shorn-ink-2: #a1a1a1;
+  --shorn-ink-3: #7a7a7a;
+
+  /* Dimmest ink for text drawn on --shorn-surface rather than --shorn-bg. It has to
+     be a separate value: ink-3 clears 4.61:1 on the ground but only 4.22:1 on the
+     lighter surface, which fails. This is 5.25:1 there. Used for code comments,
+     which carry real content and so cannot be allowed to fall below 4.5:1. */
+  --shorn-ink-dim-raised: #8a8a8a;
+
+  /* De-emphasis fill for non-text graphical marks (the competitor byte cells).
+     3.15:1 against --shorn-bg, so it clears the 3:1 floor WCAG asks of graphical
+     objects; --shorn-rule at 1.33:1 does not, and the palette validator flags it.
+     Paired against --shorn-ink at 16.9:1 for the emphasised series, which is ΔE
+     31.3 apart under deuteranopia and tritanopia. */
+  --shorn-mark-dim: #606060;
+
+  /* No accent hue. Kept under the `brand` names so the landing page and the
+     Starlight mappings have one thing to reference, and so reintroducing a
+     single accent later is a change to these three lines only. */
+  --shorn-brand: var(--shorn-ink);
+  --shorn-brand-text: var(--shorn-ink);
+  --shorn-brand-fg: var(--shorn-bg);
+
+  /* The single exception to "no hue". Reserved for failure and nothing else: on a page
+     with no other colour, one red is impossible to miss, which is the whole point of
+     spending it here. 7.14:1 against --shorn-bg, so it clears 4.5:1 comfortably.
+     Do not reach for this to decorate anything. */
+  --shorn-danger: #ff6b6b;
+
+  --shorn-radius: 4px;
+}

@@ -1,0 +1,122 @@
+/* Starlight overrides. Every colour here comes from tokens.css, which loads
+   ahead of this file via the customCss array in astro.config.mjs and is also
+   imported directly by the standalone landing page. Add no literal hex values
+   below: a literal here is a value the landing page cannot see. */
+
+/* Map Starlight's ramp onto the shorn tokens. In dark mode gray-1 is the
+   lightest ink and gray-6 the darkest surface. */
+:root {
+  --sl-color-accent-low: var(--shorn-rule);
+  --sl-color-accent: var(--shorn-ink);
+  --sl-color-accent-high: var(--shorn-ink);
+
+  --sl-color-white: var(--shorn-ink);
+  --sl-color-gray-1: var(--shorn-ink);
+  --sl-color-gray-2: var(--shorn-ink-2);
+  --sl-color-gray-3: var(--shorn-ink-3);
+  --sl-color-gray-5: var(--shorn-rule);
+  --sl-color-gray-6: var(--shorn-surface);
+  --sl-color-black: var(--shorn-bg);
+
+  --sl-color-bg: var(--shorn-bg);
+  --sl-color-bg-sidebar: var(--shorn-bg);
+  --sl-color-hairline: var(--shorn-rule);
+  --sl-color-hairline-light: var(--shorn-rule-soft);
+}
+
+/* Force dark mode */
+html {
+  color-scheme: dark;
+}
+
+/* The palette is monochrome, so a link cannot be distinguished from body text by
+   colour. Underline it permanently instead, the affordance every screen reader
+   and every sighted reader already agrees on. Applies to prose only: sidebar,
+   tabs, and card links have their own affordances and would turn to noise. */
+.sl-markdown-content a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--shorn-ink-3);
+}
+
+.sl-markdown-content a:hover {
+  text-decoration-color: var(--shorn-ink);
+}
+
+/* Same mark and wordmark the landing page's `.brand` renders: 20px mark, 9px
+   gap, 16px text at weight 500. Starlight's own defaults (h4-sized, weight 600,
+   logo scaled off the nav height) made the same brand two different sizes
+   depending on which page you arrived from. Keep in sync with Landing.astro. */
+.site-title {
+  color: var(--shorn-ink);
+  gap: 9px;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.site-title img {
+  width: 20px;
+  height: 20px;
+}
+
+/* Sidebar vertical lines */
+.sidebar-content details > ul {
+  border-inline-start: 1px solid var(--sl-color-gray-5);
+  margin-inline-start: 1.25rem;
+  margin-block: 0.5rem;
+  padding-inline-start: 0.05rem;
+  padding-top: 0.125rem;
+}
+
+.sidebar-content details > ul > li > a {
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+
+/* Thin scrollbars everywhere: hidden until hover */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover {
+  scrollbar-color: var(--sl-color-gray-5) transparent;
+}
+
+/* Code blocks: raised off the ground, same surface and radius the landing page
+   gives its own panels. */
+:root {
+  --ec-codeBg: var(--shorn-surface);
+  --ec-frm-edBg: var(--shorn-surface);
+  --ec-frm-edActTabBg: var(--shorn-surface);
+  --ec-frm-edTabBarBg: var(--shorn-surface);
+  --ec-frm-trmBg: var(--shorn-surface);
+  --ec-frm-trmTtbBg: var(--shorn-surface);
+  --ec-brdRad: var(--shorn-radius);
+}
+
+/* Asides/callouts: darker, subtler */
+.starlight-aside {
+  background-color: var(--shorn-surface);
+  border-color: var(--sl-color-asides-border);
+}
+
+/* The active sidebar item is marked by ink weight rather than an accent colour,
+   so it does need *some* signal, but not bold, which is louder than the page. */
+[aria-current="page"],
+[aria-current="page"] a {
+  font-weight: normal !important;
+}
+
+/* Inline code: match code block tone */
+.sl-markdown-content :not(pre) > code {
+  background-color: var(--shorn-surface);
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: var(--shorn-radius);
+}
+
+/* Byte tables are the recurring figure in these docs and they are all numeric. */
+.sl-markdown-content table td:not(:first-child),
+.sl-markdown-content table th:not(:first-child) {
+  font-variant-numeric: tabular-nums;
+}

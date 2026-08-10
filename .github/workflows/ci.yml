@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      # The seven examples are the surface the docs point at, and nothing else
+      # exercises them: they are outside tsconfig's `include`, and `node` strips
+      # their types without checking them. They assert on their own output, so
+      # running them is the check.
+      - run: pnpm examples
+
+  engines-floor:
+    # `engines` says Node 20, and a floor CI cannot exercise is a claim rather than
+    # a fact. pnpm 11 needs Node 22.13 to install, so the build runs on 22 and the
+    # *built artifact* is then exercised on the floor itself — which is the only
+    # thing `engines` actually promises a consumer.
+    name: Engines floor (built artifact on Node 20)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Round-trip on Node 20
+        run: |
+          node --input-type=module -e '
+            import { m } from "./dist/index.js";
+            const s = m.object({ id: m.uint(), name: m.string(), tags: m.array(m.string()) });
+            const value = { id: 7, name: "Ada", tags: ["x", "y"] };
+            const got = s.decode(s.encode(value));
+            if (JSON.stringify(got) !== JSON.stringify(value)) throw new Error("round-trip mismatch");
+            try { m.uint().encode(-1); throw new Error("expected a throw"); } catch (e) {
+              if (e.name !== "EncodeError") throw e;
+            }
+            console.log("Node", process.version, "ok");
+          '
+
+  soak:
+    # The deep property run: 50k generated schemas against every invariant. Too slow
+    # for `pnpm check` on every save, cheap enough to run on every push.
+    name: Property soak
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:soak

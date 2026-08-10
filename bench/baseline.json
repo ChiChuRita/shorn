@@ -1,0 +1,268 @@
+{
+  "recordedOn": {
+    "node": "v22.23.1",
+    "platform": "darwin-arm64",
+    "cpus": "12 cores"
+  },
+  "metrics": {
+    "throughput/person encode": {
+      "value": 22345500,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/person decode": {
+      "value": 63218582,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/nested event encode": {
+      "value": 10303215,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/nested event decode": {
+      "value": 12501324,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/100-event batch encode": {
+      "value": 137691,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/100-event batch decode": {
+      "value": 131267,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/unicode string encode": {
+      "value": 1889434,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/unicode string decode": {
+      "value": 1787607,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/500 ms timestamps encode": {
+      "value": 192030,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/500 ms timestamps decode": {
+      "value": 153047,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/zod person (validated) encode": {
+      "value": 7371396,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/zod person (validated) decode": {
+      "value": 11512128,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/fingerprinted zod person encode": {
+      "value": 7699264,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "throughput/fingerprinted zod person decode": {
+      "value": 10284183,
+      "unit": "ops/s",
+      "direction": "higher",
+      "tolerance": 0.25,
+      "floor": 0
+    },
+    "hostile/reject empty": {
+      "value": 2827.81,
+      "unit": "ns",
+      "direction": "lower",
+      "tolerance": 0.3,
+      "floor": 0
+    },
+    "hostile/reject truncated": {
+      "value": 2928.624,
+      "unit": "ns",
+      "direction": "lower",
+      "tolerance": 0.3,
+      "floor": 0
+    },
+    "hostile/reject trailing byte": {
+      "value": 2291.244,
+      "unit": "ns",
+      "direction": "lower",
+      "tolerance": 0.3,
+      "floor": 0
+    },
+    "hostile/reject all 0xff": {
+      "value": 2492.426,
+      "unit": "ns",
+      "direction": "lower",
+      "tolerance": 0.3,
+      "floor": 0
+    },
+    "hostile/array of uint heap ceiling": {
+      "value": 5,
+      "unit": "KB",
+      "direction": "lower",
+      "tolerance": 0.5,
+      "floor": 256
+    },
+    "hostile/array of object heap ceiling": {
+      "value": 2,
+      "unit": "KB",
+      "direction": "lower",
+      "tolerance": 0.5,
+      "floor": 256
+    },
+    "hostile/64MB string heap ceiling": {
+      "value": 2,
+      "unit": "KB",
+      "direction": "lower",
+      "tolerance": 0.5,
+      "floor": 256
+    },
+    "size/person bytes": {
+      "value": 8,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0,
+      "floor": 0
+    },
+    "size/nested event bytes": {
+      "value": 38,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0,
+      "floor": 0
+    },
+    "size/100-event batch bytes": {
+      "value": 3801,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0,
+      "floor": 0
+    },
+    "size/unicode string bytes": {
+      "value": 226,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0,
+      "floor": 0
+    },
+    "size/500 ms timestamps bytes": {
+      "value": 3002,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0,
+      "floor": 0
+    },
+    "size/fingerprinted person bytes": {
+      "value": 11,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0,
+      "floor": 0
+    },
+    "bundle/m only minified": {
+      "value": 16328,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0.01,
+      "floor": 0
+    },
+    "bundle/m only gzip": {
+      "value": 4856,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0.01,
+      "floor": 0
+    },
+    "bundle/compile + m minified": {
+      "value": 26496,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0.01,
+      "floor": 0
+    },
+    "bundle/compile + m gzip": {
+      "value": 8019,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0.01,
+      "floor": 0
+    },
+    "bundle/full surface minified": {
+      "value": 29155,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0.01,
+      "floor": 0
+    },
+    "bundle/full surface gzip": {
+      "value": 8861,
+      "unit": "B",
+      "direction": "lower",
+      "tolerance": 0.01,
+      "floor": 0
+    },
+    "startup/import": {
+      "value": 1.307,
+      "unit": "ms",
+      "direction": "lower",
+      "tolerance": 0.4,
+      "floor": 0
+    },
+    "startup/first encode": {
+      "value": 0.407,
+      "unit": "ms",
+      "direction": "lower",
+      "tolerance": 0.4,
+      "floor": 0
+    },
+    "memory/retained after 50k round trips": {
+      "value": 4,
+      "unit": "KB",
+      "direction": "lower",
+      "tolerance": 0.6,
+      "floor": 512
+    },
+    "memory/retained after oversized encode": {
+      "value": 0,
+      "unit": "KB",
+      "direction": "lower",
+      "tolerance": 1,
+      "floor": 512
+    }
+  }
+}

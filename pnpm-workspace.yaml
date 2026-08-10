@@ -1,0 +1,15 @@
+# The library itself lives at the repo root. It has to be listed as a workspace
+# package, not just the workspace root, or changesets cannot resolve the `shorn`
+# package named by every changeset file.
+packages:
+  - "."
+  - "docs"
+# Benchmark competitors ship native extracts; running their install scripts is what
+# makes the comparison a fair one. `protobufjs` is denied on purpose — its script
+# only fetches a CLI the benchmarks never call.
+allowBuilds:
+  cbor-extract: true
+  esbuild: true
+  msgpackr-extract: true
+  protobufjs: false
+  sharp: true

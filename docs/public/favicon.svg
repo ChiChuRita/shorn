@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="shorn-logo-title">
+  <title id="shorn-logo-title">shorn</title>
+  <!-- Mid grey, and deliberately not the ink the logo uses. A favicon is fetched
+       by the browser chrome with no page CSS in scope, so custom properties never
+       apply here — and the chrome may be light or dark, where near-white would
+       disappear against a light tab bar. This grey clears 4.6:1 on white and
+       4.1:1 on the page ground, which is enough for a non-text glyph. -->
+  <rect x="7" y="14" width="50" height="13" rx="4" fill="none" stroke="#8f8f8f" stroke-width="4"/>
+  <rect x="7" y="37" width="18" height="13" rx="4" fill="#8f8f8f"/>
+</svg>

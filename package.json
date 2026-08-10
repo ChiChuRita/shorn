@@ -1,0 +1,92 @@
+{
+  "name": "shorn",
+  "version": "0.0.1",
+  "description": "One-line drop-in binary serialization for your existing Zod, Valibot, or ArkType schema",
+  "keywords": [
+    "standard-schema",
+    "serialization",
+    "binary",
+    "codec",
+    "zod",
+    "valibot",
+    "arktype",
+    "msgpack",
+    "protobuf",
+    "schema"
+  ],
+  "author": "Rahul Singh (https://github.com/ChiChuRita)",
+  "license": "MIT",
+  "repository": "github:ChiChuRita/shorn",
+  "homepage": "https://shorn.dev",
+  "bugs": "https://github.com/ChiChuRita/shorn/issues",
+  "type": "module",
+  "packageManager": "pnpm@11.13.1",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "docs:dev": "pnpm build && pnpm --filter docs dev",
+    "docs:build": "pnpm build && pnpm --filter docs build",
+    "docs:preview": "pnpm --filter docs preview",
+    "examples": "pnpm build && for f in examples/0*.ts; do node \"$f\"; done",
+    "bench": "pnpm build && node bench/run.mjs",
+    "bench:large": "pnpm build && node bench/run.mjs --large",
+    "bench:entropy": "pnpm build && node bench/run.mjs --large --high-entropy",
+    "bench:bundle": "pnpm build && node bench/bundle-size.mjs",
+    "bench:memory": "pnpm build && node bench/memory.mjs",
+    "bench:startup": "pnpm build && node bench/startup.mjs",
+    "bench:strings": "pnpm build && node bench/string-threshold.mjs",
+    "bench:hostile": "pnpm build && node --expose-gc bench/hostile.mjs",
+    "bench:all": "pnpm check && pnpm bench && pnpm bench:large && pnpm bench:startup && pnpm bench:memory && pnpm bench:hostile && pnpm bench:bundle",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint:pack": "publint && attw --pack . --profile esm-only",
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm lint:pack",
+    "changeset": "changeset",
+    "changeset:status": "changeset status --since=main",
+    "changeset:version": "changeset version",
+    "release": "pnpm check && changeset publish",
+    "regress": "pnpm build && node --expose-gc bench/regression.mjs",
+    "regress:update": "pnpm build && node --expose-gc bench/regression.mjs --update",
+    "verify": "pnpm check && pnpm regress",
+    "test:soak": "SHORN_PROPERTY_CASES=50000 vitest run test/property.test.ts"
+  },
+  "dependencies": {
+    "@standard-schema/spec": "^1.1.0"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@changesets/cli": "^2.31.1",
+    "@msgpack/msgpack": "^3.1.2",
+    "@valibot/to-json-schema": "^1.7.1",
+    "arktype": "^2.2.3",
+    "avsc": "^5.7.9",
+    "cbor-x": "^1.6.0",
+    "esbuild": "^0.28.1",
+    "msgpackr": "^1.11.5",
+    "protobufjs": "^7.5.4",
+    "publint": "^0.3.23",
+    "schemapack": "^1.4.2",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.3",
+    "valibot": "^1.4.2",
+    "vitest": "^3.2.4",
+    "zod": "^4.4.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

@@ -1,0 +1,15 @@
+---
+import Default from "@astrojs/starlight/components/Head.astro";
+
+const llmsUrl = `${import.meta.env.BASE_URL}llms.txt`;
+---
+
+<Default {...Astro.props}>
+  <link rel="alternate" type="text/plain" href={llmsUrl} title="LLMs.txt" />
+  <slot />
+</Default>
+<script is:inline>
+  // Dark-only docs: pin the Starlight theme before its ThemeProvider reads it.
+  localStorage.setItem("starlight-theme", "dark");
+  document.documentElement.dataset.theme = "dark";
+</script>

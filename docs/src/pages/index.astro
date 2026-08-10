@@ -1,0 +1,434 @@
+---
+import Landing from "../layouts/Landing.astro";
+import Playground from "../components/Playground.astro";
+import HeroShear from "../components/HeroShear.astro";
+
+const demo = [
+  "// The validator you already use.",
+  "const Person = z.object({",
+  "  name: z.string(),",
+  "  age: z.int().nonnegative(),",
+  '  sex: z.enum(["M", "F", "X"]),',
+  "});",
+  "",
+  "// It is also the wire format.",
+  "const bytes = encode(Person, person);",
+  "// → 8 canonical bytes, validated before encoding",
+  "",
+  "const back = decode(Person, bytes);",
+  '// → { name: string; age: number; sex: "M" | "F" | "X" }',
+];
+
+const payloads = [
+  { label: "shorn", note: "", bytes: 8, self: true },
+  { label: "Avro", note: "own schema", bytes: 8, self: false },
+  { label: "SchemaPack", note: "own builder", bytes: 9, self: false },
+  { label: "Protobuf", note: ".proto + codegen", bytes: 11, self: false },
+  { label: "msgpackr plain", note: "field names", bytes: 25, self: false },
+  { label: "JSON", note: "field names + text", bytes: 35, self: false },
+];
+
+---
+
+<Landing
+  title="shorn"
+  description="One-line drop-in binary serialization for the Zod, Valibot, or ArkType schema you already use. No wire schema, schema file, codegen, or second source of truth."
+  headline="Your validator is the wire format."
+  size="md"
+  cta="Read the docs"
+  code={demo}
+>
+  Already have a Zod, Valibot, or ArkType schema? shorn is a one-line drop-in:
+  install it and pass your schema directly to <code>encode</code> and
+  <code>decode</code>. No wire schema, schema file, codegen, or migration.
+
+  {/* The argument itself, not a table about it: the same record as text and as bytes,
+      and the shearing of one into the other. */}
+  <HeroShear slot="figure" />
+
+  <section slot="after" class="plain drop-in" aria-labelledby="drop-in">
+    <h2 id="drop-in">Install it. Keep your schema.</h2>
+    <p>
+      shorn derives the wire shape from your schema; Zod, Valibot, or ArkType still
+      owns validation behavior, transformations, and errors.
+    </p>
+    <dl class="setup">
+      <div class="self">
+        <dt>shorn</dt>
+        <dd>
+          <strong>Use your existing validator directly.</strong> Call
+          <code>encode(schema, value)</code> and <code>decode(schema, bytes)</code>.
+        </dd>
+      </div>
+      <div>
+        <dt>Avro</dt>
+        <dd>
+          Define and maintain an Avro schema, inline or in its own file, then create an
+          Avro codec.
+        </dd>
+      </div>
+      <div>
+        <dt>SchemaPack</dt>
+        <dd>Repeat the shape with SchemaPack's builder before encoding.</dd>
+      </div>
+      <div>
+        <dt>Protobuf</dt>
+        <dd>
+          Create a <code>.proto</code> file, then run code generation or configure runtime
+          reflection.
+        </dd>
+      </div>
+    </dl>
+
+    {/* The size comparison belongs with the setup cost, not in the hero: it is the same
+        list of formats, answering the second question you ask about each of them. */}
+    <figure class="sizes">
+      <table>
+        <caption>That same Person record, encoded by each of them.</caption>
+        <tbody>
+          {
+            payloads.map((row) => (
+              <tr class:list={{ self: row.self }}>
+                <th scope="row">
+                  {row.label}{row.note && <small> ({row.note})</small>}
+                </th>
+                <td class="count">{row.bytes}</td>
+                <td class="bar" aria-hidden="true">
+                  <span>
+                    {Array.from({ length: row.bytes }, () => (
+                      <i />
+                    ))}
+                  </span>
+                </td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+      <figcaption>
+        shorn matches Avro's eight bytes without adding an Avro schema.
+      </figcaption>
+    </figure>
+  </section>
+
+  <Playground slot="after" />
+
+  <section slot="after" class="plain" aria-labelledby="fit">
+    <h2 id="fit">Built for shared TypeScript schemas</h2>
+    <div class="fit">
+      <p class="in">
+        Reach for it in caches, RPC, worker messages, and compact application storage.
+      </p>
+      <p class="out">
+        Reach for something else for cross-language readers, self-describing payloads,
+        or automatic schema evolution. <code>fingerprinted()</code> stamps the wire shape
+        into the bytes, so a payload an older shape wrote is rejected rather than decoded
+        wrong.
+      </p>
+    </div>
+  </section>
+
+  <section slot="after" class="plain" aria-labelledby="wire-safety">
+    <h2 id="wire-safety">Safe to put on the wire</h2>
+    <div class="proofs">
+      <article>
+        <h3>Canonical bytes</h3>
+        <p>
+          The same value always encodes to the same bytes, so a payload can be a cache
+          key or a content hash.
+        </p>
+      </article>
+      <article>
+        <h3>Defensive decoding</h3>
+        <p>
+          Decoding bytes you did not write is where binary formats get exploited. Bad
+          lengths, invalid UTF-8, and trailing data are rejected, with bounded reads.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section slot="after" class="plain" aria-labelledby="size">
+    <h2 id="size">Smallest or tied in every raw fixture</h2>
+    <p>
+      Small payloads normally cost CPU, because you buy them from a compressor. These
+      come from the schema, in the same pass that encodes the value.
+    </p>
+
+    {/* "100-event payload" meant nothing without the shape behind it. This is the
+        literal fixture from bench/fixtures.mjs, so keep the two in step. */}
+    <pre class="fixture"><code>{`Person  { age, name, sex }
+Event   { active, actor: Person, id,
+          metrics: { cpu, memory }, tags[], timestamp }`}</code></pre>
+    <p class="quiet fixture-note">
+      Four fixtures: a Person, the same Person with non-ASCII text, one Event, and a
+      batch of 100 Events in an array.
+    </p>
+
+    <dl class="setup">
+      <div class="self">
+        <dt>25 ms</dt>
+        <dd>
+          <strong>to encode 100,000 events</strong>, 4.2 MB. Gzipping that afterwards
+          costs a further 79 ms, three times the encode itself.
+        </dd>
+      </div>
+      <div>
+        <dt>up to 6.2×</dt>
+        <dd>faster than JSON to encode, and up to 14.5× faster to decode.</dd>
+      </div>
+      <div>
+        <dt>up to 77%</dt>
+        <dd>smaller than JSON before compression.</dd>
+      </div>
+    </dl>
+    <p class="quiet">
+      <a
+        href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/size/`}
+        >Read the results, caveats, and reproduction steps</a
+      >.
+    </p>
+  </section>
+</Landing>
+
+<style>
+  .plain {
+    padding: clamp(48px, 8vh, 80px) 0 clamp(36px, 5vh, 56px);
+    border-top: 1px solid var(--shorn-rule-soft);
+  }
+
+  .plain h2 {
+    margin: 0 0 10px;
+    font-size: 21px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  .plain h3 {
+    margin: 0 0 6px;
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .plain p {
+    margin: 0;
+    max-width: 68ch;
+    font-size: 16px;
+    line-height: 1.65;
+    color: var(--shorn-ink-2);
+  }
+
+  .proofs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    gap: 28px;
+    max-width: 1040px;
+    margin-top: 22px;
+  }
+
+  .setup {
+    margin: 24px 0 0;
+    max-width: 900px;
+    border-top: 1px solid var(--shorn-rule-soft);
+  }
+
+  .setup > div {
+    display: grid;
+    grid-template-columns: minmax(120px, 170px) minmax(0, 1fr);
+    gap: 24px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--shorn-rule-soft);
+  }
+
+  .setup dt,
+  .setup dd {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .setup dt {
+    font-family: var(--mono, ui-monospace), monospace;
+    color: var(--shorn-ink-3);
+  }
+
+  .setup dd {
+    color: var(--shorn-ink-2);
+  }
+
+  .setup strong {
+    color: var(--shorn-ink);
+    font-weight: 500;
+  }
+
+  .setup .self dt {
+    color: var(--shorn-ink);
+  }
+
+  @media (max-width: 600px) {
+    .setup > div {
+      grid-template-columns: 1fr;
+      gap: 3px;
+    }
+  }
+
+  /* The boundary drawn as a boundary: one rule down the side, lit where shorn belongs
+     and dim where it does not. The sentences name their own side, so no headings. */
+  .fit {
+    display: grid;
+    gap: 18px;
+    max-width: 68ch;
+    margin-top: 20px;
+  }
+
+  .fit p {
+    padding-left: 18px;
+    border-left: 2px solid var(--shorn-rule);
+  }
+
+  .fit .in {
+    color: var(--shorn-ink);
+    border-left-color: var(--shorn-ink);
+  }
+
+  .fit .out {
+    color: var(--shorn-ink-3);
+  }
+
+  .plain ul {
+    margin: 14px 0 0;
+    padding-left: 1.1em;
+    max-width: 68ch;
+    font-size: 16px;
+    line-height: 1.65;
+    color: var(--shorn-ink-2);
+  }
+
+  .plain li::marker {
+    color: var(--shorn-ink-3);
+  }
+
+  .plain .quiet {
+    margin-top: 16px;
+    font-size: 14.5px;
+    color: var(--shorn-ink-3);
+  }
+
+  .plain code {
+    font-family: var(--mono, ui-monospace), monospace;
+    font-size: 0.9em;
+  }
+
+  .plain a {
+    color: inherit;
+  }
+
+  /* The fixture shapes, so "100-event payload" means something. A plain block, not the
+     hero's code treatment: it is a shape sketch, not runnable source. */
+  .fixture {
+    margin: 18px 0 0;
+    padding: 0;
+    overflow-x: auto;
+    font-family: var(--mono, ui-monospace), monospace;
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: var(--shorn-ink-2);
+  }
+
+  .fixture-note {
+    margin-top: 10px;
+  }
+
+
+  /* ---------- the size table, now in the setup section ---------- */
+  .sizes {
+    margin: 30px 0 0;
+    max-width: 60ch;
+    overflow-x: auto;
+  }
+
+  .sizes table {
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  .sizes caption {
+    margin-bottom: 14px;
+    text-align: left;
+    font-size: 14px;
+    color: var(--shorn-ink-3);
+  }
+
+  .sizes th,
+  .sizes td {
+    /* 4px each side against a 14px cell is a 22px row, the rhythm the old
+       gap-based version had, minus the rows that silently grew to two lines. */
+    padding: 4px 0;
+    font-family: var(--mono, ui-monospace), monospace;
+    font-weight: 400;
+    color: var(--shorn-ink-3);
+    white-space: nowrap;
+  }
+
+  /* Right-aligned, the way a horizontal bar chart always sets its category labels.
+     Left-aligned, the column is as wide as "msgpackr plain (field names)" and every
+     short row opens a void between its name and its count: "shorn" at one edge and
+     "8" stranded at the other. Flush right, name and count sit together and the bars
+     still share a left edge. */
+  .sizes th {
+    padding-right: 20px;
+    text-align: right;
+  }
+
+  .sizes th small {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* The count leads the bars rather than trailing them, so the bars share a left
+     edge and stay directly comparable, and the numbers stay a clean column. */
+  .sizes .count {
+    padding-right: 16px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sizes .bar span {
+    display: flex;
+    gap: 2px;
+  }
+
+  .sizes .bar i {
+    width: clamp(4px, 0.45vw, 6px);
+    height: 14px;
+    border-radius: 2px;
+    background: var(--shorn-mark-dim);
+  }
+
+  .sizes tr.self th,
+  .sizes tr.self .count {
+    color: var(--shorn-ink);
+  }
+
+  .sizes tr.self .bar i {
+    background: var(--shorn-ink);
+  }
+
+  figcaption {
+    margin-top: 18px;
+    max-width: 62ch;
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: var(--shorn-ink-3);
+  }
+
+  @media (max-width: 640px) {
+    .sizes th small {
+      display: none;
+    }
+
+    .sizes .bar span {
+      gap: 1px;
+    }
+  }
+</style>

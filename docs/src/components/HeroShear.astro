@@ -1,0 +1,372 @@
+---
+// The hero's figure: the same record as JSON text and as shorn bytes, and the shearing
+// of one into the other. The strips are drawn by strips.css, shared with the playground
+// so the two read as the same figure at two sizes; everything in this file is the run.
+import "../styles/strips.css";
+
+// The Person record the hero encodes, one field per row. `cells` is what the wire lane
+// draws and `bytes` is what it costs, which are the same number everywhere except the
+// varint: `34` is one byte, drawn as a box per digit so each character of the JSON has
+// somewhere of its own to land. A box is therefore not always a byte, and the count
+// beside the lane is the byte count. Both totals come from this table, so neither the
+// 35 nor the 8 can drift away from what is drawn.
+const fields = [
+  { key: "name", raw: "Alice", quoted: true, cells: ["5", "A", "l", "i", "c", "e"], lengthCells: 1, bytes: 6 },
+  { key: "age", raw: "34", quoted: false, cells: ["3", "4"], lengthCells: 0, bytes: 1 },
+  { key: "sex", raw: "F", quoted: true, cells: ["F"], lengthCells: 0, bytes: 1 },
+];
+
+// The JSON as tokens rather than one string: the strip inks value characters differently
+// from keys. Each character also carries its position in the run as `--i`, which is what
+// staggers the shearing from the left instead of dropping the strip all at once.
+//
+// A surviving character also carries `to`: the wire cell it becomes, so the script can
+// fly it there. One character, one cell, all the way through, which is what the varint
+// getting a box per digit above buys.
+//
+// Broken into lines where a formatter would break, one field per line. The breaks and
+// the indent are layout only: `n` still counts every character in order, so the strip
+// is one cell per byte and the 35 is still 35.
+let n = 0;
+type Char = { c: string; i: number; to?: string };
+type Line = { indent: boolean; tokens: { chars: Char[]; lift: boolean }[] };
+
+const lines: Line[] = [];
+const line = (indent: boolean) => lines[lines.push({ indent, tokens: [] }) - 1];
+const tok = (into: Line, text: string, to?: (k: number) => string) =>
+  into.tokens.push({ chars: [...text].map((c, k) => ({ c, i: n++, to: to?.(k) })), lift: !!to });
+
+tok(line(false), "{");
+for (const [i, f] of fields.entries()) {
+  const row = line(true);
+  tok(row, `"${f.key}":${f.quoted ? '"' : ""}`);
+  // Value characters land after the length byte, and never past the last cell.
+  tok(row, f.raw, (k) => `${f.key}-${Math.min(f.lengthCells + k, f.cells.length - 1)}`);
+  if (f.quoted) tok(row, '"');
+  // Trailing, so the comma sits on the line of the field it closes, exactly where a
+  // formatter puts it, and in the same place in the byte order it was before.
+  if (i < fields.length - 1) tok(row, ",");
+}
+tok(line(false), "}");
+
+const jsonBytes = n;
+const wireBytes = fields.reduce((c, f) => c + f.bytes, 0);
+const shed = jsonBytes - wireBytes;
+
+// The whole panel is one labelled image rather than 43 single characters for a screen
+// reader to spell out, and the run is decoration on top of it.
+const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} bytes of JSON. The same record is ${wireBytes} bytes of shorn: a length byte, then Alice, then 34, then F.`;
+---
+
+<figure class="hero-bytes">
+  <div class="bytes lg wrap" role="img" aria-label={label}>
+    <p class="lane">JSON<span> · {jsonBytes} bytes</span></p>
+    {/* One source line per strip: a newline between these spans renders as a real space
+        and opens a gap in the middle of a byte run. */}
+    <div class="strip json lines">{lines.map((l) => (<div class:list={["line", { in: l.indent }]}>{l.tokens.map((t) => (<span class:list={["tok", { run: t.lift }]}>{t.chars.map((ch) => (<i style={`--i:${ch.i}`} data-to={ch.to}>{ch.c}</i>))}</span>))}</div>))}</div>
+
+    <div class="split"><span data-count={`−{n} bytes, sheared`} data-shed={shed}>−{shed} bytes, sheared</span></div>
+
+    <p class="lane out">shorn<span> · {wireBytes} bytes</span></p>
+    <div class="strip wire">{fields.map((f) => (<span class="group"><span class="cells">{f.cells.map((c, ci) => (<i class:list={{ len: ci < f.lengthCells }} data-wire={`${f.key}-${ci}`}>{c}</i>))}</span><span class="field">{f.key}</span></span>))}</div>
+  </div>
+
+  <figcaption>
+    The field names live in your schema, so only the values go on
+    the wire; position is what identifies a field. <span class="gag">The field names grew
+    back in your schema, where they were the whole time.</span>
+    <button type="button" class="again" data-again>↻ shear it again</button>
+  </figcaption>
+</figure>
+
+<script>
+  // Not `document.currentScript`: Astro bundles this as a module script, where that is
+  // always null.
+  //
+  // Plays once when the figure comes into view and then holds the sheared state. A loop
+  // would be reading the same sentence out loud on repeat: the figure is an argument, and
+  // an argument is made once. Scrolling it away and back, or the button under the
+  // caption, is what asks for it again.
+  const fig = document.querySelector<HTMLElement>(".hero-bytes");
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
+
+  // The beats, in milliseconds from the moment the figure is asked to play. Held here
+  // rather than in the stylesheet because the flight is measured in JS anyway, and
+  // splitting the timing across two files is how one of them drifts.
+  //
+  // LEAD is a beat of nothing: the record has to be read as JSON before anything is taken
+  // off it. SHEARED is when the last shorn cell has finished falling, LANDED when the
+  // last surviving byte has arrived, and GHOST when the shorn ones come back dimmed so
+  // the original record is legible beside what it encoded to.
+  const LEAD = 1000;
+  const SHEARED = 1900;
+  const LANDED = 3500;
+  const GHOST = LANDED + 800;
+
+  const timers: ReturnType<typeof setTimeout>[] = [];
+
+  const play = () => {
+    if (!fig || still.matches) return;
+
+    for (const t of timers) clearTimeout(t);
+    timers.length = 0;
+
+    // Restart from the top on a replay. `reset` kills transitions for one frame first:
+    // without it, dropping `playing` starts everything animating back, and the rects
+    // measured below would be of cells still most of the way to where they landed.
+    fig.classList.add("reset");
+    fig.classList.remove("playing", "done", "ghost");
+    void fig.offsetWidth;
+
+    // Where each surviving character is going: one character, one cell. Measured every
+    // play rather than cached, because the strips wrap and the column width moves the
+    // targets.
+    let order = 0;
+    fig.querySelectorAll<HTMLElement>("[data-to]").forEach((cell) => {
+      const target = fig.querySelector<HTMLElement>(`[data-wire="${cell.dataset.to}"]`);
+      if (!target) return;
+      const r = cell.getBoundingClientRect();
+      const d = target.getBoundingClientRect();
+      cell.style.setProperty("--dx", `${d.left - r.left}px`);
+      cell.style.setProperty("--dy", `${d.top - r.top}px`);
+      // The survivors leave one at a time, in reading order, once the shorn cells are
+      // clear of them.
+      cell.style.setProperty("--d", `${SHEARED + order++ * 90}ms`);
+    });
+
+    fig.classList.remove("reset");
+    fig.classList.add("armed");
+
+    const counter = fig.querySelector<HTMLElement>("[data-count]");
+    const tpl = counter?.dataset.count ?? "";
+    const total = Number(counter?.dataset.shed);
+
+    timers.push(
+      setTimeout(() => {
+        fig.classList.add("playing");
+        // The count runs with the cells that are dropping, not after them.
+        if (!counter) return;
+        const from = performance.now();
+        const tick = (now: number) => {
+          const p = Math.min(1, (now - from) / (SHEARED - 200));
+          counter.textContent = tpl.replace("{n}", String(Math.round(p * total)));
+          if (p < 1 && fig.classList.contains("playing")) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }, LEAD),
+
+      setTimeout(() => {
+        fig.classList.add("done");
+        // Also where the count is settled: a backgrounded tab stops serving frames, and
+        // the ticker above would otherwise leave it stranded mid-count.
+        if (counter) counter.textContent = tpl.replace("{n}", String(total));
+      }, LEAD + LANDED),
+
+      setTimeout(() => fig.classList.add("ghost"), LEAD + GHOST),
+    );
+  };
+
+  if (fig && !still.matches) {
+    fig.classList.add("armed");
+    fig.querySelector<HTMLButtonElement>("[data-again]")?.addEventListener("click", play);
+
+    // Fires on the way in, and rearms when the figure has fully left, so it plays for
+    // someone who scrolls back up, and never twice while it sits on screen.
+    let away = true;
+    new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting && away) {
+          away = false;
+          play();
+        } else if (!e.isIntersecting) {
+          away = true;
+        }
+      },
+      { threshold: 0.4 },
+    ).observe(fig);
+  }
+</script>
+
+<style>
+  /* No max-width: the strips are the hero's evidence and should use the column they are
+     given. `.bytes` owns its own overflow.
+
+     One run, not a loop. The 27 cells that carry no information drop off, the 8 that do
+     fly down into the wire strip, the length byte arrives last, and the shorn cells come
+     back dimmed so the record you started with is still readable beside its encoding.
+
+     Transitions rather than keyframes because the flight distances are measured at play
+     time: the script writes `--dx`/`--dy` per cell and a class change is what runs them.
+     Everything here is a state on top of the resting figure, so with the script never
+     running this is simply the static figure. */
+  .hero-bytes {
+    margin: 0 0 clamp(28px, 4vh, 40px);
+    /* Side by side, this bottom margin is the gap between the figure's bottom and the
+       row's, and the hero's actions align to the row. Landing.astro cannot reset it from
+       outside: Astro scopes with `:where()`, so its `main > figure` rule carries less
+       specificity than this class and quietly loses. Stacked, the margin is still the
+       separation from whatever follows. */
+  }
+
+  @media (min-width: 1240px) {
+    .hero-bytes {
+      margin-bottom: 0;
+    }
+  }
+
+  /* One frame with nothing moving, so a replay can measure real positions. */
+  .hero-bytes.reset *,
+  .hero-bytes.reset *::before,
+  .hero-bytes.reset *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  /* Pre-play: the wire strip is empty slots waiting for the bytes, and the label above it
+     is not there yet: the shorn line has nothing to say until it is shorn. */
+  .hero-bytes.armed .wire i {
+    color: transparent;
+    opacity: 0.42;
+  }
+
+  .hero-bytes.armed .wire .len {
+    opacity: 0;
+  }
+
+  .hero-bytes.armed .field,
+  .hero-bytes.armed .lane.out {
+    opacity: 0;
+  }
+
+  /* Slow, and staggered by position, so a shorn cell is something you watch leave rather
+     than a flicker. 35 cells at 34ms apart is a full second of the strip coming apart
+     from the left. */
+  .hero-bytes .json i {
+    transition:
+      transform 700ms cubic-bezier(0.35, 0, 0.65, 1),
+      opacity 520ms linear;
+    transition-delay: calc(var(--i) * 34ms);
+  }
+
+  /* Roughly one line's worth of drop: further than that and a cell leaving the first
+     line is still legible over the third one on its way out. */
+  .hero-bytes.playing .tok:not(.run) i {
+    transform: translateY(42px) rotate(16deg);
+    opacity: 0;
+  }
+
+  /* The survivors leave later, travel further, and pass over the divider on the way,
+     hence the stacking context. `--d` is written per cell so they leave in reading order
+     rather than all at once. */
+  .hero-bytes .run i {
+    position: relative;
+    z-index: 2;
+    transition:
+      transform 900ms cubic-bezier(0.5, 0, 0.15, 1),
+      opacity 240ms linear;
+    transition-delay: var(--d, 1900ms);
+  }
+
+  .hero-bytes.playing .run i {
+    transform: translate(var(--dx, 0), var(--dy, 0));
+  }
+
+  /* The handoff: the fliers are sitting exactly on top of the cells they became, so
+     swapping which of the two is inked reads as one thing, not two. */
+  .hero-bytes.playing.done .run i {
+    opacity: 0;
+    transition: opacity 200ms linear;
+  }
+
+  .hero-bytes.armed.done .wire i {
+    color: var(--shorn-ink);
+    opacity: 1;
+    transition:
+      color 260ms ease-out,
+      opacity 260ms ease-out;
+  }
+
+  .hero-bytes.armed.done .field,
+  .hero-bytes.armed.done .lane.out {
+    opacity: 1;
+    transition: opacity 320ms ease-out 140ms;
+  }
+
+  /* The one byte nothing flew into: the string's length, the whole cost of the format.
+     It arrives last, on its own, which is the only way to notice it. */
+  .hero-bytes.armed.done .wire .len {
+    color: var(--shorn-ink-dim-raised);
+    animation: pop 420ms cubic-bezier(0.2, 1.4, 0.4, 1) 300ms both;
+  }
+
+  @keyframes pop {
+    from {
+      transform: scale(0.3);
+      opacity: 0;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+
+  /* Where it comes to rest. The shorn bytes fade back in at the positions they were taken
+     from, dim, so the finished figure is the original record and its encoding side by
+     side: you can still read the JSON, you can just see what of it was air. The
+     survivors come back to full ink, since those are the ones that are also below.
+
+     Opacity is the only property in transit: transform snaps back while the cell is still
+     invisible, so they fade in where they were rather than flying back up. The selectors
+     carry `playing`/`done` only to outweigh the states they are overriding. */
+  .hero-bytes.playing.ghost .tok:not(.run) i {
+    transform: none;
+    /* Faint enough to read as removed, solid enough to still read as characters. The one
+       knob worth turning by eye. */
+    opacity: 0.42;
+    transition: opacity 700ms ease-out;
+    transition-delay: calc(var(--i) * 12ms);
+  }
+
+  .hero-bytes.playing.done.ghost .run i {
+    transform: none;
+    opacity: 1;
+    transition: opacity 700ms ease-out;
+  }
+
+  figcaption {
+    margin-top: 18px;
+    max-width: 62ch;
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: var(--shorn-ink-3);
+  }
+
+  .gag {
+    color: var(--shorn-ink-2);
+  }
+
+  .again {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    font: inherit;
+    color: var(--shorn-ink-3);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .again:hover {
+    color: var(--shorn-ink);
+  }
+
+  /* The run is decoration on a static figure: it reads the same without it, so the
+     button that replays it has nothing to offer either. */
+  @media (prefers-reduced-motion: reduce) {
+    .again {
+      display: none;
+    }
+  }
+</style>
