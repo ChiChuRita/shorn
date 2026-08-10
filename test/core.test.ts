@@ -91,6 +91,32 @@ describe("shorn core", () => {
     }
   });
 
+  it("rejects malformed UTF-8 rather than substituting a replacement character", () => {
+    // The decode path prefers Node's `utf8Slice`, which substitutes U+FFFD where
+    // `TextDecoder` throws. A malformed payload must still throw, so the substitution
+    // has to be caught and re-decided by the fatal decoder rather than returned.
+    for (const bad of [
+      [0xff],
+      [0xfe, 0xfe],
+      [0x61, 0xff, 0x62],
+      [0xc3], // truncated two-byte sequence
+      [0xe2, 0x82], // truncated three-byte sequence
+      [0xed, 0xa0, 0x80], // surrogate half encoded as UTF-8
+    ]) {
+      const payload = new Uint8Array([bad.length, ...bad]);
+      expect(() => m.string().decode(payload)).toThrow(/Invalid UTF-8/);
+    }
+  });
+
+  it("returns a legitimately encoded replacement character instead of rejecting it", () => {
+    // The mirror of the case above, and the reason the guard re-decodes rather than
+    // throwing on sight: U+FFFD is a perfectly ordinary character, and a payload that
+    // really contains one is well formed.
+    for (const value of ["�", `a�b`, "�".repeat(40), `${"x".repeat(50)}�`]) {
+      expect(m.string().decode(m.string().encode(value))).toBe(value);
+    }
+  });
+
   it("rejects unpaired UTF-16 surrogates instead of changing the string", () => {
     expect(() => m.string().encode("\ud800")).toThrow(/unpaired surrogate/);
     expect(() => m.string().encode("\udc00")).toThrow(/unpaired surrogate/);

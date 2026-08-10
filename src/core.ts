@@ -62,6 +62,33 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
 /**
+ * Node's own UTF-8 decoder, when there is one — 45% cheaper than `TextDecoder` at every
+ * length measured, and the difference is the whole cost of decoding a document.
+ *
+ * `Buffer.prototype.utf8Slice` rather than a `Buffer`: it runs on any `Uint8Array`, so
+ * no view is allocated per call. Wrapping the input in `Buffer.from` per call measured
+ * *slower than doing nothing* (67ns against TextDecoder's 59ns on four bytes), and
+ * caching one view per `Reader` would only move that cost onto single-string payloads.
+ *
+ * A global lookup, never an import: shorn ships no Node built-in, and a browser, a
+ * worker, or a Deno without the Node shim simply finds nothing here and keeps using
+ * `TextDecoder`. Bun and Deno's Node compatibility both provide it.
+ *
+ * Guarded, because it does not share `TextDecoder`'s contract: it substitutes U+FFFD
+ * where the fatal decoder throws. See `Reader.string`.
+ */
+const nodeUtf8Slice: ((this: Uint8Array, start: number, end: number) => string) | undefined =
+  typeof Buffer === "function" && typeof Buffer.prototype?.utf8Slice === "function"
+    ? Buffer.prototype.utf8Slice
+    : undefined;
+
+/**
+ * The character Node substitutes for every malformed sequence, and therefore the one
+ * that has to send a string back to the fatal decoder for a second opinion.
+ */
+const REPLACEMENT_CHARACTER = "�";
+
+/**
  * One eight-byte staging buffer for reading floats. A Reader is built per `decode()`,
  * so a DataView of its own could never be reused and constructing one profiled at 13%
  * of a float-carrying decode. DataView rather than Float64Array keeps little-endian
@@ -459,6 +486,20 @@ export class Reader {
       }
     }
     const bytes = this.bytes(length);
+    // Node's decoder first, and it keeps the fatal contract rather than weakening it.
+    // `utf8Slice` substitutes U+FFFD for every malformed sequence, so a result with no
+    // U+FFFD in it *proves* the input was well formed — that is the whole check, and
+    // `String.prototype.indexOf` is a native scan rather than a byte loop in JS, which
+    // is why an explicit ASCII pre-scan lost past 64 bytes and this does not.
+    //
+    // A hit sends the string to `textDecoder` for the definitive answer, so malformed
+    // input throws exactly as before, and a legitimately encoded U+FFFD comes back
+    // intact instead of being mistaken for corruption. Both cases are rare and pay one
+    // extra pass; nothing is accepted that the fatal decoder would have refused.
+    if (nodeUtf8Slice !== undefined) {
+      const decoded = nodeUtf8Slice.call(bytes, 0, length);
+      if (decoded.indexOf(REPLACEMENT_CHARACTER) < 0) return decoded;
+    }
     try {
       return textDecoder.decode(bytes);
     } catch (error) {
