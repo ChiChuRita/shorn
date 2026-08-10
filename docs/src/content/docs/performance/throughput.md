@@ -3,7 +3,7 @@ title: Throughput
 description: Encode and decode benchmarks against JSON and schema-based binary codecs.
 ---
 
-shorn is faster than byte-producing JSON in every measured fixture. Against the binary codecs, it leads most fixtures; text-heavy Unicode data is the exception.
+shorn is faster than byte-producing JSON in every measured fixture. Against the binary codecs, it leads on record-shaped data. It does **not** lead on document-shaped data: a payload made of many separate strings is decoded faster by msgpackr's `bundleStrings` mode, whatever alphabet those strings are in.
 
 ## Against JSON
 
@@ -23,6 +23,8 @@ Across these fixtures, shorn is up to 6.2× faster to encode and up to 14.5× fa
 
 ## Against binary codecs
 
+Three msgpackr modes exist and this table compares against one of them. `bundleStrings` is measured in the document section below, where it wins decode outright.
+
 | Fixture | Op | shorn | Avro | SchemaPack | msgpackr records |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Person | enc | **25.16M** | 17.10M | 12.55M | 10.55M |
@@ -34,7 +36,26 @@ Across these fixtures, shorn is up to 6.2× faster to encode and up to 14.5× fa
 | 100 events | enc | **100.1K** | 41.2K | 53.4K | 26.9K |
 | 100 events | dec | **116.3K** | 52.8K | 57.5K | 88.1K |
 
-Unicode-heavy data is the exception: msgpackr records encode it 4% faster, and Avro decodes it faster. String processing dominates that fixture.
+Unicode-heavy data is one exception: msgpackr records encode it 4% faster, and Avro decodes it faster. String processing dominates that fixture.
+
+### Documents are the other exception, and it is not about Unicode
+
+The fixtures above are records: few keys, short strings, no optional fields. A document — many keys, most of the payload being string content, arrays whose elements have different key sets — measures differently, and this is the honest comparison on one:
+
+| Codec | Bytes | Encode | Decode |
+| --- | ---: | ---: | ---: |
+| **shorn** | **2,236** | **166.5K** | 216.1K |
+| msgpackr shared records | 2,268 | 89.8K | 383.1K |
+| msgpackr bundled strings | 2,341 | 158.3K | **556.9K** |
+| cbor-x shared records | 2,321 | 85.4K | 350.6K |
+| @msgpack/msgpack | 2,872 | 86.9K | 98.2K |
+| JSON bytes | 3,334 | 149.6K | 145.5K |
+
+shorn is smallest and fastest to encode, and fourth to decode. The cause is one string-decode call per string: `bundleStrings` writes all string content contiguously and decodes it in a single call, which is the cost shorn pays once per string. 87% of this payload is string bytes.
+
+**The alphabet is irrelevant to this.** That fixture is pure ASCII — every character one byte — and shorn still decodes it at 39% of `bundleStrings`. Reading the Unicode row above and concluding that ASCII API payloads are safely in the winning column is the wrong conclusion: what costs is the *number* of strings, not what is in them.
+
+These decode figures are already 21% better than when this fixture was added: optional-field objects stopped falling back to the interpreted path (17%), and strings now decode through Node's own UTF-8 decoder where one exists (a further 10%). The remaining gap to `bundleStrings` is real, open, and a wire-format question rather than a tuning one — bundling strings would change the bytes.
 
 :::caution[Microbenchmark margins vary]
 The codecs share one benchmark process, so small margins can move between runs. In isolated Person-encode measurements on the same machine, shorn took 42.54 ns and Avro 48.22 ns: a 13% difference. Treat narrow results as directional and benchmark representative production data.

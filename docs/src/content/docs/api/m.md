@@ -72,7 +72,11 @@ Elements only; length from the schema, positions never reordered. **May** contai
 m.object<S extends Shape>(shape: S): Schema<ObjectOutput<S>>;
 ```
 
-Presence bitmap for optional fields (`ceil(n / 8)` bytes, omitted when nothing is optional), then values in **canonical key order**, UTF-16 ascending. Declaration order is irrelevant. Unknown properties throw on encode.
+Presence bitmap for optional fields (`ceil(n / 8)` bytes, omitted when nothing is optional), then values in **canonical key order**, UTF-16 ascending. Declaration order is irrelevant.
+
+**Undeclared properties are dropped, not rejected.** `m.object({ a: m.uint() }).encode({ a: 1, extra: "x" })` writes one byte and decodes to `{ a: 1 }`; `extra` is not on the wire and does not come back. The schema is the statement of what the shape is, and this matches Zod's own default, which strips unknown keys before shorn ever sees the value.
+
+If an undeclared property should be an error rather than a silent omission, say so in the schema and use a validator: `compile(z.strictObject({ … }))` rejects with `Unrecognized key: "extra"`. The `m` builders have no strict variant, because rejecting means scanning every key on every encode and that cost belongs to the schemas that ask for it.
 
 ## `.optional()` and `.nullable()`
 
