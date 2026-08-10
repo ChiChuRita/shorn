@@ -50,7 +50,9 @@ A varint **byte** length, then the contents. Strings are UTF-8; `m.bytes()` is r
 Uint8Array([9, 9]) -> [2, 9, 9]
 ```
 
-UTF-8 decoding is strict. Invalid sequences cause a `DecodeError` instead of being replaced with `U+FFFD`.
+UTF-8 decoding is strict. Invalid sequences cause a `DecodeError` instead of being replaced with `U+FFFD`. That holds regardless of which decoder the runtime provides: on Node, string decoding goes through `Buffer.prototype.utf8Slice` because it is measurably cheaper, and because that function substitutes `U+FFFD` rather than failing, any result containing one is re-decoded strictly to get a definitive answer. A string that legitimately contains `U+FFFD` round-trips; a malformed payload throws.
+
+**String content stays where its field is, and that is a commitment rather than an accident.** Writing every string into one contiguous region instead — as msgpackr's `bundleStrings` mode does — would let a decoder turn all of them into text in a single call, which is worth about 32% of decode on a document-shaped payload. It is deliberately not done: it would change the bytes of every existing shape, it would still not overtake `bundleStrings`, and substrings of one large region keep that whole region alive in memory for as long as any field decoded from it is retained. If it is ever offered it will be an opt-in wrapper alongside [`fingerprinted()`](/versioning/fingerprinting/), which adds a new shape rather than redefining this one.
 
 ## Literals
 
