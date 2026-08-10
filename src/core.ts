@@ -2,6 +2,8 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 const MAX_COLLECTION_LENGTH = 1_000_000;
 const ASCII_FAST_PATH_LIMIT = 8;
+/** Floats one `Reader` must read before a `DataView` over the input pays for itself. */
+const FLOAT_VIEW_TRIP = 8;
 const MAX_BYTE_LENGTH = 64 * 1024 * 1024;
 const MAX_RETAINED_BUFFER_BYTES = 64 * 1024;
 const SLICE_COPY_LIMIT = 16;
@@ -351,6 +353,15 @@ let pooledWriterBusy = false;
 export class Reader {
   private offset = 0;
 
+  /**
+   * Built once a decode has read `FLOAT_VIEW_TRIP` floats, never before: a DataView
+   * costs more to allocate than the scratch copy below saves on a record holding one
+   * or two of them — a 38-byte nested event decodes 34% slower if this is built eagerly
+   * — while an array of floats amortizes the one allocation to nothing.
+   */
+  private view: DataView | undefined;
+  private floatsRead = 0;
+
   constructor(private readonly buffer: Uint8Array) {}
 
   get position(): number {
@@ -547,9 +558,27 @@ export class Reader {
     if (start + 8 > this.buffer.length) {
       throw new DecodeError("Unexpected end of input", start);
     }
-    const buffer = this.buffer;
-    for (let index = 0; index < 8; index++) floatBytes[index] = buffer[start + index]!;
+    const view = this.view;
+    // Split like `varuint`/`varuintSlow`: folding the scratch path and the DataView
+    // construction into this body costs it V8's inlining budget, and an uninlined
+    // `getFloat64` is no faster than the copy it replaced.
+    if (view === undefined) return this.float64Slow(start);
     this.offset = start + 8;
+    return view.getFloat64(start, true);
+  }
+
+  private float64Slow(start: number): number {
+    const buffer = this.buffer;
+    this.offset = start + 8;
+    if (this.floatsRead++ >= FLOAT_VIEW_TRIP) {
+      const view = (this.view = new DataView(
+        buffer.buffer,
+        buffer.byteOffset,
+        buffer.byteLength,
+      ));
+      return view.getFloat64(start, true);
+    }
+    for (let index = 0; index < 8; index++) floatBytes[index] = buffer[start + index]!;
     return floatView.getFloat64(0, true);
   }
 }
