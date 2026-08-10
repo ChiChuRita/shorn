@@ -111,10 +111,15 @@ encodeAsync(schemaOrCodec, value, options?);
 decodeAsync(schemaOrCodec, bytes, options?);
 compile(schema, options?);
 fingerprinted(codec, options?);
+unchecked(schemaOrCodec, options?);
 ```
 
 The async pair is for schemas with async refinements. It accepts a codec as well
 as a schema, so it composes with `fingerprinted()`.
+
+`unchecked()` is the same codec with the validator removed: same bytes, no
+refinements run on either side. For a producer you own, at both ends of a link
+you own.
 
 The low-level `m` builders expose the same wire format without a validation
 library.

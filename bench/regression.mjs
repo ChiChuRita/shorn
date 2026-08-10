@@ -20,7 +20,7 @@ import process from "node:process";
 import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
 import { z } from "zod";
-import { compile, DecodeError, fingerprinted, m } from "../dist/index.js";
+import { compile, DecodeError, fingerprinted, m, unchecked } from "../dist/index.js";
 import * as fixtures from "./fixtures.mjs";
 import { nanosPerOp, median, readSink } from "./measure.mjs";
 
@@ -95,6 +95,10 @@ if (!skip("throughput")) {
     ["unicode string", unicode, unicodeValue],
     ["500 ms timestamps", timestamps, timestampValues],
     ["zod person (validated)", zodCodec, personValue],
+    // The same codec with the validator removed. Sits beside the validated row so the
+    // price of validation is read off one run rather than inferred from the hand-built
+    // `person` row above, which is only the same shape by construction.
+    ["zod person (unchecked)", unchecked(zodCodec), personValue],
     ["fingerprinted zod person", framed, personValue],
   ];
   for (const [name, schema, value] of cases) {

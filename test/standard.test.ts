@@ -11,8 +11,10 @@ import {
   decodeAsync,
   encode,
   encodeAsync,
+  fingerprinted,
   m,
   safeEncode,
+  unchecked,
 } from "../src/index.js";
 
 describe("Standard Schema adapter", () => {
@@ -557,6 +559,55 @@ describe("Standard Schema adapter", () => {
         );
       }
       expect(() => compile(valibotSchema, structure)).not.toThrow();
+    });
+  });
+
+  describe("unchecked", () => {
+    it("writes the bytes the validating codec writes", () => {
+      expect([...unchecked(zodSchema).encode(value)]).toEqual([...encode(zodSchema, value)]);
+      expect(unchecked(zodSchema).decode(encode(zodSchema, value))).toEqual(value);
+    });
+
+    it("runs no refinement, on either side", () => {
+      const Age = z.object({ age: z.int().nonnegative() });
+      expect(() => encode(Age, { age: -1 })).toThrow(EncodeError);
+
+      // Uint would refuse a negative, so the refinement being skipped has to be one the
+      // wire can carry: a bound the validator holds and the byte layout does not.
+      const bytes = unchecked(z.object({ age: z.int().max(3) })).encode({ age: 250 });
+      expect(unchecked(z.object({ age: z.int().max(3) })).decode(bytes)).toEqual({ age: 250 });
+      expect(() => decode(z.object({ age: z.int().max(3) }), bytes)).toThrow(DecodeError);
+    });
+
+    it("skips the validator's transforms too, not only its checks", () => {
+      const Name = z.object({ name: z.string().trim() });
+      expect(decode(Name, encode(Name, { name: " x " }))).toEqual({ name: "x" });
+      expect(unchecked(Name).decode(unchecked(Name).encode({ name: " x " }))).toEqual({
+        name: " x ",
+      });
+    });
+
+    it("still refuses malformed bytes, since the structural half does that", () => {
+      const bytes = encode(zodSchema, value);
+      expect(() => unchecked(zodSchema).decode(bytes.subarray(0, 3))).toThrow(DecodeError);
+    });
+
+    it("keeps a fingerprint envelope, and its mismatch check", () => {
+      const framed = fingerprinted(compile(zodSchema));
+      const bare = unchecked(framed);
+      expect([...bare.encode(value)]).toEqual([...framed.encode(value)]);
+      expect(() => bare.decode(encode(zodSchema, value))).toThrow(/different schema/);
+    });
+
+    it("is cached with the codec, so a per-message call is a lookup", () => {
+      expect(unchecked(zodSchema)).toBe(unchecked(zodSchema));
+    });
+
+    it("refuses a codec that has no validator to remove", () => {
+      expect(() => unchecked(m.string())).toThrow(/already unvalidated/);
+      // Handing this one back unchanged would keep validating under a name that
+      // promises it does not.
+      expect(() => unchecked(compile(zodSchema).nullable())).toThrow(/validator to remove/);
     });
   });
 });

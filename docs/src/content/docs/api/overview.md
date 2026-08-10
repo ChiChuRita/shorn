@@ -17,6 +17,7 @@ decodeAsync(schema, bytes, structure?): Promise<Output>;
 // Codecs
 compile(schema, structure?): Schema<Output>;
 fingerprinted(codec, options?): FingerprintedSchema<Output>;
+unchecked(schemaOrCodec, structure?): Schema<Output>;
 
 // Low-level
 m.string() | m.bytes() | m.boolean() | m.uint() | m.int()
@@ -37,6 +38,7 @@ DecodeError; // .offset
 | Async refinement | `encodeAsync` / `decodeAsync` |
 | A codec object to pass around | `compile` |
 | **Stored, queued, version-crossing** | **`fingerprinted(compile(schema), { bytes: 4 })`** |
+| Trusted producer you own, both ends | `unchecked(compile(schema))` |
 | No validator, or you need `bytes`/`float32` | `m` |
 
 All entry points use the same structural decode path through `Schema.decode`, so they report the same errors.

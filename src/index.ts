@@ -17,6 +17,7 @@ export {
   encodeAsync,
   safeDecode,
   safeEncode,
+  unchecked,
 } from "./standard.js";
 export type { EncodableStandardSchema, SafeResult } from "./standard.js";
 export { FingerprintedSchema, fingerprinted } from "./envelope.js";

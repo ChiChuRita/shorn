@@ -84,6 +84,7 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 | `This schema already decodes to undefined; wrapping it in optional() would give undefined two encodings` | a second presence marker over one already reachable |
 | `fingerprinted() needs a codec built from a Standard JSON Schema; compile() returns one, the low-level m API does not` | `fingerprinted(m.object(...))` |
 | `Fingerprint bytes must be 1, 2, 3 or 4, received X` | out-of-range `bytes` option |
+| `unchecked() needs a codec with a validator to remove; compile() returns one, optionally wrapped by fingerprinted(), and the low-level m API is already unvalidated` | `unchecked(m.object(...))`, or `unchecked(compile(schema).nullable())` |
 
 ### Rich types
 

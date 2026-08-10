@@ -55,6 +55,29 @@ const back = await decodeAsync(PersonWire, bytes);   // checks the prefix, then 
 
 A codec with no validator to await (an `m` schema, or a `compile()` codec behind `nullable()`/`optional()`) is refused rather than quietly encoded synchronously.
 
+## Skipping validation
+
+Between two services you own, on a link you own, the checks are work you have already done. `unchecked()` returns the same codec with the validator removed:
+
+```ts
+const wire = unchecked(compile(Person));
+
+wire.encode(person); // byte-identical to compile(Person).encode(person)
+wire.decode(bytes);  // no refinements run
+```
+
+The bytes do not change, so a validated decoder reads what an unchecked encoder wrote, and the other way round. Only the checks go away — and that is most of the cost. On the Person fixture, validation takes 25.16M encodes/s down to 8.93M and 67.55M decodes/s down to 12.07M; see [Throughput](/performance/throughput/#validation-included).
+
+What you give up:
+
+- **Refinements, both ways.** A negative age, a malformed email, a string over its maximum — all encode and decode fine if the wire type can carry them.
+- **Transforms, not only checks.** The validator is not run at all, so a `z.string().trim()` or a `z.coerce` no longer changes the value. It goes out exactly as handed over.
+- **Semantic version skew.** Bytes written against a schema that differs only in its refinements now decode silently. `fingerprinted()` still catches a *structural* difference — it composes, prefix check included — but a fingerprint has never covered refinements.
+
+What you keep: every structural check. Bounds on each read, the length limits, the trailing-byte refusal. Malformed input still throws `DecodeError` rather than escaping as a wrong value. See [Hostile Input](/hostile-input/).
+
+Keep the validated codec at any boundary you do not own. `unchecked()` is for the hop between your own processes, not for the edge.
+
 ## Which entry point
 
 | Situation | Use |
@@ -64,5 +87,6 @@ A codec with no validator to await (an `m` schema, or a `compile()` codec behind
 | Async refinement | `encodeAsync` / `decodeAsync`, on the schema or a codec |
 | A codec to pass around | `compile` |
 | Stored, queued, version-crossing | `fingerprinted(compile(schema), { bytes: 4 })` |
+| Trusted producer you own, both ends | `unchecked(compile(schema))` |
 
-All five use the same structural decode path and report the same malformed-input errors.
+All of them use the same structural decode path and report the same malformed-input errors.

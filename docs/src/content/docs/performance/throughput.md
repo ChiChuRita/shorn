@@ -52,6 +52,8 @@ The codecs share one benchmark process, so small margins can move between runs. 
 
 Validation is a large part of end-to-end cost. On the Person fixture, the raw codec runs at 25.16M encodes/s and 67.55M decodes/s; adding Zod reduces those figures to 8.93M and 12.07M.
 
+Between services you own, `unchecked(compile(schema))` writes the same bytes at the raw-codec figures. It gives up every refinement in exchange, on both sides — see [Skipping Validation](/core-concepts/validation/#skipping-validation).
+
 ## Runtime behavior
 
 Eligible object schemas use specialized runtime-generated encode and decode functions. Schemas with optional fields use the interpreted path. A strict Content Security Policy that blocks `new Function` also uses the interpreted path, with identical bytes and results. See [Compilation and Caching](/core-concepts/compile-and-caching/).

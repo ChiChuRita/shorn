@@ -552,6 +552,53 @@ export function compile(
   return getCompiled(schema, structure);
 }
 
+/**
+ * The same codec with the validator taken out. Identical bytes on the wire; the
+ * refinements are simply not run, on either side. On the three-field zod person fixture
+ * in `bench/regression.mjs` that is 2.3x on encode and 3.7x on decode — once the
+ * structural half is generated code, validation is most of what is left.
+ *
+ * For a producer you own, at both ends of a link you own. It removes everything the
+ * validator did, not only the checks that were going to pass: a transform such as
+ * `z.string().trim()` no longer runs, so a value goes out exactly as handed over.
+ * Decoding still bounds-checks every read and still refuses trailing bytes, so
+ * malformed input throws `DecodeError` rather than escaping — but bytes written against
+ * a schema that differs only in its refinements now decode silently. Wrap in
+ * `fingerprinted()` to keep the structural half of that check, and keep the validated
+ * codec at any boundary you do not own.
+ *
+ * Takes a schema or a codec, and is cached the same way `compile()` is, so calling it
+ * per message is a WeakMap hit rather than a rebuild.
+ */
+export function unchecked<T>(codec: Schema<T>): Schema<T>;
+export function unchecked<S extends EncodableStandardSchema>(
+  schema: S,
+): Schema<StandardSchemaV1.InferOutput<S>>;
+export function unchecked<S extends StandardSchemaV1>(
+  schema: S,
+  structure: StandardJSONSchemaV1<
+    StandardSchemaV1.InferInput<S>,
+    StandardSchemaV1.InferOutput<S>
+  >,
+): Schema<StandardSchemaV1.InferOutput<S>>;
+export function unchecked(
+  schemaOrCodec: StandardSchemaV1 | Schema<unknown>,
+  structure?: StandardJSONSchemaV1,
+): Schema<unknown> {
+  const codec =
+    schemaOrCodec instanceof Schema ? schemaOrCodec : getCompiled(schemaOrCodec, structure);
+  const bare = codec._structural;
+  if (bare === undefined) {
+    // Not a no-op return of the argument: an `m` schema really is already unchecked, but
+    // `compile(schema).nullable()` reaches here too, and handing that back would keep
+    // validating under a name that promises it does not.
+    throw new EncodeError(
+      "unchecked() needs a codec with a validator to remove; compile() returns one, optionally wrapped by fingerprinted(), and the low-level m API is already unvalidated",
+    );
+  }
+  return bare;
+}
+
 export function encode<S extends EncodableStandardSchema>(
   schema: S,
   value: StandardSchemaV1.InferOutput<S>,

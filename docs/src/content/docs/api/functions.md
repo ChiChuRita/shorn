@@ -68,6 +68,27 @@ Returns the cached wire plan as a codec with `.encode()` and `.decode()`.
 
 **No build step.** `compile` builds the codec in memory and writes nothing to disk. Repeated calls with the same schema and structure object return the **same** cached instance. Eligible object schemas specialize both encoding and decoding at runtime; a strict Content Security Policy uses the interpreted path instead. See [Compilation and Caching](/core-concepts/compile-and-caching/).
 
+## `unchecked`
+
+```ts
+unchecked<T>(codec: Schema<T>): Schema<T>;
+unchecked<S extends EncodableStandardSchema>(schema: S): Schema<InferOutput<S>>;
+unchecked<S extends StandardSchemaV1>(schema: S, structure: StandardJSONSchemaV1): Schema<InferOutput<S>>;
+```
+
+The same codec with the validator removed. Same bytes on the wire, no refinements run on either side. See [Validation](/core-concepts/validation/#skipping-validation) for when this is safe.
+
+```ts
+const wire = unchecked(compile(Person));
+wire.encode(person); // byte-identical to compile(Person).encode(person)
+```
+
+Cached with the codec it comes from, so calling it per message is a lookup rather than a rebuild. Accepts a `fingerprinted()` codec and keeps the envelope, prefix check included.
+
+Throws `EncodeError` for a codec that has no validator to remove — an `m` schema, or a `compile()` codec behind `nullable()`/`optional()`:
+
+> unchecked() needs a codec with a validator to remove; compile() returns one, optionally wrapped by fingerprinted(), and the low-level m API is already unvalidated
+
 ## `fingerprinted`
 
 ```ts

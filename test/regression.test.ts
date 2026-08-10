@@ -201,6 +201,7 @@ describe("public API surface is pinned", () => {
       "m",
       "safeDecode",
       "safeEncode",
+      "unchecked",
     ]);
   });
 
