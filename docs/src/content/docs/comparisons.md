@@ -29,11 +29,13 @@ const parsed = decode(Person, body);
 
 Send it as `Content-Type: application/octet-stream`, and convert `Date`, `bigint`, `Map`, and `Set` to explicit [wire-friendly forms](/schemas/rich-types/) first.
 
+Gzipping the JSON is not the same saving. A compressor shrinks repeated content; shorn removes structure before any compressor runs, and the two compose. In the [100,000-event benchmarks](/performance/size/#compressed-100000-events), gzipped shorn is 37% smaller than gzipped JSON on repetitive data and 22% smaller on high-entropy data, because gzipped JSON still spends compressed bits on the field names and syntax shorn never wrote. Gzip also costs measured CPU — 79 to 112 ms per batch there — while shorn's reduction is free, and it applies to payloads far too small to be worth compressing at all: nothing gzips an 8-byte record.
+
 Stay on JSON when other languages or generic tools must read the payload, when humans need to inspect or edit it directly, when streaming matters, or when the traffic is too small for another format to pay for itself.
 
 ## Against Avro, Protobuf, and SchemaPack
 
-These also keep structure outside the payload, so the comparison is about workflow rather than bytes.
+These also keep structure outside the payload, so the comparison is about workflow rather than bytes — and about where the schema lives. Theirs is a separate artifact to keep in sync (a `.proto` file, an Avro schema, a builder DSL); shorn's is the validator you already run, real code that your compiler checks and your editor refactors. TypeScript types come from the validator's own inference (`StandardSchemaV1.InferOutput`), a single type lookup, so shorn adds no type-level parsing for tsserver to re-run on every keystroke.
 
 | Codec | Schema workflow | Evolution | Languages |
 | --- | --- | --- | --- |

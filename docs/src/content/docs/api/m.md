@@ -123,6 +123,8 @@ class Writer {
   varuint(value: number): void;
   varuintBigInt(value: bigint): void;
   string(value: string): void;
+  float32(value: number): void;
+  float64(value: number): void;
   finish(): Uint8Array;
   reset(): void;
 }
@@ -130,11 +132,14 @@ class Writer {
 class Reader {
   readonly position: number;
   readonly done: boolean;
+  readonly remaining: number;
   byte(): number;
   bytes(length: number): Uint8Array;
   string(): string;
   varuint(): number;
   varuintWide(): number | bigint;
+  float32(): number;
+  float64(): number;
 }
 ```
 
@@ -155,7 +160,7 @@ class Pair extends Schema<[number, number]> {
 
 Set `_minWidth` if the schema may be used as an array element. It lets `m.array` reject an impossible count before allocating. A schema with width 0 cannot be an array element.
 
-`reader.bytes(n)` returns a fresh subarray. Custom codecs may use `byte()` when they need to avoid that allocation.
+`reader.bytes(n)` returns a **view over the input**, not a copy: it aliases the caller's `Uint8Array`, so anything you hand out of a custom codec must be copied first — `new Uint8Array(reader.bytes(n))`, which is what `m.bytes()` does. Read with `byte()` instead when you only need the values and would rather not allocate the view at all.
 
 This surface is unstable: `_encode`, `_decode`, and `_minWidth` can change in a minor release.
 

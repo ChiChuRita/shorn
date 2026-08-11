@@ -61,6 +61,16 @@ interface WireField {
 export type EncodableStandardSchema<Input = unknown, Output = Input> =
   StandardSchemaV1<Input, Output> & StandardJSONSchemaV1<Input, Output>;
 
+/**
+ * The structure half a validator that carries no JSON Schema of its own has to be handed
+ * separately — the extra argument on the second overload of every entry point below. One
+ * alias rather than the same four lines nine times.
+ */
+type StructureFor<S extends StandardSchemaV1> = StandardJSONSchemaV1<
+  StandardSchemaV1.InferInput<S>,
+  StandardSchemaV1.InferOutput<S>
+>;
+
 export type SafeResult<T> = { success: true; data: T } | { success: false; error: Error };
 
 /**
@@ -209,6 +219,38 @@ function discriminant(
   return undefined;
 }
 
+/**
+ * Whether a shape already decodes to `null` without a marker of its own — exactly the set
+ * `Schema.nullable()` declines to put a second marker on.
+ */
+function admitsNull(shape: WireShape): boolean {
+  if (typeof shape === "string") return shape === "any";
+  if ("literal" in shape) return shape.literal === null;
+  if ("enum" in shape) return shape.enum.includes(null);
+  return "nullable" in shape;
+}
+
+/**
+ * A nullable marker over a shape that already holds `null` is dropped here, one level
+ * above where `Schema.nullable()` would deal with it — which is the level the signature
+ * is taken at, and that turns out to matter.
+ *
+ * Two cases arrive here, and both reached the caller wrong. `any`, `null` and a
+ * null-bearing `enum` made `Schema.nullable()` throw "already decodes to null", blaming a
+ * `.nullable()` the caller did write for a marker this compiler added — `z.any().nullable()`
+ * is the plain one, since tag 0 is already `null`. A nested `{nullable:{nullable:…}}` did
+ * *not* throw, because `Schema.nullable()` collapses a repeat and returns itself, but it
+ * collapsed below the signature: two schemas writing byte-identical payloads carried
+ * different fingerprints and so rejected each other's bytes, which is the false positive
+ * `fingerprinted()` exists to not produce.
+ *
+ * No shape changes what it writes. The nested case's fingerprint does change, to the one
+ * matching the bytes it was already producing.
+ */
+function nullableOf(shape: WireShape): WireShape {
+  return admitsNull(shape) ? shape : { nullable: shape };
+}
+
 function wireShape(schema: JsonSchema): WireShape {
   // `anyOf` and `oneOf` differ in whether the branches may overlap, which is a
   // validation question the vendor has already answered by the time shorn runs.
@@ -218,8 +260,12 @@ function wireShape(schema: JsonSchema): WireShape {
   if (Array.isArray(union)) {
     const branches = union.map(asSchema);
     const nonNull = branches.filter((branch) => branch.type !== "null");
+    // `z.null().nullable()` writes `anyOf: [{type:"null"}, {type:"null"}]`. Every branch
+    // is the same one value, so the union is that value — and refusing it as "not a
+    // nullable union" named the one thing it unmistakably was.
+    if (nonNull.length === 0 && branches.length > 0) return { literal: null };
     if (branches.length === 2 && nonNull.length === 1) {
-      return { nullable: wireShape(nonNull[0]!) };
+      return nullableOf(wireShape(nonNull[0]!));
     }
 
     // ArkType spells `string.uuid` as three branches — the lowercase pattern, plus
@@ -232,7 +278,7 @@ function wireShape(schema: JsonSchema): WireShape {
           branch.format === "uuid" && (branch.type === "string" || typeof branch.const === "string"),
       )
     ) {
-      return nonNull.length === branches.length ? "uuid" : { nullable: "uuid" };
+      return nonNull.length === branches.length ? "uuid" : nullableOf("uuid");
     }
 
     const found = discriminant(branches);
@@ -254,8 +300,11 @@ function wireShape(schema: JsonSchema): WireShape {
 
   if (Array.isArray(schema.type)) {
     const nonNull = schema.type.filter((type) => type !== "null");
+    // `["null"]` and `["null","null"]` name one type, for the reason the all-null union
+    // above does.
+    if (nonNull.length === 0 && schema.type.length > 0) return { literal: null };
     if (schema.type.length === 2 && nonNull.length === 1) {
-      return { nullable: wireShape({ ...schema, type: nonNull[0] }) };
+      return nullableOf(wireShape({ ...schema, type: nonNull[0] }));
     }
     throw new EncodeError("Only nullable JSON Schema type arrays are currently supported");
   }
@@ -284,7 +333,14 @@ function wireShape(schema: JsonSchema): WireShape {
       // second already compiled, so this is the same literal shape from the first.
       return { literal: null };
     case "integer":
-      return typeof schema.minimum === "number" && schema.minimum >= 0 ? "uint" : "int";
+      // `.positive()` and `.nonnegative()` are the same lower bound written two ways:
+      // Zod emits `exclusiveMinimum: 0` for the first and `minimum: 0` for the second.
+      // Reading only `minimum` costs the commonest non-negative integer schema the
+      // zigzag path, which crosses every varint boundary at half the value.
+      return (typeof schema.minimum === "number" && schema.minimum >= 0) ||
+        (typeof schema.exclusiveMinimum === "number" && schema.exclusiveMinimum >= -1)
+        ? "uint"
+        : "int";
     case "number":
       return "float64";
     case "array": {
@@ -359,25 +415,19 @@ function wireShape(schema: JsonSchema): WireShape {
   }
 }
 
+/** Every scalar shape to its schema. The key type is what keeps this exhaustive. */
+const SCALAR_SCHEMAS: Record<Extract<WireShape, string>, new () => Schema<unknown>> = {
+  any: DynamicSchema,
+  boolean: BooleanSchema,
+  float64: Float64Schema,
+  int: IntSchema,
+  string: StringSchema,
+  uint: UintSchema,
+  uuid: UuidSchema,
+};
+
 function compileWireShape(shape: WireShape): Schema<unknown> {
-  if (typeof shape === "string") {
-    switch (shape) {
-      case "string":
-        return new StringSchema();
-      case "boolean":
-        return new BooleanSchema();
-      case "uint":
-        return new UintSchema();
-      case "int":
-        return new IntSchema();
-      case "float64":
-        return new Float64Schema();
-      case "uuid":
-        return new UuidSchema();
-      case "any":
-        return new DynamicSchema();
-    }
-  }
+  if (typeof shape === "string") return new SCALAR_SCHEMAS[shape]();
   if ("literal" in shape) return new LiteralSchema(shape.literal);
   if ("enum" in shape) return new EnumSchema(shape.enum as [EnumValue, ...EnumValue[]]);
   if ("nullable" in shape) return compileWireShape(shape.nullable).nullable();
@@ -420,10 +470,7 @@ function buildCodec<S extends EncodableStandardSchema>(
 ): StandardBackedSchema<StandardSchemaV1.InferOutput<S>>;
 function buildCodec<S extends StandardSchemaV1>(
   schema: S,
-  structure: StandardJSONSchemaV1<
-    StandardSchemaV1.InferInput<S>,
-    StandardSchemaV1.InferOutput<S>
-  >,
+  structure: StructureFor<S>,
 ): StandardBackedSchema<StandardSchemaV1.InferOutput<S>>;
 function buildCodec(
   schema: StandardSchemaV1,
@@ -540,10 +587,7 @@ export function compile<S extends EncodableStandardSchema>(
 ): Schema<StandardSchemaV1.InferOutput<S>>;
 export function compile<S extends StandardSchemaV1>(
   schema: S,
-  structure: StandardJSONSchemaV1<
-    StandardSchemaV1.InferInput<S>,
-    StandardSchemaV1.InferOutput<S>
-  >,
+  structure: StructureFor<S>,
 ): Schema<StandardSchemaV1.InferOutput<S>>;
 export function compile(
   schema: StandardSchemaV1,
@@ -576,10 +620,7 @@ export function unchecked<S extends EncodableStandardSchema>(
 ): Schema<StandardSchemaV1.InferOutput<S>>;
 export function unchecked<S extends StandardSchemaV1>(
   schema: S,
-  structure: StandardJSONSchemaV1<
-    StandardSchemaV1.InferInput<S>,
-    StandardSchemaV1.InferOutput<S>
-  >,
+  structure: StructureFor<S>,
 ): Schema<StandardSchemaV1.InferOutput<S>>;
 export function unchecked(
   schemaOrCodec: StandardSchemaV1 | Schema<unknown>,
@@ -606,10 +647,7 @@ export function encode<S extends EncodableStandardSchema>(
 export function encode<S extends StandardSchemaV1>(
   schema: S,
   value: StandardSchemaV1.InferOutput<S>,
-  structure: StandardJSONSchemaV1<
-    StandardSchemaV1.InferInput<S>,
-    StandardSchemaV1.InferOutput<S>
-  >,
+  structure: StructureFor<S>,
 ): Uint8Array;
 export function encode(
   schema: StandardSchemaV1,
@@ -626,10 +664,7 @@ export function decode<S extends EncodableStandardSchema>(
 export function decode<S extends StandardSchemaV1>(
   schema: S,
   value: Uint8Array,
-  structure: StandardJSONSchemaV1<
-    StandardSchemaV1.InferInput<S>,
-    StandardSchemaV1.InferOutput<S>
-  >,
+  structure: StructureFor<S>,
 ): StandardSchemaV1.InferOutput<S>;
 export function decode(
   schema: StandardSchemaV1,
@@ -646,10 +681,7 @@ export function safeEncode<S extends EncodableStandardSchema>(
 export function safeEncode<S extends StandardSchemaV1>(
   schema: S,
   value: StandardSchemaV1.InferOutput<S>,
-  structure: StandardJSONSchemaV1<
-    StandardSchemaV1.InferInput<S>,
-    StandardSchemaV1.InferOutput<S>
-  >,
+  structure: StructureFor<S>,
 ): SafeResult<Uint8Array>;
 export function safeEncode(
   schema: StandardSchemaV1,
@@ -666,10 +698,7 @@ export function safeDecode<S extends EncodableStandardSchema>(
 export function safeDecode<S extends StandardSchemaV1>(
   schema: S,
   value: Uint8Array,
-  structure: StandardJSONSchemaV1<
-    StandardSchemaV1.InferInput<S>,
-    StandardSchemaV1.InferOutput<S>
-  >,
+  structure: StructureFor<S>,
 ): SafeResult<StandardSchemaV1.InferOutput<S>>;
 export function safeDecode(
   schema: StandardSchemaV1,
@@ -712,10 +741,7 @@ export async function encodeAsync<S extends EncodableStandardSchema>(
 export async function encodeAsync<S extends StandardSchemaV1>(
   schema: S,
   value: StandardSchemaV1.InferOutput<S>,
-  structure: StandardJSONSchemaV1<
-    StandardSchemaV1.InferInput<S>,
-    StandardSchemaV1.InferOutput<S>
-  >,
+  structure: StructureFor<S>,
 ): Promise<Uint8Array>;
 export async function encodeAsync(
   schema: StandardSchemaV1 | Schema<unknown>,
@@ -734,10 +760,7 @@ export async function decodeAsync<S extends EncodableStandardSchema>(
 export async function decodeAsync<S extends StandardSchemaV1>(
   schema: S,
   value: Uint8Array,
-  structure: StandardJSONSchemaV1<
-    StandardSchemaV1.InferInput<S>,
-    StandardSchemaV1.InferOutput<S>
-  >,
+  structure: StructureFor<S>,
 ): Promise<StandardSchemaV1.InferOutput<S>>;
 export async function decodeAsync(
   schema: StandardSchemaV1 | Schema<unknown>,

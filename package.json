@@ -1,6 +1,6 @@
 {
   "name": "shorn",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "One-line drop-in binary serialization for your existing Zod, Valibot, or ArkType schema",
   "keywords": [
     "standard-schema",

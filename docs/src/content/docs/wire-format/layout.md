@@ -23,9 +23,13 @@ Signed: **ZigZag** first, mapping `0, -1, 1, -2, 2` to `0, 1, 2, 3, 4`, then the
 | `63` | `[126]` |
 | `64` | `[128, 1]` |
 
-ZigZag doubles the magnitude, so a signed integer crosses every size boundary at half the value: `64` is two bytes as an `int`, one as a `uint`. Declare `minimum >= 0` wherever it is true.
+ZigZag doubles the magnitude, so a signed integer crosses every size boundary at half the value: `64` is two bytes as an `int`, one as a `uint`. Declare a non-negative lower bound wherever it is true; either spelling is read as unsigned, so `.nonnegative()` (`minimum: 0`) and `.positive()` (`exclusiveMinimum: 0`) both get the shorter encoding.
 
 **Overlong varints are rejected.** `1` must be `[1]`, never `[129, 0]`.
+
+**`-0` is not an integer on the wire.** Both integer encodings write it as `0` and read it back as `0`, which is what `JSON.stringify` does with it too. Encoding `-0` against an enum that lists `0` normalizes the same way, since member lookup matches `-0` to `0`. A field that has to tell `-0` from `0` needs a float — `float64` carries the sign bit — or a string.
+
+Normalizing is the exception here, not the rule: `-0` as an [enum member or literal](/schemas/rejected-shapes/) is refused when the codec is built, because there the value *is* the schema and a member that cannot survive its own round trip has no index worth giving it.
 
 ## Floats
 
@@ -83,6 +87,8 @@ One discriminator byte, then the value if present.
 null -> [0]
 5    -> [1, 5]
 ```
+
+A marker over a shape that already holds `null` — `z.any()`, `z.null()`, an enum with a `null` member, or a second `.nullable()` — is dropped when the codec is built, so no payload carries two ways to spell one `null`. The dropped marker is not in the [fingerprint](/versioning/schema-evolution/) either: two schemas that write the same bytes derive the same fingerprint.
 
 ## Arrays
 

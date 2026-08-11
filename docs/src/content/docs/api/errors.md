@@ -80,7 +80,7 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 | `Required property "x" has no schema` | `required` names a property absent from `properties` |
 | `Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported` | a default or widening refinement makes the sides differ |
 | `Standard Schema provides validation but not structure; pass a Standard JSON Schema implementation as the second argument` | Valibot, Zod < 4.2, ArkType < 2.1.28 |
-| `This schema already decodes to null; wrapping it in nullable() would give null two encodings` | `m.literal(null).nullable()`, or a second null marker over one already reachable |
+| `This schema already decodes to null; wrapping it in nullable() would give null two encodings` | `m.literal(null).nullable()`, or a second null marker over one already reachable. Never from a vendor schema — `compile()` drops a redundant wrapper instead of reaching this |
 | `This schema already decodes to undefined; wrapping it in optional() would give undefined two encodings` | a second presence marker over one already reachable |
 | `fingerprinted() needs a codec built from a Standard JSON Schema; compile() returns one, the low-level m API does not` | `fingerprinted(m.object(...))` |
 | `Fingerprint bytes must be 1, 2, 3 or 4, received X` | out-of-range `bytes` option |
@@ -116,7 +116,7 @@ compile(), optionally wrapped by fingerprinted()
 | `Unknown object property "x"` | an extra property where the vendor left `additionalProperties` absent: ArkType by default, Valibot's `object` and `looseObject` |
 | `Expected a lowercase UUID, received X` | an uppercase or malformed UUID under a `format: "uuid"` schema; 16 bytes have no case to remember |
 | `Expected an array with N items` | a length that disagrees with `minItems === maxItems` |
-| `Cannot encode X as a dynamic value` | a `Date`, `Map`, `Set`, class instance, function or symbol under `z.any()` |
+| `Cannot encode X as a dynamic value` | a `Date`, `Map`, `Set`, class instance, function or symbol under `z.any()`. A *plain* object is fine whatever realm minted it — a `node:vm` context, an iframe, a worker |
 | `Dynamic value nests deeper than 64` | a dynamic value 65 levels deep, or an object that holds itself |
 | `Record is too large` | a record with more than 1,000,000 entries |
 | `No union branch has "kind" = X` | a discriminant value no branch declares |

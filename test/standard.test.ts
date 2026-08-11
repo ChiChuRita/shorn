@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { type } from "arktype";
 import { describe, expect, it } from "vitest";
 import * as v from "valibot";
@@ -95,6 +96,20 @@ describe("Standard Schema adapter", () => {
       expect(() => compile(z.uuid()).encode(uuid.toUpperCase())).toThrow(/Expected a lowercase UUID/);
     });
 
+    it("reads an exclusive lower bound as unsigned, like an inclusive one", () => {
+      // `.positive()` emits `exclusiveMinimum: 0` where `.nonnegative()` emits
+      // `minimum: 0`. Reading only the second sends the commonest non-negative integer
+      // schema down the zigzag path, which crosses every varint boundary at half the
+      // value: 100 costs one byte unsigned and two signed.
+      for (const Count of [compile(z.int().positive()), compile(z.int().nonnegative())]) {
+        expect(Count.encode(100)).toHaveLength(1);
+        expect(Count.decode(Count.encode(100))).toBe(100);
+      }
+
+      // A bound that still admits negatives stays signed, which is what pays for them.
+      expect(compile(z.int().gt(-5)).encode(100)).toHaveLength(2);
+    });
+
     it("indexes a numeric enum instead of writing a float", () => {
       const Status = compile(z.enum({ Ok: 200, Missing: 404 }));
       expect(Status.encode(404)).toHaveLength(1);
@@ -186,6 +201,45 @@ describe("Standard Schema adapter", () => {
       const cyclic: Record<string, unknown> = {};
       cyclic.self = cyclic;
       expect(() => Any.encode(cyclic)).toThrow(/nests deeper than/);
+    });
+
+    it("encodes a plain object minted in another realm, as the byte path already did", () => {
+      // `Object.prototype` is realm-scoped just as `instanceof` is, so a plain object from
+      // a node:vm context, an iframe or a worker was refused as a rich type. A rich type
+      // stays refused: its prototype *sits on* an `Object.prototype` rather than being one.
+      const Any = compile(z.any());
+      const foreign = runInNewContext("({ b: 2, a: [1, null] })") as Record<string, unknown>;
+      expect(Object.getPrototypeOf(foreign)).not.toBe(Object.prototype);
+      expect(Any.decode(Any.encode(foreign))).toEqual({ a: [1, null], b: 2 });
+      // Byte-identical to the local twin, or the realm reached the wire.
+      expect([...Any.encode(foreign)]).toEqual([...Any.encode({ b: 2, a: [1, null] })]);
+      expect(() => Any.encode(runInNewContext("new Date()") as object)).toThrow(/dynamic value/);
+      expect(() => Any.encode(runInNewContext("new Map()") as object)).toThrow(/dynamic value/);
+      expect(() => Any.encode(runInNewContext("new (class Point {})()") as object))
+        .toThrow(/dynamic value/);
+    });
+
+    it("takes an integer-like property name, which enumerates out of canonical order", () => {
+      // `Object.keys` hoists "2" ahead of "10" while canonical order is the reverse, which
+      // looks like it should need a special case and does not: a field is read by key, so
+      // only the sorted order reaches the wire. A status-code map is an ordinary object.
+      const Codes = compile(
+        z.object({ "2": z.string(), "10": z.string(), "1": z.string().optional() }),
+      );
+      const value = { "1": "c", "2": "b", "10": "a" };
+      expect(Codes.decode(Codes.encode(value))).toEqual(value);
+      // Insertion order must not reach the bytes, with the optional present or absent.
+      expect([...Codes.encode(value)]).toEqual([...Codes.encode({ "10": "a", "2": "b", "1": "c" })]);
+      expect([...Codes.encode({ "2": "b", "10": "a" })])
+        .toEqual([...Codes.encode({ "10": "a", "2": "b" })]);
+
+      // And through the open-object path, where the extras record sorts separately from
+      // the declared fields.
+      const Open = compile(z.object({ "2": z.string(), "10": z.string() }).catchall(z.string()));
+      const open = { "2": "b", "3": "y", "10": "a", zz: "x" };
+      expect(Open.decode(Open.encode(open))).toEqual(open);
+      expect([...Open.encode(open)])
+        .toEqual([...Open.encode({ zz: "x", "10": "a", "3": "y", "2": "b" })]);
     });
 
     it("encodes a discriminated union as a branch index", () => {
@@ -305,6 +359,33 @@ describe("Standard Schema adapter", () => {
       // And it inherits the null-literal rules: zero width, no second null marker.
       expect(compile(z.null()).encode(null)).toHaveLength(0);
       expect(() => compile(z.null()).nullable()).toThrow(/already decodes to null/);
+    });
+
+    it("drops a nullable marker over a shape that already holds null", () => {
+      // Tag 0 of a dynamic value is already `null`, so the marker would be a byte meaning
+      // nothing — and refusing to add it surfaced as "already decodes to null", which read
+      // as an accusation about the caller's `.nullable()` rather than about this compiler's.
+      const Any = compile(z.any().nullable());
+      for (const value of [null, 1, "x", { a: 1 }]) {
+        expect(Any.decode(Any.encode(value))).toEqual(value);
+      }
+      expect([...Any.encode(null)]).toEqual([...compile(z.any()).encode(null)]);
+
+      // `z.null().nullable()` writes `anyOf: [{type:"null"}, {type:"null"}]` and
+      // `z.literal(null).nullable()` writes the same with a `const`: every branch one value.
+      for (const Nothing of [compile(z.null().nullable()), compile(z.literal(null).nullable())]) {
+        expect(Nothing.encode(null)).toHaveLength(0);
+        expect(Nothing.decode(Nothing.encode(null))).toBeNull();
+      }
+
+      // The nested case never threw — `Schema.nullable()` collapses a repeated marker — but
+      // it collapsed below the signature, so these two wrote identical bytes under
+      // different fingerprints and rejected each other's payloads.
+      const nested = z.union([z.literal(null), z.literal("a")]).nullable();
+      const flat = z.union([z.literal(null), z.literal("a")]);
+      expect([...compile(nested).encode("a")]).toEqual([...compile(flat).encode("a")]);
+      expect(fingerprinted(compile(nested)).fingerprintHex)
+        .toBe(fingerprinted(compile(flat)).fingerprintHex);
     });
 
     it("still bounds a fixed count against the input it would have to fill", () => {

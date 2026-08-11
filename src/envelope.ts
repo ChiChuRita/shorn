@@ -39,9 +39,7 @@ function fingerprintOf(signature: string, retain: number): Uint8Array {
 }
 
 function hex(bytes: Uint8Array): string {
-  let out = "";
-  for (const byte of bytes) out += byte.toString(16).padStart(2, "0");
-  return out;
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export class FingerprintedSchema<T> extends Schema<T> {

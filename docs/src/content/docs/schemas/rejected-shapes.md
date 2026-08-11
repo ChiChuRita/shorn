@@ -97,6 +97,8 @@ Two markers for the same value would make `[0]` and `[1, 0]` decode alike, so di
 
 Drop the redundant wrapper. Mixing the two once is supported and meaningful: `m.string().optional().nullable()` tells absent apart from null.
 
+A **vendor schema** that spells the same thing twice is not this error. `z.any().nullable()`, `z.null().nullable()` and `z.literal(null).nullable()` all compile: `compile()` sees that the shape under the wrapper already holds `null` and drops the wrapper, so the codec writes exactly what the inner shape alone would write. This error is about a marker you stacked yourself — on an `m` schema, or on a codec `compile()` already returned.
+
 ## Missing structural interface
 
 > Standard Schema provides validation but not structure; pass a Standard JSON Schema implementation as the second argument

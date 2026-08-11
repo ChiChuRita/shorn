@@ -159,6 +159,24 @@ function encodePath(schema: Schema<unknown>, value: unknown): string | undefined
 }
 
 /**
+ * The first child whose encode throws, into a throwaway Writer. Every container's
+ * `_failingChild` is this loop; only the children differ. Reached solely from
+ * `encodePath`, after an encode has already failed, so the array each caller builds
+ * costs nothing on any live path.
+ */
+function firstFailing(children: Iterable<FailingChild>): FailingChild | undefined {
+  const scratch = new Writer();
+  for (const child of children) {
+    try {
+      child.schema._encode(scratch, child.value);
+    } catch {
+      return child;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Folds the path into the message. `path` doubles as the done-marker, so a re-entrant
  * encode cannot append a second, less precise path over the first.
  */
@@ -1041,15 +1059,15 @@ export class ArraySchema<T> extends Schema<T[]> {
 
   override _failingChild(value: unknown): FailingChild | undefined {
     if (!Array.isArray(value)) return undefined;
-    const scratch = new Writer();
-    for (let index = 0; index < value.length; index++) {
-      try {
-        this.item._encode(scratch, value[index]);
-      } catch {
-        return { schema: this.item, segment: `[${index}]`, value: value[index] };
-      }
-    }
-    return undefined;
+    // `Array.from`, not `.map`: map skips a sparse array's holes, and a hole is one of
+    // the values that gets here — `_encode` writes it as `undefined` and throws.
+    return firstFailing(
+      Array.from(value, (item, index) => ({
+        schema: this.item,
+        segment: `[${index}]`,
+        value: item,
+      })),
+    );
   }
 
   _decode(reader: Reader): T[] {
@@ -1105,15 +1123,13 @@ export class RecordSchema<T> extends Schema<Record<string, T>> {
   override _failingChild(value: unknown): FailingChild | undefined {
     if (typeof value !== "object" || value === null) return undefined;
     const record = value as Record<string, unknown>;
-    const scratch = new Writer();
-    for (const key of canonicalKeyOrder(Object.keys(record))) {
-      try {
-        this.value._encode(scratch, record[key] as T);
-      } catch {
-        return { schema: this.value, segment: key, value: record[key] };
-      }
-    }
-    return undefined;
+    return firstFailing(
+      canonicalKeyOrder(Object.keys(record)).map((key) => ({
+        schema: this.value,
+        segment: key,
+        value: record[key],
+      })),
+    );
   }
 
   _decode(reader: Reader): Record<string, T> {
@@ -1302,8 +1318,22 @@ export class DynamicSchema extends Schema<unknown> {
         }
         // Anything with a prototype of its own is a rich type wearing an object's shape
         // — a Date, a Map, a class instance — and would go on the wire as `{}`.
-        const prototype = Object.getPrototypeOf(value) as unknown;
-        if (prototype !== Object.prototype && prototype !== null) break;
+        //
+        // The third test is realm tolerance, for `isUint8Array`'s reason: a plain object
+        // from a `node:vm` context, an iframe or a worker carries *that* realm's
+        // `Object.prototype`, which fails `!==` here and was refused rather than encoded.
+        // Every realm's `Object.prototype` is an object whose own prototype is null,
+        // while a rich type's never is — `Date.prototype` and a class's `prototype` both
+        // sit on `Object.prototype` — so one more step separates them. It runs only once
+        // the two cheap identity checks have missed, so a same-realm object pays nothing.
+        const prototype = Object.getPrototypeOf(value) as object | null;
+        if (
+          prototype !== Object.prototype &&
+          prototype !== null &&
+          Object.getPrototypeOf(prototype) !== null
+        ) {
+          break;
+        }
         writer.byte(7);
         return this.nested(() => this.entries._encode(writer, value as Record<string, unknown>));
       }
@@ -1380,28 +1410,21 @@ export class TupleSchema<S extends readonly Schema<unknown>[]> extends Schema<Tu
     this.tail?._encode(writer, value.slice(fixed));
   }
 
+  /**
+   * Rest elements are numbered from the tuple's start, not the rest's own — handing
+   * them to `this.tail` would report `[0]` for what the caller wrote at `[3]`. Indexing
+   * past `items` into `rest` is what keeps that one walk rather than two.
+   */
   override _failingChild(value: unknown): FailingChild | undefined {
     if (!Array.isArray(value)) return undefined;
-    const scratch = new Writer();
-    for (let index = 0; index < this.items.length; index++) {
-      try {
-        this.items[index]!._encode(scratch, value[index]);
-      } catch {
-        return { schema: this.items[index]!, segment: `[${index}]`, value: value[index] };
-      }
-    }
-    // Walked here rather than handed to the tail, which would report a rest element's
-    // position within the rest — `[0]` for what the caller wrote at `[3]`.
-    if (this.rest !== undefined) {
-      for (let index = this.items.length; index < value.length; index++) {
-        try {
-          this.rest._encode(scratch, value[index]);
-        } catch {
-          return { schema: this.rest, segment: `[${index}]`, value: value[index] };
-        }
-      }
-    }
-    return undefined;
+    const length = this.rest === undefined ? this.items.length : value.length;
+    return firstFailing(
+      Array.from({ length }, (_, index) => ({
+        schema: this.items[index] ?? this.rest!,
+        segment: `[${index}]`,
+        value: value[index] as unknown,
+      })),
+    );
   }
 
   _decode(reader: Reader): TupleOutput<S> {
@@ -1564,11 +1587,14 @@ class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     private readonly tail?: Schema<Record<string, unknown>>,
   ) {
     super();
+    // Integer-like keys need no special case, though it looks as though they might:
+    // `Object.keys` hoists them ahead of the string keys in ascending numeric order, so
+    // `{"2":…,"10":…}` enumerates as `2,10` where this sorts to `10,2`. Only the sorted
+    // order reaches the wire — a field is read by key, never by enumeration — so the
+    // bytes are canonical either way, including for an absent optional's bitmap slot and
+    // for an open object's extras record. A refusal stood here until it was measured and
+    // found to reject `{"200":…,"404":…}` for nothing.
     const keys = canonicalKeyOrder(Object.keys(shape));
-    const numericKey = keys.find((key) => /^(0|[1-9]\d*)$/.test(key));
-    if (numericKey !== undefined) {
-      throw new EncodeError(`Numeric object key ${numericKey} is not supported`);
-    }
     let optionalIndex = 0;
     this.fields = keys.map((key) => {
       const declared = shape[key]!;
@@ -1662,10 +1688,11 @@ class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
 
     for (const field of this.fields) {
       if (field.optionalIndex >= 0) {
-        const present =
-          (bitmap[field.optionalIndex >> 3]! & (1 << (field.optionalIndex & 7))) !== 0;
-        if (present) {
-          field.schema._encode(writer, optionalValues[field.optionalIndex]);
+        // The bit above was set from exactly this test, so read the value rather than
+        // shifting the answer back out of the bitmap.
+        const fieldValue = optionalValues[field.optionalIndex];
+        if (fieldValue !== undefined) {
+          field.schema._encode(writer, fieldValue);
         }
       } else {
         field.schema._encode(writer, source[field.key]);
@@ -1720,17 +1747,11 @@ class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
   override _failingChild(value: unknown): FailingChild | undefined {
     if (typeof value !== "object" || value === null) return undefined;
     const record = value as Record<string, unknown>;
-    const scratch = new Writer();
-    for (const field of this.fields) {
-      const fieldValue = record[field.key];
-      if (field.optionalIndex >= 0 && fieldValue === undefined) continue;
-      try {
-        field.schema._encode(scratch, fieldValue);
-      } catch {
-        return { schema: field.schema, segment: field.key, value: fieldValue };
-      }
-    }
-    return undefined;
+    return firstFailing(
+      this.fields
+        .filter((field) => field.optionalIndex < 0 || record[field.key] !== undefined)
+        .map((field) => ({ schema: field.schema, segment: field.key, value: record[field.key] })),
+    );
   }
 
   private ownFields(record: Record<string, unknown>): Record<string, unknown> {
