@@ -1,13 +1,22 @@
 ---
 import Default from "@astrojs/starlight/components/Head.astro";
+import { getCollection } from "astro:content";
 
 const llmsUrl = `${import.meta.env.BASE_URL}llms.txt`;
+
+// Advertise this page's markdown twin, per llms.txt v2. Derived from the pathname and
+// then checked against the real ids, so the 404 route does not claim a twin it has not
+// got — it reaches this component like any other page.
+const ids = new Set((await getCollection("docs")).map((entry) => entry.id));
+const slug = Astro.url.pathname.replace(/^\/+|\/+$/g, "");
+const mdUrl = ids.has(slug) ? `${import.meta.env.BASE_URL}${slug}.md` : null;
 ---
 
-<Default {...Astro.props}>
-  <link rel="alternate" type="text/plain" href={llmsUrl} title="LLMs.txt" />
-  <slot />
-</Default>
+{/* Siblings, not children: Starlight's Head renders `starlightRoute.head` and has no
+    slot, so anything passed inside it is dropped without warning. */}
+<Default {...Astro.props} />
+{mdUrl && <link rel="alternate" type="text/markdown" href={mdUrl} title="Markdown" />}
+<link rel="alternate" type="text/markdown" href={llmsUrl} title="LLMs.txt" />
 <script is:inline>
   // Dark-only docs: pin the Starlight theme before its ThemeProvider reads it.
   localStorage.setItem("starlight-theme", "dark");

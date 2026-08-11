@@ -10,6 +10,11 @@ export default defineConfig({
       plugins: [
         starlightThemeNext(),
         starlightLlmsTxt({
+          // llms-small.txt only strips note/tip asides and whitespace by default, and
+          // these docs have almost none of either — it came out within 10% of the full
+          // file, which is no choice at all. Abridged here means "how to use shorn",
+          // dropping the pages that argue for it or measure it.
+          exclude: ["comparisons", "performance/**"],
           details:
             "Use these docs as the primary source for shorn's current API, wire format, and measured numbers.\n\nRecommended reading order:\n- Start with Getting Started and Core Concepts for the mental model\n- Use Schemas and Wire Format to find out what encodes and to what bytes\n- Use Versioning before storing or queueing any payload\n- Use API for signatures, and Performance for the measurements behind every claim",
           customSets: [
