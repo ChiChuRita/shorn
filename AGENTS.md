@@ -68,17 +68,14 @@ measurement is what justified the code, a measurement is what should retire it �
 
 ## Submitting a change
 
-Include a changeset for anything a user of the package could notice:
+Say in the PR description what a user of the package would notice, and classify it by
+effect on users rather than by diff size — new API is a minor, a fix that keeps the same
+bytes is a patch, and anything that changes the bytes or breaks existing payloads is
+breaking, however small the diff. That note becomes the release entry, so say *why* as
+well as what. Changes confined to `bench/`, `docs/`, or CI need no note.
 
-```sh
-pnpm changeset
-```
-
-Pick the bump by effect on users, not by diff size — new API is a minor, a fix that
-keeps the same bytes is a patch, and anything that changes the bytes or breaks existing
-payloads is breaking, however small the diff. Say what changed and *why* in the
-changeset; it becomes the release notes. Changes confined to `bench/`, `docs/`, or CI
-need no changeset.
+There is no changeset step. shorn is a single package on a hand-cut release, so the
+changelog is written at release time from the commits.
 
 Tests are expected with a behaviour change. Match the file that already covers the area
 rather than adding a new one.
