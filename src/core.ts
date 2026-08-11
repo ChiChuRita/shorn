@@ -10,13 +10,14 @@ const SLICE_COPY_LIMIT = 16;
 
 /**
  * The one total order behind every canonical wire decision. UTF-16 code-unit order,
- * identical to `Array.prototype.sort`'s default comparator — swapping in
- * `localeCompare`, `Intl.Collator`, code points or case folding changes the bytes of
+ * which is `Array.prototype.sort`'s default and the reason no comparator is passed —
+ * every caller sorts strings, where the default's string coercion is a no-op. Swapping
+ * in `localeCompare`, `Intl.Collator`, code points or case folding changes the bytes of
  * every object and every string enum. Named members only; tuple and array elements
  * are positional.
  */
 export function canonicalKeyOrder(keys: readonly string[]): string[] {
-  return [...keys].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+  return [...keys].sort();
 }
 
 /** Every scalar an `enum` member may be. JSON Schema allows no others. */
@@ -270,8 +271,8 @@ export class Writer {
   string(value: string): void {
     // Short ASCII in one pass, speculatively: under 128 code units the length varint is
     // one byte whatever the UTF-8 length turns out to be, so write it before it is
-    // confirmed and rewind on the first unit at or above 0x80. Timings in
-    // .changeset/tidy-hounds-smile.md.
+    // confirmed and rewind on the first unit at or above 0x80. `bench/string-threshold.mjs`
+    // is what measures the gate.
     const units = value.length;
     if (units < 0x80) {
       this.ensure(units + 1);
