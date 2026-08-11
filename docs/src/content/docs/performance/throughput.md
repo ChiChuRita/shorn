@@ -3,7 +3,7 @@ title: Throughput
 description: Encode and decode benchmarks against JSON and schema-based binary codecs.
 ---
 
-shorn is faster than byte-producing JSON in every measured fixture. Against the binary codecs, it leads on record-shaped data. It does **not** lead on document-shaped data: a payload made of many separate strings is decoded faster by msgpackr's `bundleStrings` mode, whatever alphabet those strings are in.
+shorn is faster than byte-producing JSON in every measured fixture. Against the binary codecs it leads on record-shaped data. It does **not** lead on document-shaped data: a payload made of many separate strings is decoded faster by msgpackr's `bundleStrings` mode, whatever alphabet those strings are in.
 
 ## Against JSON
 
@@ -17,13 +17,13 @@ shorn is faster than byte-producing JSON in every measured fixture. Against the 
 | 100-event batch | **100.1k** | 36.3k | **116.3k** | 21.2k |
 | Person, validated | **8.93M** | 3.69M | **12.07M** | 3.54M |
 
-Across these fixtures, shorn is up to 6.2× faster to encode and up to 14.5× faster to decode. The ASCII payloads also use as little as 23% of JSON's bytes; the Unicode payload uses 53%.
+Across these fixtures shorn is up to 6.2× faster to encode and up to 14.5× faster to decode. The ASCII payloads also use as little as 23% of JSON's bytes; the Unicode payload uses 53%.
 
-`JSON.stringify` to a string reaches 10.82M encodes/s for Person. That baseline does less work because it stops at a JavaScript string rather than producing bytes.
+`JSON.stringify` to a string reaches 10.82M encodes/s for Person. That baseline does less work, because it stops at a JavaScript string rather than producing bytes.
 
 ## Against binary codecs
 
-Three msgpackr modes exist and this table compares against one of them. `bundleStrings` is measured in the document section below, where it wins decode outright.
+Three msgpackr modes exist; this table compares against one. `bundleStrings` is measured in the document section below, where it wins decode outright.
 
 | Fixture | Op | shorn | Avro | SchemaPack | msgpackr records |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -71,19 +71,17 @@ The codecs share one benchmark process, so small margins can move between runs. 
 | Zod + JSON string | 35 | 6.42M | 4.09M |
 | Zod + JSON bytes | 35 | 3.69M | 3.54M |
 
-Validation is a large part of end-to-end cost. On the Person fixture, the raw codec runs at 25.16M encodes/s and 67.55M decodes/s; adding Zod reduces those figures to 8.93M and 12.07M.
+Validation is a large part of end-to-end cost. On the Person fixture the raw codec runs at 25.16M encodes/s and 67.55M decodes/s; adding Zod reduces those to 8.93M and 12.07M.
 
-Between services you own, `unchecked(compile(schema))` writes the same bytes at the raw-codec figures. It gives up every refinement in exchange, on both sides — see [Skipping Validation](/core-concepts/validation/#skipping-validation).
-
-## Runtime behavior
-
-Eligible object schemas use specialized runtime-generated encode and decode functions. **Decoding is generated for schemas with optional fields too** — each optional's position in the presence bitmap is fixed by the schema, so it compiles to a constant mask test. Encoding still takes the interpreted path when a schema has optional fields, as do both directions for a `__proto__` field, an open object, and an optional named after an `Object.prototype` member. A strict Content Security Policy that blocks `new Function` also uses the interpreted path, with identical bytes and results. See [Compilation and Caching](/core-concepts/compile-and-caching/).
+Between services you own, `unchecked(compile(schema))` writes the same bytes at the raw-codec figures, giving up every refinement on both sides in exchange — see [Skipping Validation](/core-concepts/validation/#skipping-validation).
 
 ## Methodology
 
 Tests ran on Node v22.23.1, an Apple M4 Pro, and macOS arm64. Small-fixture results are the median of seven samples of about 180 ms after warm-up. The [100,000-event](/performance/size/#fixtures) results use three single-operation samples, because one operation already processes the whole value. Every codec must round-trip to the same logical value.
 
 Schema construction is excluded and measured separately as [cold setup](/performance/footprint/). Raw tests use each codec's normal API with SchemaPack validation disabled. Protobuf.js includes `fromObject` and `toObject` so it exposes the same string-enum API.
+
+Eligible object schemas use specialized runtime-generated encode and decode functions; a strict Content Security Policy falls back to the interpreted path with identical bytes and results. See [Compilation and Caching](/core-concepts/compile-and-caching/#runtime-specialization) for which schemas take which path.
 
 ```sh
 pnpm bench

@@ -48,13 +48,13 @@ An event is one small application record: a few numbers, a flag, a nested actor,
 | cbor-x plain | 26 | 50 | 122 | 11,972 |
 | JSON | 35 | 58 | 163 | 16,148 |
 
-shorn is smallest or tied on every fixture. Two caveats apply: bare shorn, Avro, and Protobuf payloads require the correct schema outside the payload, and shared-record sizes exclude their record table.
+shorn is smallest or tied on every fixture, with two caveats: bare shorn, Avro, and Protobuf payloads require the correct schema outside the payload, and shared-record sizes exclude their record table.
 
-The Unicode row shows where the savings come from. shorn removes field names, tags, and syntax, but it does not shrink string content. Payloads dominated by structure and numbers can be about 75% smaller than JSON. Payloads dominated by free text see smaller gains.
+The Unicode row shows where the savings come from. shorn removes field names, tags, and syntax, but does not shrink string content. Payloads dominated by structure and numbers can be about 75% smaller than JSON; payloads dominated by free text see smaller gains.
 
 ## Compressed, 100,000 events
 
-Roughly 4.2 MB of shorn bytes, against 16 MB of JSON, a batch large enough that compression is a real decision rather than a rounding error.
+Roughly 4.2 MB of shorn bytes against 16 MB of JSON — a batch large enough that compression is a real decision rather than a rounding error.
 
 ### Repetitive data
 
@@ -67,7 +67,7 @@ Roughly 4.2 MB of shorn bytes, against 16 MB of JSON, a batch large enough that 
 | Protobuf.js | 5,781,774 | 980,559 | 618,608 |
 | JSON | 16,340,686 | 1,474,952 | 985,919 |
 
-shorn is smallest raw and under gzip. **It is not smallest under Brotli:** msgpackr records are 17% smaller, and SchemaPack is slightly smaller. Brotli compresses their repeated metadata particularly well.
+shorn is smallest raw and under gzip. **It is not smallest under Brotli:** msgpackr records are 17% smaller and SchemaPack is slightly smaller, because Brotli compresses their repeated metadata particularly well.
 
 Compression CPU for the shorn payload: gzip 78.99 ms, gunzip 4.12 ms, Brotli q6 42.19 ms, unbrotli 5.25 ms.
 
@@ -82,20 +82,18 @@ Compression CPU for the shorn payload: gzip 78.99 ms, gunzip 4.12 ms, Brotli q6 
 | Protobuf.js | 8,487,330 | 2,508,528 | **1,943,144** |
 | JSON | 18,996,242 | 3,001,786 | 2,580,139 |
 
-shorn is smallest raw and under gzip, and second under Brotli. Compared with JSON, it is 63% smaller raw, 22% smaller under gzip, and 19% smaller under Brotli. Protobuf compresses best under Brotli in this fixture despite being 21% larger raw.
+shorn is smallest raw and under gzip, and second under Brotli. Against JSON it is 63% smaller raw, 22% smaller under gzip, and 19% smaller under Brotli. Protobuf compresses best under Brotli here despite being 21% larger raw.
 
 Compression CPU: gzip 111.90 ms, gunzip 8.29 ms, Brotli q6 163.15 ms, unbrotli 12.47 ms.
 
-## Compression caveat
-
-shorn is not smallest under every compressor. Brotli makes msgpackr records or Protobuf smaller in these fixtures. shorn is smallest raw and under gzip in both 100,000-event profiles.
+**The caveat, stated plainly:** shorn is not smallest under every compressor. Brotli makes msgpackr records or Protobuf smaller in these fixtures. shorn is smallest raw and under gzip in both 100,000-event profiles.
 
 ## Cutting bytes further
 
 - **Declare non-negative integers.** ZigZag doubles the magnitude, so an `int` crosses every varint boundary at half the value.
 - **Use enums, not free strings**, for closed sets: one varint index against length plus content.
 - **Prefer literals** where a field is constant: zero bytes.
-- **Choose a compact timestamp form.** ISO-8601 is ~25 bytes, epoch millis 6–7. shorn will not choose for you. See [rich types](/schemas/rich-types/).
+- **Choose a compact timestamp form.** ISO-8601 is ~25 bytes, epoch millis 6–7. shorn will not choose for you; see [rich types](/schemas/rich-types/).
 - **Choose framing deliberately.** Use a 4-byte fingerprint for persistent data. Pinned RPC can stay bare, and a fingerprint carried in a header need not be repeated in the payload.
 
 ## Reproducing

@@ -40,14 +40,14 @@ export default defineConfig({
             {
               label: "Wire Format",
               description:
-                "Canonical field order, presence bitmaps, varints, ZigZag, enum indexes, and the low-level m API.",
+                "Canonical field order, presence bitmaps, varints, ZigZag, and enum indexes, byte by byte.",
               paths: ["wire-format/**"],
             },
             {
               label: "Comparisons",
               description:
                 "How shorn relates to JSON, to schema-driven codecs (Avro, Protobuf, SchemaPack), and to schemaless ones (MessagePack, CBOR).",
-              paths: ["comparisons/**"],
+              paths: ["comparisons"],
             },
             {
               label: "Performance and Safety",
@@ -105,7 +105,6 @@ export default defineConfig({
             { label: "Installation", slug: "getting-started/installation" },
             { label: "Quick Start", slug: "getting-started/quick-start" },
             { label: "Using Payloads", slug: "getting-started/using-payloads" },
-            { label: "Why shorn?", slug: "getting-started/why-shorn" },
           ],
         },
         {
@@ -150,25 +149,12 @@ export default defineConfig({
           ],
         },
         {
-          label: "Wire Format",
-          items: [
-            { label: "Byte Layout", slug: "wire-format/layout" },
-            { label: "Low-Level m API", slug: "wire-format/low-level-api" },
-          ],
+          label: "Byte Layout",
+          slug: "wire-format/layout",
         },
         {
           label: "Comparisons",
-          items: [
-            { label: "shorn vs JSON", slug: "comparisons/json" },
-            {
-              label: "vs Avro, Protobuf, SchemaPack",
-              slug: "comparisons/schema-codecs",
-            },
-            {
-              label: "vs MessagePack, CBOR",
-              slug: "comparisons/schemaless-codecs",
-            },
-          ],
+          slug: "comparisons",
         },
         {
           label: "Performance",

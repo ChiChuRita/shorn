@@ -3,7 +3,7 @@ title: m Builders
 description: Reference for the low-level wire builders, Reader and Writer, and Infer.
 ---
 
-`m` builds a codec directly from the wire format without a validation library. It is an escape hatch, not a replacement for your validator. See [Low-Level m API](/wire-format/low-level-api/).
+`m` builds a codec directly from the wire format, without Standard Schema or JSON Schema. Reach for it when no validation schema exists, when you need `m.bytes()` or `m.float32()`, or when you are writing a protocol fixture or custom codec.
 
 ```ts
 import { m, type Infer } from "shorn";
@@ -11,6 +11,8 @@ import { m, type Infer } from "shorn";
 const Point = m.object({ x: m.int(), y: m.int() });
 type Point = Infer<typeof Point>; // { x: number; y: number }
 ```
+
+It is an escape hatch, not a replacement for your validator: `m` checks only what encoding the wire format requires, and implements no refinements, business rules, or general validation. `fingerprinted()` cannot wrap an `m` codec, because there is no structural signature to hash.
 
 ## Primitives
 

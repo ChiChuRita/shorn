@@ -3,8 +3,6 @@ title: Installation
 description: Install shorn alongside any Standard Schema validator. Zod and ArkType need nothing extra; Valibot needs its JSON Schema converter.
 ---
 
-shorn has one dependency, `@standard-schema/spec`, which is types-only.
-
 ```sh
 npm install shorn zod
 # or
@@ -13,7 +11,7 @@ npm install shorn arktype
 npm install shorn valibot @valibot/to-json-schema
 ```
 
-shorn is ESM-only and has no Node built-ins. Its `neutral` platform target runs unchanged in browsers, workers, Bun, and Deno.
+shorn has one dependency, `@standard-schema/spec`, which is types-only. It is ESM-only and imports no Node built-in, so its `neutral` platform target runs unchanged in browsers, workers, Bun, and Deno.
 
 ## Which validator needs what
 
@@ -29,9 +27,9 @@ Any other validator that implements both interfaces works without an adapter.
 
 ## Requirements
 
-- **Node 20+**, or any runtime with `DataView`, `Uint8Array`, `TextDecoder` (with `fatal`) and `TextEncoder`, including `encodeInto`, which some React Native polyfills omit.
-- **TypeScript 5.x** for typed results: `decode` returns your schema's type instead of `unknown`.
-- **ESM.** There is no CommonJS build, but `require("shorn")` still works from Node 20.19 and 22.12 on, where `require` loads an ES module directly. Below those versions, a CommonJS caller needs `await import("shorn")`.
+**Node 20+**, or any runtime with `DataView`, `Uint8Array`, `TextDecoder` (with `fatal`) and `TextEncoder`, including `encodeInto`, which some React Native polyfills omit. **TypeScript 5.x** for typed results, so `decode` returns your schema's type instead of `unknown`.
+
+There is no CommonJS build, but `require("shorn")` still works from Node 20.19 and 22.12 on, where `require` loads an ES module directly. Below those versions, a CommonJS caller needs `await import("shorn")`.
 
 ## Verify
 
@@ -46,4 +44,4 @@ bytes.length;          // 5
 decode(Person, bytes); // { name: "Ada", age: 36 }
 ```
 
-An `EncodeError` here means the schema uses an unsupported shape. [Rejected Shapes](/schemas/rejected-shapes/) lists each unsupported shape and what to use instead.
+An `EncodeError` here means the schema uses an unsupported shape. [Rejected Shapes](/schemas/rejected-shapes/) lists each one and what to use instead.

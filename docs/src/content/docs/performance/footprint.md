@@ -5,9 +5,7 @@ description: Bundle size, cold setup, and memory. The wire codec is 5.10 KB gzip
 
 ## Bundle size
 
-These results measure an esbuild-minified browser bundle for each imported codec API. Validation libraries and schema declarations are excluded from every row.
-
-shorn appears twice: `m` is the bare wire codec and the comparable surface, since every other codec here validates nothing; `compile` adds the Standard Schema adapter.
+An esbuild-minified browser bundle for each imported codec API. Validation libraries and schema declarations are excluded from every row. shorn appears twice: `m` is the bare wire codec and the comparable surface, since every other codec here validates nothing; `compile` adds the Standard Schema adapter.
 
 | Codec | Minified | Gzip |
 | --- | ---: | ---: |
@@ -54,7 +52,7 @@ Schema and codec construction plus the first Person encode.
 | Avro / avsc | 68.99 µs |
 | Protobuf.js reflection | 187.75 µs |
 
-shorn starts faster than Avro but slower than SchemaPack. **Most of shorn's time is Zod schema construction**, which applications using Zod already pay. The cost is usually negligible in a long-lived server but can matter in a serverless function that handles one request. Define schemas at module scope so warm invocations reuse them.
+shorn starts faster than Avro but slower than SchemaPack. **Most of shorn's time is Zod schema construction**, which applications using Zod already pay. Usually negligible in a long-lived server; it can matter in a serverless function that handles one request, so define schemas at module scope and warm invocations reuse them.
 
 ## Memory
 
@@ -68,9 +66,7 @@ Steady-state retained memory after repeated forced GC in isolated processes, for
 | msgpackr records | 4.76 MiB | 17.05 MiB | 32.44 MiB | **62.20 MiB** |
 | JSON | 15.58 MiB | 15.58 MiB | **24.03 MiB** | 88.69 MiB |
 
-**Encoding a 4.04 MiB payload retains 4.11 MiB.** Encoded output is an exact-size copy, so retaining it does not retain a larger backing buffer. Internal buffers larger than 64 KiB are released.
-
-Decoded memory is middle of pack, RSS below JSON but above Avro and msgpackr records.
+**Encoding a 4.04 MiB payload retains 4.11 MiB.** Encoded output is an exact-size copy, so retaining it does not retain a larger backing buffer, and internal buffers larger than 64 KiB are released. Decoded memory is middle of pack, RSS below JSON but above Avro and msgpackr records.
 
 ## Runtime portability
 

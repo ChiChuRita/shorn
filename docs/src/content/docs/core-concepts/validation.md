@@ -12,12 +12,7 @@ const back = decode(Person, bytes);   // reads, then validates
 
 These checks are not redundant. The wire format knows that a field is a string; only your schema knows that it must be a non-empty email address under 64 characters.
 
-| Error | Thrown when |
-| --- | --- |
-| `EncodeError` | validation failed on the way in, or the schema cannot be encoded |
-| `DecodeError` | the bytes are malformed, **or** validation failed on the way out |
-
-`DecodeError.offset` is the byte position reached. See [Errors](/api/errors/).
+A failure on the way in is an `EncodeError`, on the way out a `DecodeError` — the same class malformed bytes produce. See [Errors](/api/errors/).
 
 ## Results instead of exceptions
 
@@ -42,9 +37,7 @@ Both take either the Standard Schema or a codec built from it. There are no safe
 
 Nothing shorn does is itself asynchronous: reading and writing bytes is synchronous work with no I/O. The only `await` is your validator's, which is why these are separate functions rather than a `Promise` every caller has to unwrap.
 
-### Async validation and fingerprints
-
-These compose. Pass the fingerprinted codec to the async entry points and the prefix is written and checked exactly as on the sync path:
+Fingerprints compose. Pass the fingerprinted codec to the async entry points and the prefix is written and checked exactly as on the sync path:
 
 ```ts
 const PersonWire = fingerprinted(compile(Person), { bytes: 4 });
@@ -78,15 +71,4 @@ What you keep: every structural check. Bounds on each read, the length limits, t
 
 Keep the validated codec at any boundary you do not own. `unchecked()` is for the hop between your own processes, not for the edge.
 
-## Which entry point
-
-| Situation | Use |
-| --- | --- |
-| Ordinary code | `encode` / `decode` |
-| Untrusted input | `safeEncode` / `safeDecode` |
-| Async refinement | `encodeAsync` / `decodeAsync`, on the schema or a codec |
-| A codec to pass around | `compile` |
-| Stored, queued, version-crossing | `fingerprinted(compile(schema), { bytes: 4 })` |
-| Trusted producer you own, both ends | `unchecked(compile(schema))` |
-
-All of them use the same structural decode path and report the same malformed-input errors.
+Every entry point uses the same structural decode path and reports the same malformed-input errors. [API Overview](/api/overview/) has the table of which one to reach for.

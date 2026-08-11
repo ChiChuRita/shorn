@@ -21,6 +21,8 @@ const back = decode(Person, bytes); // typed and validated
 
 The payload is eight bytes: field names and type tags remain in the schema. See [Byte Layout](/wire-format/layout/) for the exact encoding.
 
+Valibot needs one additional structure argument; Zod and ArkType schemas are passed directly. See [Valibot](/validators/valibot/).
+
 ## Reuse a codec object
 
 ```ts
@@ -30,7 +32,7 @@ PersonWire.encode(person);
 PersonWire.decode(bytes);
 ```
 
-Use `compile` when you want a codec to pass around or store in a registry. The functional API caches the same codec by schema identity.
+Use `compile` when you want a codec to pass around or store in a registry. The functional API caches the same codec by schema identity, so neither form is faster than the other.
 
 ## Store or queue data
 
@@ -52,5 +54,3 @@ const result = safeDecode(Person, bytes);
 if (!result.success) return new Response("Bad request", { status: 400 });
 result.data; // typed
 ```
-
-Valibot requires one additional structure object. See [Valibot](/validators/valibot/). Zod and ArkType schemas can be passed directly.

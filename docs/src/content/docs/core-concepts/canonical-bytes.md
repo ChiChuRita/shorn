@@ -23,7 +23,7 @@ encode(Person, { name: "Grace", age: 45, sex: "F" });
 
 `age` is written first even though it was declared second. The order is derived from field names, so validators and the high- and low-level APIs all produce the same result.
 
-The **encoder** applies the sort. The [`m` API](/wire-format/low-level-api/) cannot override it because canonical field order is a wire-format rule, not a schema option.
+The **encoder** applies the sort. The [`m` API](/api/m/) cannot override it because canonical field order is a wire-format rule, not a schema option.
 
 ## Enum members are sorted too
 

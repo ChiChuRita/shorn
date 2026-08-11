@@ -43,19 +43,13 @@ DecodeError; // .offset
 
 All entry points use the same structural decode path through `Schema.decode`, so they report the same errors.
 
-## Options
+## Options and types
 
 ```ts
 interface FingerprintOptions {
   readonly bytes?: 1 | 2 | 3 | 4; // default 3
 }
-```
 
-The trailing `structure` argument is a `StandardJSONSchemaV1`, required for validators implementing Standard Schema but not Standard JSON Schema: Valibot always, Zod before 4.2, ArkType before 2.1.28.
-
-## Types
-
-```ts
 type SafeResult<T> =
   | { success: true; data: T }
   | { success: false; error: Error };
@@ -66,19 +60,17 @@ type EncodableStandardSchema<In = unknown, Out = In> =
 type Infer<S extends Schema<unknown>> = S["_output"];
 ```
 
+The trailing `structure` argument is a `StandardJSONSchemaV1`, required for validators implementing Standard Schema but not Standard JSON Schema: Valibot always, Zod before 4.2, ArkType before 2.1.28.
+
 `Infer` reads the output type off a low-level `m` codec. For schema-backed codecs use your validator's inference (`z.infer`, `v.InferOutput`, `typeof T.infer`).
 
 Also exported: `Schema`, `OptionalSchema`, `NullableSchema`, `FingerprintedSchema`, `Reader`, `Writer`, `ObjectOutput`, `Shape`, `FingerprintOptions`.
 
-## The three-line version
+## The two-line version
 
 ```ts
 const Person = z.object({ name: z.string(), age: z.int().nonnegative() });
 
-export const wire = compile(Person);                 // pinned RPC
-export const stored = fingerprinted(compile(Person), { bytes: 4 });
+export const wire = compile(Person);                              // pinned RPC
+export const stored = fingerprinted(compile(Person), { bytes: 4 }); // persisted
 ```
-
-## Reference
-
-[Functions](/api/functions/) · [m Builders](/api/m/) · [Errors](/api/errors/)

@@ -10,11 +10,11 @@ description: JSON Schema has no form for these, so every vendor refuses them bef
 | ArkType `Date`, `bigint` | `{ code: "date" }`, `{ code: "domain", domain: "bigint" }` |
 | `z.string().transform(...)` | Zod: *"Transforms cannot be represented"* |
 
-**This is a JSON Schema limitation, not a validator-specific one.** shorn gets structure through Standard JSON Schema, so it cannot encode values that JSON Schema cannot describe. shorn preserves the validator's error and adds guidance for converting the value.
+**This is a JSON Schema limitation, not a validator-specific one.** shorn gets structure through Standard JSON Schema, so it cannot encode values JSON Schema cannot describe. It preserves the validator's own error and appends guidance.
 
 ## The pattern
 
-**shorn encodes a wire-friendly shape. Convert rich values at the application boundary.** In Zod, `z.codec()` can define both conversions:
+**shorn encodes a wire-friendly shape. Convert rich values at the application boundary.** In Zod, `z.codec()` can declare both directions:
 
 ```ts
 const Rich = z.object({
@@ -35,13 +35,9 @@ const bytes = codec.encode(z.encode(Rich, value)); // rich → wire → bytes
 const back = z.decode(Rich, codec.decode(bytes));  // bytes → wire → rich
 ```
 
-Valibot and ArkType transforms do not expose a reverse direction through Standard Schema, so write both conversions explicitly. Use a `Wire` schema for shorn and convert outside it.
+Valibot and ArkType transforms do not expose a reverse direction through Standard Schema, so write both conversions explicitly. Either way, use a `Wire` schema for shorn and convert outside it.
 
-## Why separate conversion is required
-
-- **Standard Schema v1 exposes only `validate` and `jsonSchema`.** It has no reverse operation. `z.encode` is specific to Zod, and calling it would require validator-specific code.
-- **For a Zod codec, `jsonSchema.output()` throws.** `input()` returns the wire shape, while the output is the rich type. shorn needs both sides to agree.
-- **shorn calls the schema's validation direction during both encode and decode.** Supplying `structure` does not make a bidirectional codec work: rich values fail validation as wire values, while wire values are transformed into rich values that the wire codec cannot encode.
+The conversion has to stay separate because Standard Schema v1 exposes only `validate` and `jsonSchema` — there is no reverse operation, and `z.encode` is Zod-specific. Supplying `structure` does not rescue a bidirectional codec either: rich values fail validation as wire values, while wire values are transformed into rich values the wire codec cannot encode. For a Zod codec, `jsonSchema.output()` throws outright, and shorn needs both sides to agree.
 
 ## Choosing a wire form
 
@@ -55,10 +51,8 @@ Valibot and ArkType transforms do not expose a reverse direction through Standar
 | `Set` | `z.array(T)` | count + elements |
 | `undefined` field | `z.optional(T)` | one bit |
 
-An epoch integer is about 20 bytes smaller than an ISO-8601 string. You can choose it in your own codec, but shorn will not convert automatically because a round trip could change the original string representation.
+An epoch integer is about 20 bytes smaller than an ISO-8601 string. Choose it in your own codec if you want it; shorn will not convert automatically, because a round trip could change the original string representation.
 
-The [fingerprint](/versioning/fingerprinting/) identifies only the wire shape. Changing conversion functions without changing that shape does not change the fingerprint.
+The [fingerprint](/versioning/fingerprinting/) identifies only the wire shape, so changing conversion functions without changing that shape does not change it.
 
-## Values with no sensible wire form
-
-Values such as `RegExp`, `URL`, class instances, and functions need an explicit wire representation. Store only the data you need, such as a URL string or a regular expression's source and flags, and convert at the application boundary.
+Values such as `RegExp`, `URL`, class instances, and functions have no sensible wire form at all. Store only the data you need — a URL string, a regular expression's source and flags — and convert at the boundary.
