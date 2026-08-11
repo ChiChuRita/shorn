@@ -595,8 +595,8 @@ const results = {
   // all-required record, the shape the generated codecs are best at. Running shorn
   // through msgpackr's own benchmark on a real document found decode 2.1x behind their
   // shared records, and this suite could not see it. `documentSection` has optional
-  // fields, so it decodes on the interpreted path; the payload is 87% string bytes,
-  // which is content shorn does not shrink and cannot decode faster than the platform.
+  // fields and heterogeneous elements, and the payload is 87% string bytes — content
+  // shorn does not shrink and cannot decode faster than the platform.
   document: benchmarkFixture(
     "Document — raw codec, schemaless comparison only",
     "document",

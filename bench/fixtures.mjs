@@ -34,8 +34,10 @@ export const batch = m.array(event);
  * records on data of this shape while our suite showed decode leading everything, and
  * the suite could not see it because no fixture here had:
  *
- *   - **optional fields**, which make the field set dynamic and so keep an object on
- *     the interpreted decode path — no `new Function` record decoder at all;
+ *   - **optional fields**, which make the field set dynamic. When this fixture was added
+ *     that kept an object off the generated decoder entirely; decoding is generated for
+ *     them now, since each optional's bitmap bit is fixed by the schema and compiles to
+ *     a constant mask test. Encoding is still interpreted here;
  *   - **heterogeneous array elements**, where the same array holds objects with four
  *     different key sets, which is normal in real documents and absent above;
  *   - **string-dominated content**: three quarters of that payload was string bytes,
