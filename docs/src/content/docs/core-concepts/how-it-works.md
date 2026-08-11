@@ -23,10 +23,15 @@ Both interfaces are vendor-neutral — Standard Schema supplies `validate(value)
 The JSON Schema becomes a `WireShape`, a small closed union:
 
 ```
-boolean | float64 | int | string | uint
-| { array } | { tuple } | { object, rejectUnknown }
-| { enum }  | { literal } | { nullable }
+any | boolean | float64 | int | string | uint | uuid
+| { array } | { tuple } | { object, rejectUnknown } | { record }
+| { enum }  | { literal } | { nullable } | { ref }
+| { union, on, cases } | { union, types }
 ```
+
+The two union variants are the two ways a branch can be named without trying it: `on`/`cases` is a discriminant property, `types` is the JSON type of the value. A union whose branches could overlap has neither and is [refused](/schemas/rejected-shapes/#overlapping-unions).
+
+A `{ ref }` is the back-edge of a cycle, and the only shape that is not self-contained: it indexes a definition table the document carries beside its root shape. The table appears only when a `$ref` actually closes a cycle — a `$ref` reached twice but never through itself is inlined — so no non-recursive schema's signature moved when recursion was added.
 
 Two details drive the choices that matter:
 
@@ -40,6 +45,8 @@ Both `jsonSchema.input()` and `.output()` are converted and compared; a schema w
 The `WireShape` becomes a tree of `Schema` objects, the same objects the [`m` API](/api/m/) builds by hand, which is why the two produce identical bytes.
 
 Each node carries a `_minWidth`: the fewest bytes any value of that shape can occupy. That is what lets an array refuse an impossible element count *before* allocating. See [Hostile Input](/hostile-input/).
+
+A cycle is built definitions first, as nodes that exist before the schemas they stand for do — every container reads its children's `_minWidth` in its own constructor, so a back-edge has to be answerable before the cycle it closes is built. Those nodes are also where nesting depth is counted, since depth comes from the payload there rather than from the schema.
 
 shorn also stores a canonical string signature: the `WireShape` as JSON without `rejectUnknown`. [`fingerprinted()`](/versioning/fingerprinting/) hashes this signature. Removing `rejectUnknown` lets equivalent Zod and ArkType schemas agree even though they handle extra properties differently. The `m` API has no signature, so `fingerprinted()` refuses codecs built with `m`.
 

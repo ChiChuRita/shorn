@@ -67,11 +67,11 @@ structure through [Standard JSON Schema](https://standardschema.dev/json-schema)
 ## Scope
 
 shorn covers strings, booleans, integers, numbers, literals, enums, nullable
-values, arrays, tuples, records, discriminated unions, dynamic values
-(`z.any()`), and objects — closed or open, with optional fields. It does not
-support undiscriminated unions, recursive schemas, streaming, or automatic
-schema evolution. `Date`, `bigint`, `Map`, and `Set` need an explicit wire
-representation.
+values, arrays, tuples, records, unions — discriminated, or with no two branches
+sharing a JSON type — recursive schemas, dynamic values (`z.any()`), and
+objects — closed or open, with optional fields. It does not support unions whose
+branches overlap, streaming, or automatic schema evolution. `Date`, `bigint`,
+`Map`, and `Set` need an explicit wire representation.
 
 ## Documentation
 

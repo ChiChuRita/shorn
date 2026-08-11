@@ -18,7 +18,7 @@ Use a fingerprint for stored, queued, or version-crossing payloads. Bare payload
 
 The fingerprint hashes the canonical **wire structure**. It changes when bytes can move: adding, removing, or renaming a field; changing a type; required ↔ optional; changing enum members; signed ↔ unsigned integer; or reordering a tuple.
 
-It does **not** change for refinements, property declaration order, strictness, validator choice, or conversion functions. A stricter `.max()` can therefore reject old data without changing the fingerprint. If validation behavior is part of your data version, carry an application version separately in a header, column, or envelope — a wire fingerprint is not a complete schema version.
+It does **not** change for refinements, property declaration order, strictness, validator choice, or conversion functions. Validator choice holds for recursive schemas too, though the vendors spell them differently — zod points the cycle at the root, Valibot inlines the root and repeats it under `$defs` — because a root that merely duplicates a definition is folded back onto it. One exception is known: two *mutually* recursive definitions are not deduplicated, so a mutually recursive type may fingerprint differently across vendors. Keep both codecs, or write the type in one validator. A stricter `.max()` can therefore reject old data without changing the fingerprint. If validation behavior is part of your data version, carry an application version separately in a header, column, or envelope — a wire fingerprint is not a complete schema version.
 
 ## Choose a width
 

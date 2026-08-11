@@ -91,6 +91,6 @@ assert.throws(() => serve(hit.request.subarray(0, 2)));
 
 win(`m.tuple([m.uint(), compile(Schema)]) carries id + payload in one stream, no glue serializer`);
 win(`small calls pay best: a request is ${hit.request.length} B against 62 B of JSON-RPC`);
-pain("errors need their own codec, because shorn has no union to hold result-or-error");
+pain("errors get their own codec here; a discriminated union on an `ok` literal would hold result-or-error in one");
 pain(`only ${(listJson / list.reply.length).toFixed(2)}× on 50 rows — every 19.99 costs 8 float64 bytes, 5 JSON chars`);
 note("tuple element types infer end to end: `list.result.orders[0][2]` is the enum, not string");

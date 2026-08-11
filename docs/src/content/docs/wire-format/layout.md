@@ -183,6 +183,41 @@ The index is the only byte added, and it usually replaces one. The discriminant 
 
 Branches are ordered by their discriminant, canonically, so reordering the schema does not move the wire. An index past the last branch is a `DecodeError`. Adding a branch shifts every index at or after it, exactly as adding an enum member does.
 
+## Type-disjoint unions
+
+The same varint index, when the branches carry no discriminant but no two of them share a JSON type.
+
+```ts
+z.union([z.string(), z.number()])
+
+"hi" -> [1, 2, 104, 105]
+        │  └─ the string: length 2, then "hi"
+        └─ branch index; `string` sorts after `number`
+42   -> [0, 0, 0, 0, 0, 0, 0, 69, 64]
+```
+
+Branches are ordered by **type name** — `array`, `boolean`, `null`, `number`, `object`, `string` — so declaration order does not reach the wire, exactly as with a discriminant. The decoder cannot tell the two union forms apart and does not need to: both read an index and then the branch.
+
+`integer` is not a name on that list. It folds into `number`, because nothing about a value says which of the two it was declared as, and a union that would need to tell them apart is refused rather than given an index it cannot assign.
+
+## Recursive schemas
+
+Nothing of their own. A cycle lives in the schema, so each level writes what its shapes write:
+
+```ts
+const Node = z.object({ value: z.string(), get children() { return z.array(Node); } });
+
+{ value: "a", children: [] }                               -> [1, 97, 0]
+                                                               │      └─ no children
+                                                               └─ "a"
+{ value: "a", children: [{ value: "b", children: [] }] }   -> [1, 97, 1, 1, 98, 0]
+                                                                       └─ one child, inline
+```
+
+The recursion is bounded by whatever lets it stop — an empty array here, a `null` back-edge in a linked list. Depth is capped at 256 levels on both sides, since a recursive schema takes its nesting from the payload rather than from the schema; see [Hostile Input](/hostile-input/).
+
+A `$ref` reached twice but never through itself is not a cycle. It is inlined, so a shared definition writes, and fingerprints, exactly as it would written out in full.
+
 ## Open objects
 
 Declared fields first, exactly as a closed object writes them, then everything else as a record.

@@ -12,6 +12,7 @@ import {
   EnumSchema,
   Float64Schema,
   IntSchema,
+  LazySchema,
   LiteralSchema,
   Reader,
   RecordSchema,
@@ -50,7 +51,23 @@ type WireShape =
       readonly union: readonly WireShape[];
       readonly on: string;
       readonly cases: readonly EnumValue[];
-    };
+    }
+  // A union with no discriminant, keyed by the JSON type of the value instead. A
+  // separate variant rather than `on: undefined`, so the two forms cannot derive the
+  // same signature.
+  | { readonly union: readonly WireShape[]; readonly types: readonly string[] }
+  // The back-edge of a cycle, as an index into a `WireDocument`'s definition table.
+  | { readonly ref: number };
+
+/**
+ * A whole document's shape. The definition table is a property of the document rather
+ * than of any shape inside it — a `{ ref }` is only ever resolved against the top level —
+ * and it is absent unless a cycle was found, so a schema without one keeps the signature,
+ * and therefore the fingerprint, it already had.
+ */
+type WireDocument =
+  | WireShape
+  | { readonly defs: readonly WireShape[]; readonly root: WireShape };
 
 interface WireField {
   readonly key: string;
@@ -220,13 +237,49 @@ function discriminant(
 }
 
 /**
+ * The JSON type of each branch, when every branch declares exactly one and no two share
+ * it. That is the whole condition for encoding a union with no discriminant: the type of
+ * the value names its branch, so nothing is tried and nothing is guessed.
+ *
+ * `integer` folds into `number` because no value carries which of the two it was declared
+ * as, so a union of the pair is not disjoint and stays refused. A branch with a `type`
+ * array, or none at all — `z.any()`, a bare `{}` — is refused for the same reason: it
+ * overlaps whatever sits beside it.
+ */
+function disjointTypes(
+  branches: readonly JsonSchema[],
+  ctx: RefContext,
+): readonly string[] | undefined {
+  const types: string[] = [];
+  for (const branch of branches) {
+    // A branch that is a bare `$ref` — one arm of a union being the whole recursive
+    // definition — keeps its type at the far end of the pointer. One hop, deliberately:
+    // a pointer to another pointer reads as typeless and is refused, like any other
+    // branch whose type cannot be named.
+    const target =
+      typeof branch.$ref === "string" ? resolvePointer(ctx.document, branch.$ref) : branch;
+    if (typeof target.type !== "string") return undefined;
+    const type = target.type === "integer" ? "number" : target.type;
+    if (types.includes(type)) return undefined;
+    types.push(type);
+  }
+  return types.length === 0 ? undefined : types;
+}
+
+/**
  * Whether a shape already decodes to `null` without a marker of its own — exactly the set
  * `Schema.nullable()` declines to put a second marker on.
  */
-function admitsNull(shape: WireShape): boolean {
+function admitsNull(shape: WireShape, defNulls?: readonly boolean[]): boolean {
   if (typeof shape === "string") return shape === "any";
   if ("literal" in shape) return shape.literal === null;
   if ("enum" in shape) return shape.enum.includes(null);
+  // Only the undiscriminated form can carry a `null` branch — a discriminated one is all
+  // objects — but reading the branches keeps both forms on a single rule.
+  if ("union" in shape) return shape.union.some((branch) => admitsNull(branch, defNulls));
+  // Unanswerable while the cycle is still open, which is every call from `nullableOf`.
+  // `defNulls` settles it later, and `LazySchema` carries the answer to the check.
+  if ("ref" in shape) return defNulls?.[shape.ref] ?? false;
   return "nullable" in shape;
 }
 
@@ -251,7 +304,117 @@ function nullableOf(shape: WireShape): WireShape {
   return admitsNull(shape) ? shape : { nullable: shape };
 }
 
-function wireShape(schema: JsonSchema): WireShape {
+/**
+ * The state one document's `$ref`s are resolved against. Threaded through `wireShape`
+ * rather than closed over, so every recursion site says out loud that it is walking the
+ * same document.
+ */
+interface RefContext {
+  /** What a pointer is relative to. `$ref: "#"` — zod's spelling — names this. */
+  readonly document: JsonSchema;
+  /** Pointers being expanded right now; a `$ref` back to one of these is a cycle. */
+  readonly active: Set<string>;
+  /**
+   * What each pointer resolved to: the shape itself once expanded, or the `{ ref }` a
+   * cycle head was numbered with the moment something referred back to it. Also what
+   * keeps a shared subtree from being walked once per reference — a chain of refs each
+   * used twice would otherwise expand exponentially, which matters because the document
+   * may have been fetched rather than written.
+   */
+  readonly shapes: Map<string, WireShape>;
+  readonly defs: (WireShape | undefined)[];
+}
+
+/**
+ * JSON Pointer, the subset a `$ref` uses. Same-document only: fetching a remote schema
+ * mid-build is not something a serializer should be doing.
+ */
+function resolvePointer(document: JsonSchema, pointer: string): JsonSchema {
+  if (pointer === "#" || pointer === "") return document;
+  if (!pointer.startsWith("#/")) {
+    throw new EncodeError(
+      `Unsupported JSON Schema reference ${JSON.stringify(pointer)}; only same-document references are supported`,
+    );
+  }
+  let node: unknown = document;
+  for (const segment of pointer.slice(2).split("/")) {
+    // `~1` before `~0`, as RFC 6901 requires: the other order turns `~01` into `/`.
+    node = asSchema(node)[segment.replace(/~1/g, "/").replace(/~0/g, "~")];
+    if (node === undefined) {
+      throw new EncodeError(`JSON Schema reference ${JSON.stringify(pointer)} does not resolve`);
+    }
+  }
+  return asSchema(node);
+}
+
+/**
+ * A `$ref`, as either a definition or an inlined copy.
+ *
+ * A reference reached while its own target is still being expanded is the back-edge of a
+ * cycle: it becomes a numbered definition, and every later reference to that pointer is
+ * the same number. A reference to something already finished is simply that shape again
+ * — a shared subtree, not a recursive one — so it is inlined, which keeps a
+ * non-recursive `$ref` out of the signature and off `LazySchema`'s indirection.
+ */
+function refShape(pointer: string, ctx: RefContext): WireShape {
+  const known = ctx.shapes.get(pointer);
+  if (known !== undefined) return known;
+
+  if (ctx.active.has(pointer)) {
+    // The back-edge of a cycle. Numbered here and remembered, so every later reference to
+    // this pointer — including the one that finishes the expansion below — is the same id.
+    const ref: WireShape = { ref: ctx.defs.length };
+    ctx.defs.push(undefined);
+    ctx.shapes.set(pointer, ref);
+    return ref;
+  }
+
+  ctx.active.add(pointer);
+  const shape = wireShape(resolvePointer(ctx.document, pointer), ctx);
+  ctx.active.delete(pointer);
+
+  const ref = ctx.shapes.get(pointer);
+  if (ref === undefined) {
+    ctx.shapes.set(pointer, shape);
+    return shape;
+  }
+  // Present only if something referred back mid-expansion, which is what made it a
+  // definition; the slot reserved above is filled now that the shape exists.
+  ctx.defs[(ref as { readonly ref: number }).ref] = shape;
+  return ref;
+}
+
+/**
+ * One document as one shape, with any cycle lifted into a definition table.
+ *
+ * The root is expanded through `refShape` rather than directly, so that `$ref: "#"` is
+ * recognised as the back-edge it is.
+ */
+function toWireShape(document: JsonSchema): WireDocument {
+  const ctx: RefContext = { document, active: new Set(), shapes: new Map(), defs: [] };
+  const root = refShape("#", ctx);
+  if (ctx.defs.length === 0) return root;
+  const defs = ctx.defs as WireShape[];
+
+  // Vendors spell one recursive type two ways, and the two differ by an unrolling: zod
+  // points the cycle at the root itself, while valibot inlines the root and emits an
+  // identical copy under `$defs`. Folding a root that merely duplicates a definition
+  // back onto it is what keeps the fingerprint from depending on which validator wrote
+  // the schema — the promise made in the schema-changes documentation.
+  //
+  // ponytail: the root only. Two identical *definitions* stay separate, so a mutually
+  // recursive type could still fingerprint differently across vendors. Hash-cons the
+  // table if that ever turns up.
+  const rootJson = JSON.stringify(root);
+  const duplicate = defs.findIndex((def) => JSON.stringify(def) === rootJson);
+  return { defs, root: duplicate < 0 ? root : { ref: duplicate } };
+}
+
+function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
+  // Ahead of every other keyword: a `$ref` node carries no `type`, and what it points at
+  // is the whole of what it means here.
+  if (typeof schema.$ref === "string") return refShape(schema.$ref, ctx);
+
   // `anyOf` and `oneOf` differ in whether the branches may overlap, which is a
   // validation question the vendor has already answered by the time shorn runs.
   // Zod writes a plain union as `anyOf` and a discriminated one as `oneOf`; both
@@ -265,7 +428,7 @@ function wireShape(schema: JsonSchema): WireShape {
     // nullable union" named the one thing it unmistakably was.
     if (nonNull.length === 0 && branches.length > 0) return { literal: null };
     if (branches.length === 2 && nonNull.length === 1) {
-      return nullableOf(wireShape(nonNull[0]!));
+      return nullableOf(wireShape(nonNull[0]!, ctx));
     }
 
     // ArkType spells `string.uuid` as three branches — the lowercase pattern, plus
@@ -290,11 +453,24 @@ function wireShape(schema: JsonSchema): WireShape {
       return {
         on: found.on,
         cases,
-        union: cases.map((value) => wireShape(branches[found.cases.indexOf(value)]!)),
+        union: cases.map((value) => wireShape(branches[found.cases.indexOf(value)]!, ctx)),
       };
     }
+
+    // No discriminant, but possibly no ambiguity either: branches separated by JSON type
+    // need nothing on the wire beyond the index a discriminated union already writes.
+    const byType = disjointTypes(branches, ctx);
+    if (byType !== undefined) {
+      // Ordered by type name, so the branch index survives a reordering of the schema.
+      const types = canonicalKeyOrder(byType);
+      return {
+        types,
+        union: types.map((type) => wireShape(branches[byType.indexOf(type)]!, ctx)),
+      };
+    }
+
     throw new EncodeError(
-      "Only nullable and discriminated JSON Schema unions are currently supported; a discriminated union needs one property that is a distinct const in every branch",
+      "Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported; give the branches one property that is a distinct const in each, or make no two branches share a JSON type",
     );
   }
 
@@ -304,7 +480,7 @@ function wireShape(schema: JsonSchema): WireShape {
     // above does.
     if (nonNull.length === 0 && schema.type.length > 0) return { literal: null };
     if (schema.type.length === 2 && nonNull.length === 1) {
-      return nullableOf(wireShape({ ...schema, type: nonNull[0] }));
+      return nullableOf(wireShape({ ...schema, type: nonNull[0] }, ctx));
     }
     throw new EncodeError("Only nullable JSON Schema type arrays are currently supported");
   }
@@ -345,14 +521,14 @@ function wireShape(schema: JsonSchema): WireShape {
       return "float64";
     case "array": {
       if (Array.isArray(schema.prefixItems)) {
-        const tuple = schema.prefixItems.map((item) => wireShape(asSchema(item)));
+        const tuple = schema.prefixItems.map((item) => wireShape(asSchema(item), ctx));
         // `items` beside `prefixItems` is the rest element; `false` means there is none.
         return "items" in schema && schema.items !== false
-          ? { tuple, rest: wireShape(asSchema(schema.items)) }
+          ? { tuple, rest: wireShape(asSchema(schema.items), ctx) }
           : { tuple };
       }
       if (!("items" in schema)) throw new EncodeError("Arrays require an item schema");
-      const array = wireShape(asSchema(schema.items));
+      const array = wireShape(asSchema(schema.items), ctx);
       // A count the schema fixes needs no length varint, and like a tuple may hold a
       // zero-width element.
       return typeof schema.minItems === "number" && schema.minItems === schema.maxItems
@@ -366,7 +542,7 @@ function wireShape(schema: JsonSchema): WireShape {
       const extras =
         additional === undefined || additional === false
           ? undefined
-          : wireShape(additional === true ? {} : asSchema(additional));
+          : wireShape(additional === true ? {} : asSchema(additional), ctx);
       // No declared properties makes it a record: every key open, one value type. With
       // them it is an open object — the same record, written after the declared fields.
       if (extras !== undefined && Object.keys(properties).length === 0) {
@@ -386,7 +562,7 @@ function wireShape(schema: JsonSchema): WireShape {
         object: canonicalKeyOrder(Object.keys(properties)).map((key) => ({
           key,
           optional: !required.has(key),
-          value: wireShape(asSchema(properties[key])),
+          value: wireShape(asSchema(properties[key]), ctx),
         })),
         // Asks whether *shorn* must police extra properties, not whether the schema
         // does. `false` means the vendor's own validate() already dealt with them —
@@ -398,17 +574,14 @@ function wireShape(schema: JsonSchema): WireShape {
     }
     default: {
       // A node with no `type` and nothing structural left to read is `any`: `z.any()`,
-      // `z.unknown()`, a bare `{}`. Combinators are excluded deliberately, so a `$ref`
-      // recursive schema is refused rather than quietly re-typed as a tagged blob —
-      // and refused by name, because "type undefined" told the caller nothing.
+      // `z.unknown()`, a bare `{}`. Combinators are excluded deliberately, so a shape
+      // carrying one is refused by name rather than quietly re-typed as a tagged blob —
+      // "type undefined" told the caller nothing. A well-formed `$ref` returned at the
+      // top of this function; it stays on the list to name the malformed spelling.
       if (schema.type === undefined) {
         const combinator = COMBINATORS.find((keyword) => keyword in schema);
         if (combinator === undefined) return "any";
-        throw new EncodeError(
-          combinator === "$ref"
-            ? "Recursive schemas ($ref) are not supported; flatten to a fixed depth or nest the recursive part as bytes"
-            : `Unsupported JSON Schema combinator ${combinator}`,
-        );
+        throw new EncodeError(`Unsupported JSON Schema combinator ${combinator}`);
       }
       throw new EncodeError(`Unsupported Standard JSON Schema type ${String(schema.type)}`);
     }
@@ -426,26 +599,38 @@ const SCALAR_SCHEMAS: Record<Extract<WireShape, string>, new () => Schema<unknow
   uuid: UuidSchema,
 };
 
-function compileWireShape(shape: WireShape): Schema<unknown> {
+/** The definition each `{ ref }` stands for, absent unless the shape holds a cycle. */
+type Lazies = readonly LazySchema<unknown>[];
+
+function compileWireShape(shape: WireShape, lazies?: Lazies): Schema<unknown> {
   if (typeof shape === "string") return new SCALAR_SCHEMAS[shape]();
   if ("literal" in shape) return new LiteralSchema(shape.literal);
   if ("enum" in shape) return new EnumSchema(shape.enum as [EnumValue, ...EnumValue[]]);
-  if ("nullable" in shape) return compileWireShape(shape.nullable).nullable();
-  if ("array" in shape) return new ArraySchema(compileWireShape(shape.array), shape.length);
+  if ("ref" in shape) return lazies![shape.ref]!;
+  if ("nullable" in shape) return compileWireShape(shape.nullable, lazies).nullable();
+  if ("array" in shape) {
+    return new ArraySchema(compileWireShape(shape.array, lazies), shape.length);
+  }
   if ("tuple" in shape) {
     return new TupleSchema(
-      shape.tuple.map(compileWireShape),
-      shape.rest === undefined ? undefined : compileWireShape(shape.rest),
+      // An arrow, not a bare reference: `map` passes the index, which `lazies` would take.
+      shape.tuple.map((item) => compileWireShape(item, lazies)),
+      shape.rest === undefined ? undefined : compileWireShape(shape.rest, lazies),
     );
   }
-  if ("record" in shape) return new RecordSchema(compileWireShape(shape.record));
+  if ("record" in shape) return new RecordSchema(compileWireShape(shape.record, lazies));
   if ("union" in shape) {
-    return new UnionSchema(shape.on, shape.cases, shape.union.map(compileWireShape));
+    const branches = shape.union.map((branch) => compileWireShape(branch, lazies));
+    // Without a discriminant the cases are JSON type names and the key is absent; the
+    // wire form is the same varint index either way.
+    return "types" in shape
+      ? new UnionSchema(undefined, shape.types, branches)
+      : new UnionSchema(shape.on, shape.cases, branches);
   }
 
   const objectShape = Object.create(null) as Record<string, Schema<unknown>>;
   for (const field of shape.object) {
-    const schema = compileWireShape(field.value);
+    const schema = compileWireShape(field.value, lazies);
     objectShape[field.key] = field.optional ? schema.optional() : schema;
   }
   return createObjectSchema(
@@ -453,11 +638,45 @@ function compileWireShape(shape: WireShape): Schema<unknown> {
     shape.rejectUnknown,
     // Built here rather than inside `ObjectSchema`, so `m` does not carry
     // `RecordSchema` in its bundle.
-    shape.extras === undefined ? undefined : new RecordSchema(compileWireShape(shape.extras)),
+    shape.extras === undefined
+      ? undefined
+      : new RecordSchema(compileWireShape(shape.extras, lazies)),
   );
 }
 
-function wireSignature(shape: WireShape): string {
+/**
+ * Which definitions can themselves decode to `null`, as the least fixed point over the
+ * table: a back-edge starts at "no" and one round per definition settles the rest, since
+ * a boolean lattice this shallow cannot keep moving.
+ *
+ * This is the one check `nullableOf` cannot make while a cycle is still open. `LazySchema`
+ * carries the answer, so `nullable()` over a definition that already holds null is
+ * refused when the codec is built rather than giving null two spellings on the wire.
+ */
+function defNulls(defs: readonly WireShape[]): boolean[] {
+  const nulls = new Array<boolean>(defs.length).fill(false);
+  // One round per definition settles a lattice this shallow — a back-edge starts at "no"
+  // and only ever turns on — and there is one definition in every schema seen so far, so
+  // the quadratic shape of this costs nothing worth an early exit.
+  for (let round = 0; round < defs.length; round++) {
+    defs.forEach((def, id) => (nulls[id] = admitsNull(def, nulls)));
+  }
+  return nulls;
+}
+
+/**
+ * Definitions first, each as a `LazySchema` that exists before the schema it stands for
+ * does. Every container reads its children's `_minWidth` in its own constructor, so a
+ * back-edge has to be answerable before the cycle it closes is built.
+ */
+function compileShape(shape: WireDocument): Schema<unknown> {
+  if (typeof shape !== "object" || !("defs" in shape)) return compileWireShape(shape);
+  const lazies = defNulls(shape.defs).map((yieldsNull) => new LazySchema<unknown>(yieldsNull));
+  shape.defs.forEach((def, id) => lazies[id]!.resolve(compileWireShape(def, lazies)));
+  return compileWireShape(shape.root, lazies);
+}
+
+function wireSignature(shape: WireDocument): string {
   return JSON.stringify(shape, (key, value) => (key === "rejectUnknown" ? undefined : value));
 }
 
@@ -502,8 +721,8 @@ function buildCodec(
       { cause: error },
     );
   }
-  const inputShape = wireShape(asSchema(inputJsonSchema));
-  const outputShape = wireShape(asSchema(outputJsonSchema));
+  const inputShape = toWireShape(asSchema(inputJsonSchema));
+  const outputShape = toWireShape(asSchema(outputJsonSchema));
   const signature = wireSignature(outputShape);
   if (wireSignature(inputShape) !== signature) {
     // Rarely reached: zod's `z.codec()` has a rich output type, so the conversion above
@@ -513,7 +732,7 @@ function buildCodec(
       "Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported",
     );
   }
-  return new StandardBackedSchema(schema, compileWireShape(outputShape), signature);
+  return new StandardBackedSchema(schema, compileShape(outputShape), signature);
 }
 
 const directCache = new WeakMap<object, StandardBackedSchema<unknown>>();

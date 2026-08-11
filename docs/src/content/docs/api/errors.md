@@ -65,7 +65,7 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 
 | Message | Cause |
 | --- | --- |
-| `Only nullable and discriminated JSON Schema unions are currently supported` | a union with no property that is a distinct `const` in every branch |
+| `Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported` | a union with two branches of one JSON type and no property that is a distinct `const` in every branch |
 | `Only nullable JSON Schema type arrays are currently supported` | a `type` array with >1 non-null entry |
 | `Arrays require an item schema` | an array with no `items` |
 | `Empty enums are unsupported` | an enum with no members |
@@ -74,7 +74,8 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 | `Unsupported JSON Schema literal` | a literal that is not string, number, boolean, or null |
 | `Unsupported Standard JSON Schema type X` | a type with no wire shape |
 | `Unsupported Standard JSON Schema node` | a non-object node where a schema was expected |
-| `Recursive schemas ($ref) are not supported; flatten to a fixed depth or nest the recursive part as bytes` | `z.lazy()`, a self-referential getter, any `$ref` |
+| `Unsupported JSON Schema reference "…"; only same-document references are supported` | a `$ref` naming another document |
+| `JSON Schema reference "…" does not resolve` | a `$ref` whose pointer names nothing in the document |
 | `Unsupported JSON Schema combinator X` | `allOf` (an intersection) or `not` (`z.never()`) |
 | `The second argument must be a Standard JSON Schema implementation — toStandardJsonSchema(schema) for Valibot` | a raw JSON Schema object, or the structure wrapped in `{ structure }` |
 | `Required property "x" has no schema` | `required` names a property absent from `properties` |
@@ -118,8 +119,10 @@ compile(), optionally wrapped by fingerprinted()
 | `Expected an array with N items` | a length that disagrees with `minItems === maxItems` |
 | `Cannot encode X as a dynamic value` | a `Date`, `Map`, `Set`, class instance, function or symbol under `z.any()`. A *plain* object is fine whatever realm minted it — a `node:vm` context, an iframe, a worker |
 | `Dynamic value nests deeper than 64` | a dynamic value 65 levels deep, or an object that holds itself |
+| `Recursive value nests deeper than 256` | a recursive schema 257 levels deep, or a cycle with no way out of it |
 | `Record is too large` | a record with more than 1,000,000 entries |
 | `No union branch has "kind" = X` | a discriminant value no branch declares |
+| `No union branch holds X` | a JSON type no branch of a type-disjoint union declares. Only reachable through `unchecked()`: a validated codec rejects the value first |
 | `Expected a tuple with at least N items` | fewer items than a rest tuple's fixed part |
 | *validation issues, joined by `; `* | your refinements failed; paths prefixed as `field.nested: message` |
 
@@ -143,7 +146,8 @@ All `DecodeError` with an `offset`.
 | `Non-canonical dynamic number` | an integer written under the float tag |
 | `Unknown dynamic tag X` | a tag byte above 7 |
 | `Dynamic value nests deeper than 64` | a payload that nests past the limit |
-| `Unknown union branch X` | a branch index past the last branch |
+| `Recursive value nests deeper than 256` | a payload that nests a recursive schema past the limit |
+| `Unknown union branch X` | a branch index past the last branch, discriminated or type-disjoint |
 | `Extra property "x" repeats a declared field` | an open object's tail naming a key the schema declares |
 
 Handle fingerprint mismatches explicitly. Fingerprints are short wire-shape identifiers, not complete schema versions; see [Wire Fingerprints](/versioning/fingerprinting/).

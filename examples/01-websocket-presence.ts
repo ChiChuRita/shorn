@@ -1,7 +1,8 @@
 // Presence in a collaborative editor: join / leave / cursor / chat at 20 Hz.
 //
 // Best case for shorn: tiny, fixed-shape, very frequent messages.
-// The catch: shorn has no unions, so we write the "which message is this" byte ourselves.
+// The catch: a codec per message kind, so the "which message is this" byte is ours.
+// `z.discriminatedUnion("kind", [...])` would put that byte in the schema instead.
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { compile } from "../dist/index.js";
@@ -66,5 +67,5 @@ assert.throws(() => unframe(new Uint8Array([9, 0, 0])), /Unknown message kind/);
 assert.throws(() => unframe(new Uint8Array([2, 255, 255, 255])));
 
 win(`a cursor frame is ${cursor.length} B (1 tag + ${cursor.length - 1} shorn) against ${cursorJson} B of JSON`);
-pain("no unions: the tag byte and the dispatch table are hand-written");
+pain("the tag byte and dispatch table are hand-written; a discriminated union folds both into one codec");
 note("decode reads a subarray, so the tag costs one byte and no copy");

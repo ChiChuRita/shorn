@@ -44,7 +44,54 @@ An array whose `minItems` equals its `maxItems` is the third case: the count is 
 
 Every branch must be an object with one property that is a distinct `const` in each of them. That discriminant costs nothing on the wire: it is a literal inside its branch, and a literal encodes to zero bytes. So the index is the only byte added, and it replaces the field a self-describing format would have written out in full.
 
-Branches are ordered by discriminant, so declaration order does not reach the wire. Adding a branch shifts the indices at or after it; see [Schema Changes](/versioning/schema-evolution/). A union with no such property is [refused](/schemas/rejected-shapes/#general-unions), because choosing a branch would mean guessing.
+Branches are ordered by discriminant, so declaration order does not reach the wire. Adding a branch shifts the indices at or after it; see [Schema Changes](/versioning/schema-evolution/).
+
+## Type-disjoint unions
+
+`z.union([z.string(), z.number()])` → the same varint branch index, then that branch.
+
+A union needs no discriminant when no two branches share a JSON type, because then the type of the value already names its branch. Nothing is tried and nothing is guessed: exactly one branch can hold a given value, so the encoder reads `typeof` and writes the index.
+
+```ts
+z.union([z.string(), z.number()]);              // number is 0, string is 1
+z.union([z.string(), z.array(z.string()), z.null()]);
+z.union([z.literal("a"), z.literal(3)]);        // the index is the whole payload
+```
+
+The seven types are `string`, `number`, `boolean`, `null`, `array`, `object`, and — folded into `number` — `integer`. Branches are ordered by type name, so declaration order does not reach the wire here either.
+
+Two branches that *do* share a type stay [refused](/schemas/rejected-shapes/#overlapping-unions): `z.union([z.int(), z.number()])` is refused because no value says which of the two it was declared as, and two object branches with no `const` are refused because picking between them would mean trying each in turn and keeping the first that fits.
+
+## Recursive schemas
+
+`z.lazy(() => Node)`, or a self-referential getter → the same shapes, with the cycle read again at each level.
+
+```ts
+const Node = z.object({
+  value: z.string(),
+  get children() {
+    return z.array(Node);
+  },
+});
+```
+
+A recursive schema adds nothing to the wire. The cycle lives in the schema, so a tree costs exactly what its levels cost written out longhand: the array count at each level, and the fields of each node.
+
+Recursion needs a way out, and the way out is what bounds the payload — a nullable back-edge, an optional field, or an array that can be empty. Nesting is capped at **256 levels** on both sides, because depth comes from the payload rather than the schema and a few bytes per level would otherwise buy unbounded stack. A linked list longer than that wants an array; recursion is for trees.
+
+A definition reached twice but never through itself is not recursive: it is inlined, and encodes and fingerprints exactly as it would written out in full. A cycle with no way out — `{ next: Node }` with no `null` and no `?` — has no finite value at all, and reports that as a depth error the first time it is used.
+
+Recursion composes with both union forms, which is what a JSON value needs:
+
+```ts
+const Json = z.union([
+  z.string(), z.number(), z.boolean(), z.null(),
+  z.array(z.lazy(() => Json)),
+  z.record(z.string(), z.lazy(() => Json)),
+]);
+```
+
+Six branches, no two sharing a type, two of them recursive. A branch that *is* the whole definition works too — its type is read at the far end of the `$ref`.
 
 ## Records, open objects, and dynamic values
 
@@ -77,9 +124,9 @@ Objects write a presence bitmap for optional fields (`ceil(n / 8)` bytes, omitte
 
 ## Nullable and nesting
 
-`z.nullable(T)` · `v.nullable(T)` · `"T | null"` → one discriminator byte + value. Both JSON Schema spellings work: an `anyOf` of two branches where one is `null`, and a `type` array of two entries where one is `"null"`. Nullable is the **only** union supported.
+`z.nullable(T)` · `v.nullable(T)` · `"T | null"` → one discriminator byte + value. Both JSON Schema spellings work: an `anyOf` of two branches where one is `null`, and a `type` array of two entries where one is `"null"`. A two-branch nullable is the cheapest union: one byte and no index.
 
-Objects, arrays, and tuples nest without a per-level header — a nested object is encoded as only its fields. There is no depth limit for non-recursive nesting, though at about 5,900 levels JavaScript throws a `RangeError` instead of a `DecodeError`; that needs a hostile *schema*, not merely hostile bytes. Recursive schemas are unsupported because a `$ref` to the root has no bounded wire shape, so shorn cannot compute `_minWidth`.
+Objects, arrays, and tuples nest without a per-level header — a nested object is encoded as only its fields. There is no depth limit for nesting the schema itself fixes, though at about 5,900 levels JavaScript throws a `RangeError` instead of a `DecodeError`; that needs a hostile *schema*, not merely hostile bytes. Nesting the *payload* chooses — a recursive schema, or a dynamic value — is capped, at 256 levels and 64 respectively.
 
 ## Refinements are validated, not encoded
 

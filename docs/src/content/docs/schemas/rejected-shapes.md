@@ -7,9 +7,10 @@ shorn refuses schemas it cannot encode exactly. Unless noted, each refusal is an
 
 | Shape | Refused at | Instead |
 | --- | --- | --- |
-| Undiscriminated union | build | a `const` discriminant in every branch |
-| Recursive schema | build | flatten, or nest as `m.bytes()` |
+| Union with two branches of one JSON type | build | a `const` discriminant in every branch |
 | Input ≠ output wire shape | build | make both sides agree |
+| `$ref` to another document | build | inline the definition |
+| Recursion past 256 levels, or with no way out | encode and decode | a nullable back-edge, or an array |
 | `Date`, `bigint`, `Map`, `Set` | vendor, before shorn | convert at the edge |
 | Transform | vendor, before shorn | `z.codec()` outside the codec |
 | Empty enum | build | — |
@@ -21,21 +22,43 @@ shorn refuses schemas it cannot encode exactly. Unless noted, each refusal is an
 | Unknown property | encode | close the object, or strip first |
 | Uppercase UUID | encode | lowercase it, as RFC 4122 asks |
 
-## General unions
+## Overlapping unions
 
-> Only nullable and discriminated JSON Schema unions are currently supported
+> Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported
 
-A **discriminated** union is supported: one property that is a distinct `const` in every branch tells the decoder which branch to read, and the index costs one byte. See [Supported Types](/schemas/supported-types/#discriminated-unions).
+Three union forms are supported, and each one lets the encoder name a branch without trying it:
 
-A union without one is refused. Picking a branch would mean trying each in turn and keeping the first that fits, and where two branches both fit, the wrong choice decodes silently into a valid-looking value. Give the branches a discriminant, or give each variant its own codec and select it by [fingerprint](/versioning/schema-evolution/).
+- **nullable** — two branches, one of them `null`: one discriminator byte, no index.
+- **discriminated** — one property that is a distinct `const` in every branch. See [Discriminated unions](/schemas/supported-types/#discriminated-unions).
+- **type-disjoint** — no two branches sharing a JSON type, so the type of the value names its branch. See [Type-disjoint unions](/schemas/supported-types/#type-disjoint-unions).
+
+What stays refused is a union where two branches could both hold one value:
+
+```ts
+z.union([z.object({ a: z.string() }), z.object({ b: z.number() })]);  // both objects
+z.union([z.int(), z.number()]);                                      // both numbers
+z.union([z.string(), z.any()]);                                      // any overlaps everything
+```
+
+Picking a branch there would mean trying each in turn and keeping the first that fits, and where two branches both fit, the wrong choice decodes silently into a valid-looking value. Give the branches a discriminant, or give each variant its own codec and select it by [fingerprint](/versioning/schema-evolution/).
+
+`z.union([z.int(), z.number()])` is refused for a reason worth naming: `integer` and `number` are one type at runtime, since nothing about `5` says which of the two it was declared as. A branch with a `type` array, or with no `type` at all, is refused for the same reason — it overlaps whatever sits beside it.
 
 Extra properties are a separate question from open objects, which are [supported](/schemas/supported-types/#records-open-objects-and-dynamic-values). When a validator omits `additionalProperties` entirely — ArkType, and some Valibot object schemas — the object is closed with no tail to hold extras, so the codec builds and encoding an extra property throws `Unknown object property "x"`.
 
-## Recursive schemas
+## Recursion that cannot terminate
 
-> Recursive schemas ($ref) are not supported; flatten to a fixed depth or nest the recursive part as bytes
+> Recursive value nests deeper than 256
 
-A `$ref` back to the root has no bounded wire shape, so shorn cannot compute the `_minWidth` used to limit allocation during decoding. Flatten to a fixed depth, or encode the nested part separately into an `m.bytes()` field.
+Recursive schemas are [supported](/schemas/supported-types/#recursive-schemas). Two things about them are still refused.
+
+A cycle needs a way out — a nullable back-edge, an optional field, or an array that may be empty. A cycle without one describes no finite value, and rather than a build-time proof of that, shorn lets the depth counter report it the first time the schema is used.
+
+Depth itself is capped at 256 levels on both sides, because a recursive schema takes its nesting from the payload rather than from the schema: without a cap, a couple of bytes per level would buy unbounded stack. A structure deeper than that wants an array rather than a cycle.
+
+> Unsupported JSON Schema reference "…"; only same-document references are supported
+
+A `$ref` is resolved against the document it appears in. Fetching a remote schema mid-build is not something a serializer should be doing.
 
 ## Intersections and never
 

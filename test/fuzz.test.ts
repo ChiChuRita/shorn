@@ -10,6 +10,20 @@ interface Corpus {
   readonly values: readonly unknown[];
 }
 
+const recursiveTree = z.object({
+  value: z.string(),
+  get children() {
+    return z.array(recursiveTree);
+  },
+});
+
+const recursiveList = z.object({
+  name: z.string(),
+  get next() {
+    return recursiveList.nullable();
+  },
+});
+
 const corpus: readonly Corpus[] = [
   { name: "uint", schema: m.uint(), values: [0, 1, 127, 128, 300, 16384, Number.MAX_SAFE_INTEGER] },
   { name: "int", schema: m.int(), values: [0, -1, 1, -100, Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER] },
@@ -142,6 +156,29 @@ const corpus: readonly Corpus[] = [
       lit: m.literal(7),
     }),
     values: [{ req: "a", nul: null, lit: 7 }, { req: "a", opt: 1, nul: true, lit: 7 }],
+  },
+  {
+    name: "type-union",
+    schema: compile(z.union([z.string(), z.number(), z.null()])),
+    values: ["", "hi", 0, 1.5, null],
+  },
+  {
+    // The two shapes a cycle can take: an array that may be empty, and a nullable
+    // back-edge. Both take their depth from the payload, so both belong here.
+    name: "recursive-tree",
+    schema: compile(recursiveTree),
+    values: [
+      { value: "", children: [] },
+      { value: "r", children: [{ value: "a", children: [{ value: "b", children: [] }] }] },
+    ],
+  },
+  {
+    name: "recursive-list",
+    schema: compile(recursiveList),
+    values: [
+      { name: "a", next: null },
+      { name: "a", next: { name: "b", next: { name: "c", next: null } } },
+    ],
   },
 ];
 

@@ -138,7 +138,11 @@ function encodePath(schema: Schema<unknown>, value: unknown): string | undefined
   let node = schema;
   let current = value;
   try {
-    for (;;) {
+    // Bounded, because a recursive schema holding a value that refers to itself gives the
+    // walk no bottom to reach: each step finds another failing child, forever. No encode
+    // that got as far as producing a path nests deeper than this — `LazySchema` refuses
+    // past it — so the bound truncates nothing a caller could otherwise have been told.
+    for (let step = 0; step < MAX_RECURSION_DEPTH; step++) {
       const child: FailingChild | undefined = node._failingChild(current);
       if (child === undefined) break;
       path =
@@ -1168,19 +1172,45 @@ export class RecordSchema<T> extends Schema<Record<string, T>> {
 }
 
 /**
+ * The JSON type of a value, which is what a union with no discriminant reads to pick a
+ * branch. `integer` is absent deliberately: nothing about `5` says which of the two
+ * number types it was declared as, so `standard.ts` folds the pair together and refuses
+ * a union that would need to tell them apart.
+ */
+function jsonTypeOf(value: unknown): string | undefined {
+  if (value === null) return "null";
+  switch (typeof value) {
+    case "string":
+      return "string";
+    case "number":
+      return "number";
+    case "boolean":
+      return "boolean";
+    case "object":
+      return Array.isArray(value) ? "array" : "object";
+  }
+  return undefined;
+}
+
+/**
  * `z.discriminatedUnion`: a varint branch index, then that branch's own encoding. The
  * index usually replaces a byte rather than adding one, since the discriminant is a
  * literal inside its branch and a literal writes nothing.
  *
  * Branches are ordered by discriminant, so declaration order does not reach the wire.
- * A general union has no such property to read, so it stays refused — choosing a
- * branch would mean guessing, and guessing wrong decodes silently.
+ *
+ * With no discriminant to read, `key` is undefined and `cases` are JSON type names: the
+ * type of the value picks the branch. That is not a guess — `standard.ts` builds this
+ * form only when no two branches share a runtime type, so exactly one can match, and
+ * the decoder reads the same index either way. A union whose branches *do* overlap
+ * stays refused, because choosing between them would mean trying each in turn and the
+ * wrong choice decodes silently.
  */
 export class UnionSchema<T> extends Schema<T> {
   private readonly indexes: Map<EnumValue, number>;
 
   constructor(
-    private readonly key: string,
+    private readonly key: string | undefined,
     cases: readonly EnumValue[],
     private readonly branches: readonly Schema<T>[],
   ) {
@@ -1191,9 +1221,14 @@ export class UnionSchema<T> extends Schema<T> {
     // The index byte plus the cheapest branch: the budget is fixed before the decoder
     // knows which branch is coming.
     this._minWidth = 1 + narrowest;
+    // A `null` branch makes the union itself decode to null, so a `nullable()` over it
+    // would give null two encodings. Only reachable without a discriminant, where null
+    // is one of the types; a discriminated branch is always an object.
+    this._yieldsNull = branches.some((branch) => branch._yieldsNull);
   }
 
   private branchOf(value: unknown): number | undefined {
+    if (this.key === undefined) return this.indexes.get(jsonTypeOf(value) as EnumValue);
     if (typeof value !== "object" || value === null) return undefined;
     return this.indexes.get((value as Record<string, unknown>)[this.key] as EnumValue);
   }
@@ -1202,9 +1237,11 @@ export class UnionSchema<T> extends Schema<T> {
     const index = this.branchOf(value);
     if (index === undefined) {
       throw new EncodeError(
-        `No union branch has ${JSON.stringify(this.key)} = ${JSON.stringify(
-          (value as Record<string, unknown> | null)?.[this.key],
-        )}`,
+        this.key === undefined
+          ? `No union branch holds ${jsonTypeOf(value) ?? typeof value}`
+          : `No union branch has ${JSON.stringify(this.key)} = ${JSON.stringify(
+              (value as Record<string, unknown> | null)?.[this.key],
+            )}`,
       );
     }
     writer.varuint(index);
@@ -1228,6 +1265,89 @@ export class UnionSchema<T> extends Schema<T> {
       throw new DecodeError(`Unknown union branch ${index}`, reader.position);
     }
     return branch._decode(reader);
+  }
+}
+
+/**
+ * How deep a recursive schema may nest, on either side — the same protection
+ * `MAX_DYNAMIC_DEPTH` gives a dynamic value, for the same reason: a cycle takes its
+ * depth from the payload rather than the schema, so a handful of bytes would otherwise
+ * buy unbounded stack. Higher than the dynamic limit because a recursive schema is
+ * declared on purpose and a linked list is a normal thing to declare, where a dynamic
+ * value nesting past 64 is a payload doing something strange.
+ */
+const MAX_RECURSION_DEPTH = 256;
+
+/**
+ * The back-edge of a recursive schema: a `$ref` to a definition that encloses it, which
+ * is what `z.lazy` and a self-referential type compile to. Built before the schema it
+ * points at exists — the cycle cannot be closed any other way — and wired by `resolve`
+ * once that schema is built.
+ *
+ * `_minWidth` stays the inherited 1, and that is exact enough to keep every allocation
+ * guard sound. An inhabited cycle has to be escapable, and the only ways out are an
+ * optional field, a nullable marker, an array count, a record count or a union index —
+ * each of which costs a byte inside the definition. So one byte is a true lower bound,
+ * and computing a tighter one would mean a second implementation of every container's
+ * width rule. A definition with *no* way out has no finite value at all; rather than
+ * detect that, the depth counter below turns it into an error on first use.
+ */
+export class LazySchema<T> extends Schema<T> {
+  private inner: Schema<T> | undefined;
+  private depth = 0;
+
+  constructor(yieldsNull: boolean) {
+    super();
+    this._yieldsNull = yieldsNull;
+  }
+
+  resolve(inner: Schema<T>): void {
+    this.inner = inner;
+  }
+
+  /**
+   * The counter lives here rather than on a parameter for `DynamicSchema.nested`'s
+   * reason: the recursion runs through the container schemas, which know nothing about
+   * depth, and every turn around a cycle passes through exactly one of these. One
+   * method for both sides, so the message exists once; the caller's `finally` keeps a
+   * throw from leaving the count raised on a reused codec.
+   */
+  private enter(reader?: Reader): void {
+    if (this.depth >= MAX_RECURSION_DEPTH) {
+      const message = `Recursive value nests deeper than ${MAX_RECURSION_DEPTH}`;
+      throw reader === undefined
+        ? new EncodeError(message)
+        : new DecodeError(message, reader.position);
+    }
+    this.depth++;
+  }
+
+  /**
+   * The one `_encode` in the file that carries a `try`, against the rule `encodePath`
+   * explains. It costs only schemas that are actually recursive, which have already
+   * paid for the indirection above it.
+   */
+  _encode(writer: Writer, value: T): void {
+    this.enter();
+    try {
+      this.inner!._encode(writer, value);
+    } finally {
+      this.depth--;
+    }
+  }
+
+  _decode(reader: Reader): T {
+    this.enter(reader);
+    try {
+      return this.inner!._decode(reader);
+    } finally {
+      this.depth--;
+    }
+  }
+
+  /** Delegated, or the path stops at every level of the recursion. */
+  override _failingChild(value: unknown): FailingChild | undefined {
+    return this.inner!._failingChild(value);
   }
 }
 

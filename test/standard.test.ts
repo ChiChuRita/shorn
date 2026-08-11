@@ -331,14 +331,12 @@ describe("Standard Schema adapter", () => {
       expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     });
 
-    it("does not re-type a recursive or union schema as a dynamic value", () => {
-      // Both reach the same typeless node the `any` mapping reads, and both keep the
-      // refusal they had: a `$ref` has no bounded width, and an undiscriminated
-      // union has no property that says which branch to read.
-      const Node = z.object({ value: z.int(), get children() { return z.array(Node); } });
-      expect(() => compile(Node)).toThrow(/Recursive schemas \(\$ref\) are not supported/);
+    it("does not re-type an overlapping union as a dynamic value", () => {
+      // Reaches the same typeless node the `any` mapping reads, and keeps the refusal it
+      // had: two object branches with no discriminant have nothing that says which one to
+      // read, so a value would have to be tried against each in turn.
       expect(() => compile(z.union([z.object({ a: z.string() }), z.object({ b: z.int() })])))
-        .toThrow(/Only nullable and discriminated JSON Schema unions/);
+        .toThrow(/Only nullable, discriminated and type-disjoint JSON Schema unions/);
     });
 
     it("names the combinator when one carries the refusal", () => {
@@ -547,6 +545,216 @@ describe("Standard Schema adapter", () => {
     expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
     expect(Object.hasOwn(decoded, "__proto__")).toBe(true);
     expect(decoded.__proto__).toBe("safe");
+  });
+
+  describe("unions with no discriminant", () => {
+    it("dispatches on the JSON type when no two branches share one", () => {
+      const Value = compile(z.union([z.string(), z.number()]));
+      // Ordered by type name, so `number` is index 0 and `string` is index 1 whichever
+      // way the schema listed them.
+      expect([...Value.encode("hi")]).toEqual([1, 2, 104, 105]);
+      expect(Value.decode(Value.encode("hi"))).toBe("hi");
+      expect(Value.decode(Value.encode(42))).toBe(42);
+    });
+
+    it("costs the one index byte a discriminated union costs", () => {
+      const Value = compile(z.union([z.literal("a"), z.literal(3)]));
+      // Both branches are literals, so the index is the entire payload.
+      expect([...Value.encode("a")]).toEqual([1]);
+      expect([...Value.encode(3)]).toEqual([0]);
+      expect(Value.decode(Value.encode(3))).toBe(3);
+    });
+
+    it("takes null, arrays and objects as types of their own", () => {
+      const Value = compile(z.union([z.string(), z.array(z.string()), z.null()]));
+      for (const value of ["x", ["a", "b"], null]) {
+        expect(Value.decode(Value.encode(value as never))).toEqual(value);
+      }
+    });
+
+    it("does not let branch order reach the wire", () => {
+      const forward = fingerprinted(compile(z.union([z.string(), z.number()])));
+      const backward = fingerprinted(compile(z.union([z.number(), z.string()])));
+      expect(forward.fingerprintHex).toBe(backward.fingerprintHex);
+      expect([...forward.encode("x")]).toEqual([...backward.encode("x")]);
+    });
+
+    it("refuses branches that a value cannot tell apart", () => {
+      // Nothing about `5` says which of the two number types it was declared as, so this
+      // is the ambiguity the refusal exists for rather than a shape shorn declines to try.
+      expect(() => compile(z.union([z.int(), z.number()]))).toThrow(
+        /type-disjoint JSON Schema unions/,
+      );
+      // `z.any()` overlaps whatever sits beside it.
+      expect(() => compile(z.union([z.string(), z.any()]))).toThrow(EncodeError);
+    });
+
+    it("names the type it could not place", () => {
+      // Through `unchecked`, because a validated codec rejects the value first: with the
+      // branches disjoint, no value the vendor accepts can reach this message.
+      const Value = unchecked(z.union([z.string(), z.number()]));
+      expect(() => Value.encode(true as never)).toThrow(/No union branch holds boolean/);
+    });
+
+    it("refuses a payload naming a branch that does not exist", () => {
+      const Value = compile(z.union([z.string(), z.number()]));
+      expect(() => Value.decode(Uint8Array.from([2, 0]))).toThrow(DecodeError);
+    });
+
+    it("tells absent from null over a nullable type union", () => {
+      // The union already holds null, so `.nullable()` on top would give null two
+      // spellings — `.optional()` is the wrapper that still says something new.
+      const Value = compile(z.object({ v: z.union([z.string(), z.number(), z.null()]).optional() }));
+      expect(Value.decode(Value.encode({ v: null }))).toEqual({ v: null });
+      expect(Value.decode(Value.encode({}))).toEqual({});
+      expect(() => compile(z.union([z.string(), z.number(), z.null()])).nullable()).toThrow(
+        /already decodes to null/,
+      );
+    });
+  });
+
+  describe("recursive schemas", () => {
+    const Node = z.object({
+      value: z.string(),
+      get children() {
+        return z.array(Node);
+      },
+    });
+
+    it("round-trips a tree through a $ref back to the root", () => {
+      const Tree = compile(Node);
+      const tree = {
+        value: "r",
+        children: [
+          { value: "a", children: [] },
+          { value: "b", children: [{ value: "c", children: [] }] },
+        ],
+      };
+      expect(Tree.decode(Tree.encode(tree))).toEqual(tree);
+    });
+
+    it("round-trips a linked list built from a nullable back-edge", () => {
+      const Cell = z.object({
+        name: z.string(),
+        get next() {
+          return Cell.nullable();
+        },
+      });
+      const List = compile(Cell);
+      let list: unknown = null;
+      for (let index = 0; index < 200; index++) list = { name: `n${index}`, next: list };
+      expect(List.decode(List.encode(list as never))).toEqual(list);
+    });
+
+    it("bounds nesting on both sides rather than the stack", () => {
+      const Cell = z.object({
+        name: z.string(),
+        get next() {
+          return Cell.nullable();
+        },
+      });
+      const List = compile(Cell);
+      let list: unknown = null;
+      for (let index = 0; index < 400; index++) list = { name: "n", next: list };
+      expect(() => List.encode(list as never)).toThrow(/nests deeper than 256/);
+      // A payload claiming the same depth is refused before it can exhaust the stack.
+      const deep = Uint8Array.from([...Array.from({ length: 400 }, () => [1, 0, 1]).flat(), 0]);
+      expect(() => List.decode(deep)).toThrow(DecodeError);
+    });
+
+    it("still refuses an array of a zero-width element through the cycle", () => {
+      // The definition's own width answers this, and one byte is a true lower bound for
+      // any cycle a value can actually escape.
+      const Tree = compile(Node);
+      expect(Tree.encode({ value: "", children: [] })).toHaveLength(2);
+    });
+
+    it("derives one fingerprint whichever validator wrote the schema", () => {
+      // zod points the cycle at the root; valibot inlines the root and emits an identical
+      // copy under `$defs`. The two forms differ by an unrolling and must not differ by a
+      // fingerprint — validator choice is outside the wire shape.
+      const VNode: v.GenericSchema<{ value: string; children: unknown[] }> = v.object({
+        value: v.string(),
+        children: v.array(v.lazy(() => VNode)),
+      });
+      const zod = fingerprinted(compile(Node));
+      const valibot = fingerprinted(compile(VNode, toStandardJsonSchema(VNode)));
+      expect(zod.fingerprintHex).toBe(valibot.fingerprintHex);
+      const tree = { value: "r", children: [{ value: "a", children: [] }] };
+      expect([...zod.encode(tree)]).toEqual([...valibot.encode(tree as never)]);
+    });
+
+    it("leaves a non-recursive schema's signature exactly as it was", () => {
+      // The definition table is emitted only when a cycle is found, so no existing
+      // fingerprint moves. This pins the plain three-field shape.
+      const Person = fingerprinted(compile(z.object({ age: z.int(), name: z.string() })));
+      expect(Person.fingerprintHex).toBe("fee99f");
+    });
+
+    it("inlines a shared subtree instead of making it a definition", () => {
+      // Reached twice but never through itself: not recursive, so it keeps the shape and
+      // the fingerprint it would have had written out longhand.
+      const Leaf = z.object({ x: z.string() });
+      const shared = fingerprinted(compile(z.object({ a: Leaf, b: Leaf })));
+      const written = fingerprinted(
+        compile(z.object({ a: z.object({ x: z.string() }), b: z.object({ x: z.string() }) })),
+      );
+      expect(shared.fingerprintHex).toBe(written.fingerprintHex);
+    });
+
+    it("composes with a type-disjoint union, including a bare $ref branch", () => {
+      // The canonical recursive union: a JSON value. zod types the array and object
+      // branches, so their `$ref`s sit inside `items` rather than being the branch.
+      const Json: z.ZodType = z.union([
+        z.string(),
+        z.number(),
+        z.boolean(),
+        z.null(),
+        z.array(z.lazy(() => Json)),
+        z.record(z.string(), z.lazy(() => Json)),
+      ]);
+      const Value = compile(Json);
+      const value = { a: [1, "x", true, null], b: { c: 2.5 } };
+      expect(Value.decode(Value.encode(value))).toEqual(value);
+
+      // And the other spelling, where a branch *is* the whole definition: the type is at
+      // the far end of the pointer, so it still names its branch.
+      const Cell = z.object({
+        v: z.string(),
+        get next() {
+          return z.union([Cell, z.number(), z.null()]);
+        },
+      });
+      const List = compile(Cell);
+      const list = { v: "a", next: { v: "b", next: 3 } };
+      expect(List.decode(List.encode(list))).toEqual(list);
+    });
+
+    it("does not hang on a value that refers to itself", () => {
+      // The path walk descends one level per step, and a cyclic value gives it no bottom.
+      // Bounded, so this is an error rather than a hang. `unchecked` because zod's own
+      // validator exhausts the stack on a cyclic value before shorn sees it.
+      const Cyclic = z.object({
+        n: z.string(),
+        get self() {
+          return Cyclic;
+        },
+      });
+      const value: Record<string, unknown> = { n: "x" };
+      value.self = value;
+      expect(() => unchecked(Cyclic).encode(value as never)).toThrow(/nests deeper than 256/);
+    });
+
+    it("keeps the field path through the recursion", () => {
+      const Tree = compile(Node);
+      const error = safeEncode(Node, {
+        value: "r",
+        children: [{ value: 1 as never, children: [] }],
+      });
+      expect(error.success).toBe(false);
+      expect(Tree).toBeDefined();
+      if (!error.success) expect(error.error.message).toMatch(/children\[0\]\.value/);
+    });
   });
 
   describe("error detail", () => {

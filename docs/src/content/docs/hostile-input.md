@@ -21,6 +21,7 @@ A tagless decoder relies on the schema to interpret every byte. Bounds and lengt
 | `__proto__` as a decoded key | handled; the decode target is null-prototype |
 | Record keys out of order, or repeated | `DecodeError` |
 | Dynamic value nested past 64 levels | `DecodeError` |
+| Recursive schema nested past 256 levels | `DecodeError` |
 | Unknown dynamic type tag | `DecodeError` |
 | Union branch index past the last branch | `DecodeError` |
 | Open-object extra repeating a declared field | `DecodeError` |
@@ -33,6 +34,8 @@ A naive decoder can allocate far more memory than the payload size suggests: a s
 
 Every schema carries a **`_minWidth`**, the fewest bytes one value can occupy. Before allocating an array, the decoder multiplies this width by the declared count and checks that enough input remains. `_minWidth` is computed during codec construction, so the runtime check costs one multiplication per decoded array.
 
+A recursive schema's back-edge reports the smallest width that is always true of it, one byte, rather than a measured one: a cycle a value can escape has to pass through an optional field, a nullable marker, an array count, a record count or a union index, and each of those costs a byte. So the check holds, at the same strength it has for any one-byte element such as a string.
+
 This is why **arrays of zero-width elements are rejected during codec construction**. Literals, empty tuples, and empty objects use no bytes, so the decoder could not verify the declared count against the payload length. A tuple may still contain them because its length comes from the schema.
 
 ### The one exception
@@ -42,7 +45,7 @@ An array whose count the schema fixes — `minItems` equal to `maxItems` — is 
 ## Security boundaries
 
 - **No security audit or coverage-guided fuzzing.** Property-based and mutation tests are not substitutes for either.
-- **No depth limit from the schema.** A schema nested about 5,900 levels deep can exhaust the JavaScript stack and throw `RangeError` instead of `DecodeError`. This requires a hostile **schema**, not merely hostile bytes. Limit depth if schemas come from untrusted input. Depth chosen by the *payload* is capped: a dynamic value nests at most 64 levels, on both sides.
+- **No depth limit from the schema.** A schema nested about 5,900 levels deep can exhaust the JavaScript stack and throw `RangeError` instead of `DecodeError`. This requires a hostile **schema**, not merely hostile bytes. Limit depth if schemas come from untrusted input. Depth chosen by the *payload* is capped on both sides: a dynamic value nests at most 64 levels and a recursive schema at most 256, so neither can turn a few bytes per level into unbounded stack.
 - **Not a sandbox.** Validation code runs with the same privileges as the application.
 - **Not authentication or encryption.** Fingerprints are unkeyed and payloads are readable to anyone with the schema.
 
