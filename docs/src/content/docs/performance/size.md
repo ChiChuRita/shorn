@@ -1,9 +1,9 @@
 ---
 title: Payload Size
-description: Smallest raw payload in every measured fixture, smallest gzip in both large profiles, sixth under Brotli on repetitive data.
+description: Smallest raw payload in every measured fixture, smallest gzip in both large profiles, second under Brotli in both.
 ---
 
-Size is the axis shorn leads. Every number is from `pnpm bench:all` on Node v22.23.1, Apple M4 Pro, macOS arm64.
+Size is the axis shorn leads. Every number is from Node v22.23.1, Apple M4 Pro, macOS arm64. Each table below comes from a single run — the raw-bytes table from `pnpm bench`, the two compressed tables from `pnpm bench:large` and `pnpm bench:entropy` respectively — because compressed sizes from different fixture runs are not comparable and must not share a table.
 
 ## Fixtures
 
@@ -60,33 +60,35 @@ Roughly 4.2 MB of shorn bytes against 16 MB of JSON — a batch large enough tha
 
 | Codec | Raw | Gzip | Brotli q6 |
 | --- | ---: | ---: | ---: |
-| **shorn** | **4,231,777** | **924,494** | 603,189 |
-| SchemaPack | 4,331,777 | 937,975 | 597,776 |
-| Avro | 4,344,802 | 935,333 | 632,034 |
-| msgpackr records | 4,995,339 | 1,114,738 | **513,630** |
-| Protobuf.js | 5,781,774 | 980,559 | 618,608 |
-| JSON | 16,340,686 | 1,474,952 | 985,919 |
+| **shorn** | **4,276,969** | **1,294,279** | 1,031,628 |
+| SchemaPack | 4,376,969 | 1,310,861 | **911,527** |
+| Avro | 4,485,280 | 1,333,773 | 1,096,771 |
+| msgpackr shared records | 4,995,339 | 1,545,944 | 1,096,702 |
+| msgpackr bundled strings | 5,262,688 | 1,468,427 | 1,075,095 |
+| Protobuf.js | 5,826,966 | 1,402,471 | 1,054,692 |
+| JSON | 16,498,152 | 1,769,924 | 1,731,672 |
 
-shorn is smallest raw and under gzip. **It is not smallest under Brotli:** msgpackr records are 17% smaller and SchemaPack is slightly smaller, because Brotli compresses their repeated metadata particularly well.
+shorn is smallest raw and under gzip, and second under Brotli. **SchemaPack is 12% smaller under Brotli** while being 100,000 bytes larger raw, and the reason is specific rather than general: this fixture's `id`, `timestamp` and `memory` are counters, and a fixed-width big-endian integer leaves its high bytes unchanged across thousands of consecutive records, which LZ77 matches as long identical runs. shorn writes LEB128 — 40% fewer bytes for the same counter, but little-endian 7-bit groups lead with the byte that changes every record and straddle boundaries no byte-level matcher lines up with. Density and LZ-friendliness are in tension here, and shorn is on the density side of it by design.
 
-Compression CPU for the shorn payload: gzip 78.99 ms, gunzip 4.12 ms, Brotli q6 42.19 ms, unbrotli 5.25 ms.
+Compression CPU for the shorn payload: gzip 48.22 ms, gunzip 4.46 ms, Brotli q6 62.87 ms, unbrotli 5.79 ms.
 
 ### High-entropy data
 
 | Codec | Raw | Gzip | Brotli q6 |
 | --- | ---: | ---: | ---: |
-| **shorn** | **6,987,333** | **2,337,080** | 2,084,918 |
-| SchemaPack | 7,087,333 | 2,540,070 | 2,089,259 |
-| Avro | 7,100,358 | 2,446,369 | 2,187,026 |
-| msgpackr records | 7,750,895 | 2,598,288 | 2,235,235 |
-| Protobuf.js | 8,487,330 | 2,508,528 | **1,943,144** |
-| JSON | 18,996,242 | 3,001,786 | 2,580,139 |
+| **shorn** | **7,032,525** | **2,843,123** | 2,405,343 |
+| SchemaPack | 7,132,525 | 2,956,080 | 2,559,420 |
+| Avro | 7,240,836 | 2,933,473 | 2,529,981 |
+| msgpackr shared records | 7,750,895 | 2,977,950 | 2,610,896 |
+| msgpackr bundled strings | 8,053,257 | 3,078,433 | **2,245,961** |
+| Protobuf.js | 8,532,522 | 2,992,114 | 2,471,879 |
+| JSON | 19,153,708 | 3,288,544 | 3,213,618 |
 
-shorn is smallest raw and under gzip, and second under Brotli. Against JSON it is 63% smaller raw, 22% smaller under gzip, and 19% smaller under Brotli. Protobuf compresses best under Brotli here despite being 21% larger raw.
+shorn is smallest raw and under gzip, and second under Brotli. Against JSON it is 63% smaller raw, 14% smaller under gzip, and 25% smaller under Brotli. msgpackr's bundled-strings mode is 7% smaller under Brotli despite being 15% larger raw: it writes every string's content contiguously, and on data that is mostly unique strings that is the layout Brotli exploits best.
 
-Compression CPU: gzip 111.90 ms, gunzip 8.29 ms, Brotli q6 163.15 ms, unbrotli 12.47 ms.
+Compression CPU: gzip 99.27 ms, gunzip 8.75 ms, Brotli q6 170.65 ms, unbrotli 13.44 ms.
 
-**The caveat, stated plainly:** shorn is not smallest under every compressor. Brotli makes msgpackr records or Protobuf smaller in these fixtures. shorn is smallest raw and under gzip in both 100,000-event profiles.
+**The caveat, stated plainly:** shorn is not smallest under every compressor. Under Brotli, SchemaPack wins on repetitive data and msgpackr's bundled strings wins on high-entropy data — and both are in the tables above rather than left out of them. shorn is smallest raw and smallest under gzip in both 100,000-event profiles.
 
 ## Cutting bytes further
 
