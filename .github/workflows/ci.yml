@@ -27,10 +27,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-      # The seven examples are the surface the docs point at, and nothing else
-      # exercises them: they are outside tsconfig's `include`, and `node` strips
-      # their types without checking them. They assert on their own output, so
-      # running them is the check.
+      # The seven examples plus the live-WebSocket demo are the surface the docs and
+      # the launch posts point at, and nothing else exercises them: they are outside
+      # tsconfig's `include`, and `node` strips their types without checking them.
+      # They assert on their own output, so running them is the check. The demo opens
+      # a listening socket on an ephemeral port and takes about four seconds.
       - run: pnpm examples
 
   engines-floor:

@@ -38,7 +38,8 @@
     "docs:dev": "pnpm build && pnpm --filter docs dev",
     "docs:build": "pnpm build && pnpm --filter docs build",
     "docs:preview": "pnpm --filter docs preview",
-    "examples": "pnpm build && for f in examples/0*.ts; do node \"$f\"; done",
+    "demo": "pnpm build && node examples/live-websocket.ts",
+    "examples": "pnpm build && for f in examples/0*.ts; do node \"$f\"; done && node examples/live-websocket.ts",
     "bench": "pnpm build && node bench/run.mjs",
     "bench:large": "pnpm build && node bench/run.mjs --large",
     "bench:entropy": "pnpm build && node bench/run.mjs --large --high-entropy",
@@ -77,6 +78,7 @@
     "typescript": "^5.9.3",
     "valibot": "^1.4.2",
     "vitest": "^3.2.4",
+    "ws": "^8.21.3",
     "zod": "^4.4.3"
   },
   "engines": {
