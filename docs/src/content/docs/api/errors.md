@@ -67,7 +67,6 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 | --- | --- |
 | `Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported` | a union with two branches of one JSON type and no property that is a distinct `const` in every branch |
 | `Only nullable JSON Schema type arrays are currently supported` | a `type` array with >1 non-null entry |
-| `Arrays require an item schema` | an array with no `items` |
 | `Empty enums are unsupported` | an enum with no members |
 | `Enum member … has no JSON text of its own` | `NaN`, an infinity or `-0` in a mixed enum; none of the four survives the JSON text a mixed enum is ordered by |
 | `Invalid fixed array length X` | `minItems === maxItems` outside 0 to 1,000,000 |
@@ -79,6 +78,7 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 | `Unsupported JSON Schema combinator X` | `allOf` (an intersection) or `not` (`z.never()`) |
 | `The second argument must be a Standard JSON Schema implementation — toStandardJsonSchema(schema) for Valibot` | a raw JSON Schema object, or the structure wrapped in `{ structure }` |
 | `Required property "x" has no schema` | `required` names a property absent from `properties` |
+| `A "__proto__" property does not survive a JSON Schema; rename the field` | a field named `__proto__`. No validator's JSON Schema can carry it — the key sets the prototype of the `properties` object rather than joining it, or is dropped outright — so the field would be missing from the wire shape |
 | `Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported` | a default or widening refinement makes the sides differ |
 | `Standard Schema provides validation but not structure; pass a Standard JSON Schema implementation as the second argument` | Valibot, Zod < 4.2, ArkType < 2.1.28 |
 | `This schema already decodes to null; wrapping it in nullable() would give null two encodings` | `m.literal(null).nullable()`, or a second null marker over one already reachable. Never from a vendor schema — `compile()` drops a redundant wrapper instead of reaching this |

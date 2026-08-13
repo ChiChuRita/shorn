@@ -196,6 +196,10 @@ function asSchema(value: unknown): JsonSchema {
   return value as JsonSchema;
 }
 
+/** Said from two places, since two vendors lose a `__proto__` field two different ways. */
+const PROTO_KEY_MESSAGE =
+  'A "__proto__" property does not survive a JSON Schema; rename the field';
+
 /** Keywords that carry a shape without a `type`; a node holding one is not `any`. */
 const COMBINATORS = ["$ref", "allOf", "oneOf", "not"];
 
@@ -237,6 +241,18 @@ function discriminant(
 }
 
 /**
+ * The JSON type a branch declares, taken from `type` or from the `const` standing in for
+ * it. valibot writes a literal union as bare consts where zod puts a `type` beside each
+ * one, and a const names its own type as plainly as the keyword does — without this the
+ * same union compiled from one vendor and was refused from the other.
+ */
+function branchType(branch: JsonSchema): string | undefined {
+  if (typeof branch.type === "string") return branch.type;
+  if (!("const" in branch) || !isEnumValue(branch.const)) return undefined;
+  return branch.const === null ? "null" : typeof branch.const;
+}
+
+/**
  * The JSON type of each branch, when every branch declares exactly one and no two share
  * it. That is the whole condition for encoding a union with no discriminant: the type of
  * the value names its branch, so nothing is tried and nothing is guessed.
@@ -258,8 +274,9 @@ function disjointTypes(
     // branch whose type cannot be named.
     const target =
       typeof branch.$ref === "string" ? resolvePointer(ctx.document, branch.$ref) : branch;
-    if (typeof target.type !== "string") return undefined;
-    const type = target.type === "integer" ? "number" : target.type;
+    const declared = branchType(target);
+    if (declared === undefined) return undefined;
+    const type = declared === "integer" ? "number" : declared;
     if (types.includes(type)) return undefined;
     types.push(type);
   }
@@ -385,6 +402,27 @@ function refShape(pointer: string, ctx: RefContext): WireShape {
 }
 
 /**
+ * Every child that *is* one of the definitions, replaced by a reference to it.
+ *
+ * The top of `shape` is deliberately not tested — a definition's own body is equal to
+ * itself, and folding that would leave a definition standing for nothing but its own
+ * back-edge. Callers that need the top tested compare it themselves.
+ */
+function foldDefs(node: unknown, defs: readonly string[]): unknown {
+  const fold = (child: unknown): unknown => {
+    // A shape's JSON text is what the signature is taken from, so comparing the text is
+    // comparing the shape. Rebuilt key by key rather than by variant: a `WireShape` is
+    // plain JSON either way, and the walk costs a fifth of the bytes the variants did.
+    const index =
+      typeof child === "object" && child !== null ? defs.indexOf(JSON.stringify(child)) : -1;
+    return index < 0 ? foldDefs(child, defs) : { ref: index };
+  };
+  if (typeof node !== "object" || node === null) return node;
+  if (Array.isArray(node)) return node.map(fold);
+  return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, fold(value)]));
+}
+
+/**
  * One document as one shape, with any cycle lifted into a definition table.
  *
  * The root is expanded through `refShape` rather than directly, so that `$ref: "#"` is
@@ -397,17 +435,23 @@ function toWireShape(document: JsonSchema): WireDocument {
   const defs = ctx.defs as WireShape[];
 
   // Vendors spell one recursive type two ways, and the two differ by an unrolling: zod
-  // points the cycle at the root itself, while valibot inlines the root and emits an
-  // identical copy under `$defs`. Folding a root that merely duplicates a definition
-  // back onto it is what keeps the fingerprint from depending on which validator wrote
-  // the schema — the promise made in the schema-changes documentation.
+  // points a `$ref` at the definition from wherever the type is used, while valibot
+  // inlines a copy of it there and refers back from inside that copy. Both write the
+  // same bytes, so folding a copy of a definition back onto the definition is what keeps
+  // the fingerprint from depending on which validator wrote the schema — the promise
+  // made in the schema-changes documentation, and otherwise a `fingerprinted()` codec
+  // rejects a payload it can decode.
   //
-  // ponytail: the root only. Two identical *definitions* stay separate, so a mutually
-  // recursive type could still fingerprint differently across vendors. Hash-cons the
-  // table if that ever turns up.
+  // ponytail: definitions are compared as they were built, so a definition holding an
+  // inlined copy of *another* definition is folded against the un-folded text of that
+  // one. Fold to a fixed point if a mutually recursive type ever turns up.
+  const defsJson = defs.map((def) => JSON.stringify(def));
   const rootJson = JSON.stringify(root);
-  const duplicate = defs.findIndex((def) => JSON.stringify(def) === rootJson);
-  return { defs, root: duplicate < 0 ? root : { ref: duplicate } };
+  const duplicate = defsJson.indexOf(rootJson);
+  return {
+    defs: defs.map((def) => foldDefs(def, defsJson) as WireShape),
+    root: duplicate < 0 ? (foldDefs(root, defsJson) as WireShape) : { ref: duplicate },
+  };
 }
 
 function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
@@ -422,7 +466,7 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
   const union = schema.anyOf ?? schema.oneOf;
   if (Array.isArray(union)) {
     const branches = union.map(asSchema);
-    const nonNull = branches.filter((branch) => branch.type !== "null");
+    const nonNull = branches.filter((branch) => branchType(branch) !== "null");
     // `z.null().nullable()` writes `anyOf: [{type:"null"}, {type:"null"}]`. Every branch
     // is the same one value, so the union is that value — and refusing it as "not a
     // nullable union" named the one thing it unmistakably was.
@@ -527,8 +571,11 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
           ? { tuple, rest: wireShape(asSchema(schema.items), ctx) }
           : { tuple };
       }
-      if (!("items" in schema)) throw new EncodeError("Arrays require an item schema");
-      const array = wireShape(asSchema(schema.items), ctx);
+      // No `items` leaves the elements unconstrained, which is what `any` already means
+      // here — a bare `{}` compiles to it below. arktype spells `unknown[]` that way,
+      // where zod and valibot both write `items: {}`; refusing it made the same type
+      // compile from two vendors and not the third.
+      const array = "items" in schema ? wireShape(asSchema(schema.items), ctx) : "any";
       // A count the schema fixes needs no length varint, and like a tuple may hold a
       // zero-width element.
       return typeof schema.minItems === "number" && schema.minItems === schema.maxItems
@@ -537,6 +584,13 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
     }
     case "object": {
       const properties = asSchema(schema.properties ?? {});
+      // A field named `__proto__` does not survive the trip through JSON Schema: valibot
+      // builds `properties` by assignment, so the key sets that object's prototype
+      // instead of joining it, and the field is invisible below. Left alone it compiled
+      // to an object without the field, and an unvalidated codec then dropped the value
+      // on the wire without a word.
+      const proto: unknown = Object.getPrototypeOf(properties);
+      if (proto !== Object.prototype && proto !== null) throw new EncodeError(PROTO_KEY_MESSAGE);
       const additional = schema.additionalProperties;
       // `true` and `{}` both mean a value of any shape; normalized to one here.
       const extras =
@@ -554,9 +608,16 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
           : [],
       );
       for (const key of required) {
-        if (!Object.hasOwn(properties, key)) {
-          throw new EncodeError(`Required property ${JSON.stringify(key)} has no schema`);
-        }
+        if (Object.hasOwn(properties, key)) continue;
+        // The `__proto__` case again, from the vendor that drops the property instead of
+        // setting a prototype with it — zod lists it in `required` and omits it from
+        // `properties`. Same remedy, so the same sentence rather than one naming a
+        // missing schema, which is not what went wrong.
+        throw new EncodeError(
+          key === "__proto__"
+            ? PROTO_KEY_MESSAGE
+            : `Required property ${JSON.stringify(key)} has no schema`,
+        );
       }
       return {
         object: canonicalKeyOrder(Object.keys(properties)).map((key) => ({

@@ -32,7 +32,7 @@ A `uuid` is stored as the 16 bytes it stands for rather than the 36 characters i
 | Array | `z.array(T)` | `v.array(T)` | `"T[]"` | varint count + elements |
 | Fixed array | `z.array(T).length(n)` | `v.pipe(v.array(T), v.length(n))` | `"T[] == n"` | elements only |
 | Tuple | `z.tuple([...])` | `v.tuple([...])` | `["string", "number"]` | elements only |
-| Tuple with rest | `z.tuple([...], T)` | `v.tupleWithRest([...], T)` | — | fixed items + varint count + rest |
+| Tuple with rest | `z.tuple([...], T)` | `v.tupleWithRest([...], T)` | `["string", "...", "T[]"]` | fixed items + varint count + rest |
 
 An array's count is on the wire; a tuple's comes from the schema. That is why a tuple may contain zero-width elements and an array may not.
 
