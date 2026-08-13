@@ -216,7 +216,7 @@ const Node = z.object({ value: z.string(), get children() { return z.array(Node)
 
 The recursion is bounded by whatever lets it stop — an empty array here, a `null` back-edge in a linked list. Depth is capped at 256 levels on both sides, since a recursive schema takes its nesting from the payload rather than from the schema; see [Hostile Input](/hostile-input/).
 
-A `$ref` reached twice but never through itself is not a cycle. It is inlined, so a shared definition writes, and fingerprints, exactly as it would written out in full.
+A `$ref` reached twice but never through itself is not a cycle. It is inlined, so a shared definition writes, and fingerprints, exactly as it would written out in full — unless what it inlines is a copy of a *recursive* definition, which is folded back onto that definition instead. The bytes are the same either way; the fold is what keeps one recursive type on one fingerprint across validators that spell it differently.
 
 ## Open objects
 

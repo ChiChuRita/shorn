@@ -44,6 +44,8 @@ type({ name: "string", age: "number.integer >= 0" });
 
 This works because the wire shape comes from JSON Schema. The signature excludes `rejectUnknown`, which validators handle differently but which does not change the encoded bytes.
 
+A recursive type holds too, though the validators write it differently: one points a `$ref` at its definition from wherever the type is used, another inlines a copy there and refers back from inside that copy. A copy of a definition is folded onto the definition, so the two spellings derive one signature rather than two — without that, a `fingerprinted()` codec built from one validator rejects a payload written by the other and decodable by both.
+
 ## Integers have one spelling
 
 Overlong varints are rejected: `1` must be `0x01`, never `0x81 0x00`. This keeps the encoding unique, which is required for content addressing, deduplication, and byte-level equality.

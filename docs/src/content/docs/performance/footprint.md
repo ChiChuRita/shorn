@@ -13,10 +13,10 @@ An esbuild-minified browser bundle for each imported codec API. Validation libra
 | @msgpack/msgpack | 21.20 KB | 5.93 KB |
 | msgpackr | 27.59 KB | 10.39 KB |
 | cbor-x | 29.10 KB | 10.82 KB |
-| shorn `compile` (validating) | 29.33 KB | 9.10 KB |
+| shorn `compile` (validating) | 29.84 KB | 9.28 KB |
 | protobufjs/light | 88.35 KB | 25.93 KB |
 
-**shorn's wire codec is the smallest measured, 13% under `@msgpack/msgpack` gzipped.** `compile` is 53% larger gzipped because it validates on encode and decode, which no other row does — it is still under both msgpackr and cbor-x, which validate nothing. Compare the row that matches what you ship.
+**shorn's wire codec is the smallest measured, 13% under `@msgpack/msgpack` gzipped.** `compile` is 56% larger gzipped because it validates on encode and decode, which no other row does — it is still under both msgpackr and cbor-x, which validate nothing. Compare the row that matches what you ship.
 
 That margin was 26% two releases ago and is narrowing on purpose: the decode work below bought throughput with bytes, and each trade was argued against this table rather than assumed. It is a lead to defend, not a settled one.
 
@@ -26,18 +26,18 @@ That margin was 26% two releases ago and is narrowing on purpose: the decode wor
 
 | import set | minified | gzip | this row adds |
 | --- | ---: | ---: | ---: |
-| `compile` | 29,327 | 9,100 | — |
-| + `m` | 29,920 | 9,247 | 147 gzip |
-| + `safeEncode` / `safeDecode` | 30,153 | 9,322 | 75 gzip |
-| + `encodeAsync` / `decodeAsync` | 30,748 | 9,504 | 182 gzip |
-| + `fingerprinted` | 32,111 | 9,925 | 421 gzip |
-| everything | 32,860 | 10,155 | 230 gzip |
+| `compile` | 29,846 | 9,279 | — |
+| + `m` | 30,439 | 9,422 | 143 gzip |
+| + `safeEncode` / `safeDecode` | 30,672 | 9,506 | 84 gzip |
+| + `encodeAsync` / `decodeAsync` | 31,267 | 9,685 | 179 gzip |
+| + `fingerprinted` | 32,630 | 10,101 | 416 gzip |
+| everything | 33,379 | 10,322 | 221 gzip |
 
 **Only users who import a feature pay for it.** Fingerprinting is the most expensive single import at 421 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it.
 
 These numbers grew over the previous release, spent on schema coverage: discriminated unions, records, open objects, dynamic values, packed UUIDs, non-string enums, fixed-length arrays, and tuple rest elements — shapes that previously did not compile at all.
 
-The most recent 770 gzip bytes bought the last two: **type-disjoint unions** and **recursive schemas**. Both land in the `compile` row, since the adapter is what reads a `$ref` and what decides a union's branches cannot overlap; `m` is unchanged and stays the smallest row in the table.
+The most recent 949 gzip bytes bought the last three: **type-disjoint unions**, **recursive schemas**, and a round of cross-validator agreement — 179 of them for four shapes that compiled from one validator and not another, or lost a field on the way to the wire. All three land in the `compile` row, since the adapter is what reads a `$ref`, what decides a union's branches cannot overlap, and what reads one validator's JSON Schema as the same shape as another's; `m` is unchanged and stays the smallest row in the table.
 
 The functional helpers and fingerprinting tree-shake by export. `m` is one object, so importing it retains all of its builders. Add the size of your validator if it is not already part of the application.
 
