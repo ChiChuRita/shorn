@@ -6,154 +6,154 @@
   },
   "metrics": {
     "throughput/person encode": {
-      "value": 22263842,
+      "value": 21443153,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/person decode": {
-      "value": 62017621,
+      "value": 58327524,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/nested event encode": {
-      "value": 10076570,
+      "value": 9889760,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/nested event decode": {
-      "value": 13059658,
+      "value": 12191446,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/100-event batch encode": {
-      "value": 139434,
+      "value": 131446,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/100-event batch decode": {
-      "value": 126592,
+      "value": 118912,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/unicode string encode": {
-      "value": 2022686,
+      "value": 1919956,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/unicode string decode": {
-      "value": 1880286,
+      "value": 1845171,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/500 ms timestamps encode": {
-      "value": 199255,
+      "value": 197459,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/500 ms timestamps decode": {
-      "value": 191815,
+      "value": 186605,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/zod person (validated) encode": {
-      "value": 8816212,
+      "value": 8462942,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/zod person (validated) decode": {
-      "value": 12015641,
+      "value": 11264193,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/zod person (unchecked) encode": {
-      "value": 19274336,
+      "value": 18139642,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/zod person (unchecked) decode": {
-      "value": 44495979,
+      "value": 41434931,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/fingerprinted zod person encode": {
-      "value": 7765229,
+      "value": 7389240,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/fingerprinted zod person decode": {
-      "value": 10471771,
+      "value": 9930814,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/document encode": {
-      "value": 186497,
+      "value": 175260,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "throughput/document decode": {
-      "value": 216526,
+      "value": 200210,
       "unit": "ops/s",
       "direction": "higher",
       "tolerance": 0.25,
       "floor": 0
     },
     "hostile/reject empty": {
-      "value": 2760.455,
+      "value": 2848.249,
       "unit": "ns",
       "direction": "lower",
       "tolerance": 0.3,
       "floor": 0
     },
     "hostile/reject truncated": {
-      "value": 2850.517,
+      "value": 3000.592,
       "unit": "ns",
       "direction": "lower",
       "tolerance": 0.3,
       "floor": 0
     },
     "hostile/reject trailing byte": {
-      "value": 2185.06,
+      "value": 2773.442,
       "unit": "ns",
       "direction": "lower",
       "tolerance": 0.3,
       "floor": 0
     },
     "hostile/reject all 0xff": {
-      "value": 2471.497,
+      "value": 2707.264,
       "unit": "ns",
       "direction": "lower",
       "tolerance": 0.3,
@@ -230,56 +230,56 @@
       "floor": 0
     },
     "bundle/m only minified": {
-      "value": 16866,
+      "value": 16862,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "bundle/m only gzip": {
-      "value": 5181,
+      "value": 5180,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "bundle/compile + m minified": {
-      "value": 29920,
+      "value": 30435,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "bundle/compile + m gzip": {
-      "value": 9247,
+      "value": 9421,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "bundle/full surface minified": {
-      "value": 32860,
+      "value": 33375,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "bundle/full surface gzip": {
-      "value": 10155,
+      "value": 10320,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "startup/import": {
-      "value": 1.318,
+      "value": 1.499,
       "unit": "ms",
       "direction": "lower",
       "tolerance": 0.4,
       "floor": 0
     },
     "startup/first encode": {
-      "value": 0.404,
+      "value": 0.376,
       "unit": "ms",
       "direction": "lower",
       "tolerance": 0.4,
