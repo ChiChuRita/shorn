@@ -6,7 +6,7 @@ description: Reference for the low-level wire builders, Reader and Writer, and I
 `m` builds a codec directly from the wire format, without Standard Schema or JSON Schema. Reach for it when no validation schema exists, when you need `m.bytes()` or `m.float32()`, or when you are writing a protocol fixture or custom codec.
 
 ```ts
-import { m, type Infer } from "shorn";
+import { m, type Infer } from "@chichurita/shorn";
 
 const Point = m.object({ x: m.int(), y: m.int() });
 type Point = Infer<typeof Point>; // { x: number; y: number }

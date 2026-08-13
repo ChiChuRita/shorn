@@ -66,15 +66,15 @@ importers:
       '@astrojs/starlight':
         specifier: ^0.38.1
         version: 0.38.5(astro@6.4.8(@types/node@26.1.2)(rollup@4.62.4))
+      '@chichurita/shorn':
+        specifier: workspace:*
+        version: link:..
       astro:
         specifier: ^6.0.5
         version: 6.4.8(@types/node@26.1.2)(rollup@4.62.4)
       sharp:
         specifier: ^0.33.0
         version: 0.33.5
-      shorn:
-        specifier: workspace:*
-        version: link:..
       starlight-llms-txt:
         specifier: ^0.8.0
         version: 0.8.1(@astrojs/starlight@0.38.5(astro@6.4.8(@types/node@26.1.2)(rollup@4.62.4)))(astro@6.4.8(@types/node@26.1.2)(rollup@4.62.4))

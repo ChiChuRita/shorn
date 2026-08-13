@@ -8,7 +8,7 @@ Valibot implements Standard Schema but provides JSON Schema conversion in a sepa
 ```ts
 import * as v from "valibot";
 import { toStandardJsonSchema } from "@valibot/to-json-schema";
-import { decode, encode } from "shorn";
+import { decode, encode } from "@chichurita/shorn";
 
 const Person = v.object({
   name: v.string(),

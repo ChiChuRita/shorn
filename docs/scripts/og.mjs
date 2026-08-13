@@ -60,7 +60,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
     .join("\n  ")}
 
   <text x="80" y="590" font-family="${SANS}" font-size="20" fill="${INK_3}">
-    npm install shorn
+    npm install @chichurita/shorn
   </text>
 </svg>`;
 

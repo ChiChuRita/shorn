@@ -13,17 +13,17 @@ shorn is experimental alpha and runs in Node, Bun, Deno, browsers, and workers.
 ## Installation
 
 ```sh
-npm install shorn zod
+npm install @chichurita/shorn zod
 ```
 
-ESM only, Node 20 or newer. `require("shorn")` works from Node 20.19 and 22.12 on;
-before that a CommonJS caller needs `await import("shorn")`.
+ESM only, Node 20 or newer. `require("@chichurita/shorn")` works from Node 20.19 and 22.12 on;
+before that a CommonJS caller needs `await import("@chichurita/shorn")`.
 
 ## Encode a value
 
 ```ts
 import { z } from "zod";
-import { decode, encode } from "shorn";
+import { decode, encode } from "@chichurita/shorn";
 
 const Person = z.object({
   name: z.string(),
@@ -46,7 +46,7 @@ Bare payloads carry no wire identifier. Add a fingerprint to anything stored,
 queued, or read across deployments:
 
 ```ts
-import { compile, fingerprinted } from "shorn";
+import { compile, fingerprinted } from "@chichurita/shorn";
 
 const PersonWire = fingerprinted(compile(Person), { bytes: 4 });
 

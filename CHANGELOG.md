@@ -24,11 +24,11 @@ check survives — bounds, length limits, trailing-byte refusal — but transfor
 in its refinements now decode silently. Keep the validated codec at any boundary you do
 not own.
 
-**`require("shorn")` resolves.** The `exports` map declared only an `import` condition,
+**`require("@chichurita/shorn")` resolves.** The `exports` map declared only an `import` condition,
 so CommonJS callers were refused by the resolver before Node could decide whether it
 could load an ES module. There is still no CommonJS build and no plan for one — Node
 20.19+ and 22.12+ reach the ESM build through `require`, older versions get
-`ERR_REQUIRE_ESM`, and `await import("shorn")` remains the portable form.
+`ERR_REQUIRE_ESM`, and `await import("@chichurita/shorn")` remains the portable form.
 
 **Generated decoders for objects with optional fields**, rather than the interpreted
 loop — 17% faster on a document-shaped payload. Three shapes stay interpreted because

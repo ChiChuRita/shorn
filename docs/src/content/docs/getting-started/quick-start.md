@@ -5,7 +5,7 @@ description: Encode, decode, reuse a compiled codec, and add wire identity for p
 
 ```ts
 import { z } from "zod";
-import { compile, decode, encode, fingerprinted, safeDecode } from "shorn";
+import { compile, decode, encode, fingerprinted, safeDecode } from "@chichurita/shorn";
 
 const Person = z.object({
   name: z.string(),

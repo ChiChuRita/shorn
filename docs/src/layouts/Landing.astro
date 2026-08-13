@@ -58,7 +58,7 @@ const lines = (code ?? []).map((line) => {
 const root = import.meta.env.BASE_URL.replace(/\/$/, "");
 const p = (slug: string) => `${root}/${slug}`;
 
-const install = "npm install shorn";
+const install = "npm install @chichurita/shorn";
 
 // Absolute, because og:image is the one URL crawlers will not resolve relatively.
 const canonical = new URL(Astro.url.pathname, Astro.site);

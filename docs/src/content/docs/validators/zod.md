@@ -7,7 +7,7 @@ Zod 4.2 and newer implements both Standard Schema and Standard JSON Schema direc
 
 ```ts
 import { z } from "zod";
-import { compile, decode, encode, fingerprinted } from "shorn";
+import { compile, decode, encode, fingerprinted } from "@chichurita/shorn";
 
 const Person = z.object({
   name: z.string(),

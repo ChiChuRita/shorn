@@ -7,7 +7,7 @@ ArkType 2.1.28 and newer implements both Standard Schema and Standard JSON Schem
 
 ```ts
 import { type } from "arktype";
-import { decode, encode } from "shorn";
+import { decode, encode } from "@chichurita/shorn";
 
 const Person = type({
   name: "string",

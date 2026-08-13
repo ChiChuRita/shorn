@@ -159,7 +159,7 @@ import "../styles/strips.css";
     let deps: ReturnType<typeof load> | null = null;
 
     const load = () =>
-      Promise.all([import("zod"), import("shorn")]).then(([zod, shorn]) => ({
+      Promise.all([import("zod"), import("@chichurita/shorn")]).then(([zod, shorn]) => ({
         z: zod.z as unknown,
         codec: { encode: shorn.encode, decode: shorn.decode } satisfies Codec,
       }));

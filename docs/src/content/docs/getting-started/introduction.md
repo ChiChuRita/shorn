@@ -7,7 +7,7 @@ shorn encodes data with the schema your project already uses. It reads [Standard
 
 ```ts
 import { z } from "zod";
-import { decode, encode } from "shorn";
+import { decode, encode } from "@chichurita/shorn";
 
 const Person = z.object({
   name: z.string(),
