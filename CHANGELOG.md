@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.1
+
+**Same bytes, faster.** Nothing on the wire moves and no API changes; payloads written by 0.2.0 decode unchanged and vice versa. If you store or queue shorn payloads, this upgrade needs nothing from you.
+
+### Documents encode 78% faster and decode 58% faster
+
+Document-shaped data — many keys, optional fields, most of the payload being string content — was the shape shorn was slowest on, and it moved for three reasons.
+
+**Objects with optional fields now build their encoder at construction**, as objects without them already did. Which fields arrive varies per payload, but each optional's bit in the presence bitmap is fixed by the schema, so the bitmap is assembled from constants instead of allocating a byte array and a parallel value array on every encode. Records with optional fields encode 2.2x faster; an array of them, 3.6x.
+
+**String encoding stopped measuring strings twice.** It walked every string once to total its UTF-8 length and again to write the bytes, when `TextEncoder` already reports the total. That walk was 85% of the cost of encoding a 256-byte ASCII string and 99% at 64 KB. A 4.5 KB string now encodes about 17x faster, a 258-byte one 2.9x, and the Unicode benchmark fixture 65%.
+
+**String decoding stopped allocating a view of every string** before handing it to the decoder, which accepts offsets directly. A thousand short strings decode 75% faster. On the Unicode fixture this closes most of a gap against Avro that used to be 19%.
+
+### Bundle cost
+
+The wire codec (`m`) grows 5.18 KB → 5.52 KB gzipped, which takes its lead over `@msgpack/msgpack` from 13% to 7%. That is the number that got worse, and it is stated in [footprint](https://shorn.dev/performance/footprint/) rather than left for you to find. A fourth optimization worth 2x on short non-ASCII strings was measured, priced at a further 238 gzip bytes, and dropped as not worth it.
+
 ## 0.2.0
 
 **Wire-breaking, one shape.** A recursive type reached through a wrapper — `z.object({ roots: z.array(Tree) })` rather than `Tree` itself — now derives the same fingerprint from every validator. Valibot's spelling of such a schema previously derived a different one from zod's while writing byte-identical payloads, so `fingerprinted()` rejected payloads it could decode. Its fingerprint moves onto the bytes it was already writing; zod's and arktype's do not move, no other signature changes, and no payload's bytes change. A `fingerprinted()` payload written by 0.1.0 against that one shape under Valibot is refused by 0.2.0 — re-encode it, or pin both ends.
