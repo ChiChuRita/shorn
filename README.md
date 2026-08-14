@@ -6,7 +6,7 @@ back — no schema language, no code generation, no second source of truth.
 
 Field names and type tags stay out of the payload because the schema already
 provides them. The saving comes from the schema, not a compressor, so it costs
-no CPU: up to 6.2× faster to encode and 13.5× faster to decode than JSON bytes.
+no CPU: up to 6.0× faster to encode and 13.6× faster to decode than JSON bytes.
 
 shorn is experimental alpha and runs in Node, Bun, Deno, browsers, and workers.
 

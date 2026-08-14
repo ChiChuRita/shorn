@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { DecodeError, EncodeError, m } from "../src/index.js";
+import { DecodeError, EncodeError, m, Writer } from "../src/index.js";
+
+/**
+ * `Writer`'s buffer and offset, which are `private` to callers and erased at runtime.
+ * Reaching them is the only way to place a write at a chosen distance from the end of
+ * the buffer; `bench/string-threshold.mjs` reaches for the same three.
+ */
+interface OpenWriter {
+  ensure(size: number): void;
+  string(value: string): void;
+  offset: number;
+  buffer: Uint8Array;
+}
 
 describe("shorn core", () => {
   const Person = m.object({
@@ -140,6 +152,36 @@ describe("shorn core", () => {
     for (const length of [0, 126, 127]) {
       const value = `${"x".repeat(length)}ü`;
       expect(m.string().decode(m.string().encode(value))).toBe(value);
+    }
+  });
+
+  it("writes a string flush against the end of the buffer", () => {
+    // The length varint is reserved before the UTF-8 length is known, so a string whose
+    // bytes need a wider varint than its code-unit count suggested has its payload
+    // shifted up a byte to make room. Placing the offset so the reserve ends exactly on
+    // the buffer's last byte is what proves the shift has somewhere to go — a store past
+    // a Uint8Array is dropped rather than thrown, so one byte short truncated the string
+    // in silence. 48 CJK characters is the shortest value that reaches it.
+    const encoder = new TextEncoder();
+    for (const point of ["界", "ü", "\u{1f600}", "x"]) {
+      for (let repeats = 1; repeats * point.length <= 200; repeats++) {
+        const value = point.repeat(repeats);
+        const expected = m.string().encode(value);
+        // Both the hand-copied short path and the encodeInto path above its gate, and
+        // every alignment from flush to comfortable, since only one of them is the bug.
+        for (let slack = 0; slack <= 3; slack++) {
+          const writer = new Writer() as unknown as OpenWriter;
+          writer.ensure(1 << 16);
+          writer.offset = writer.buffer.length - (value.length * 3 + 2) + slack;
+          const start = writer.offset;
+          writer.string(value);
+          expect(writer.offset).toBeLessThanOrEqual(writer.buffer.length);
+          expect([...writer.buffer.subarray(start, writer.offset)]).toEqual([...expected]);
+        }
+        expect(expected.length).toBe(
+          encoder.encode(value).length + (encoder.encode(value).length < 0x80 ? 1 : 2),
+        );
+      }
     }
   });
 

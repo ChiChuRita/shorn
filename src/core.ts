@@ -2,6 +2,14 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 const MAX_COLLECTION_LENGTH = 1_000_000;
 const ASCII_FAST_PATH_LIMIT = 8;
+/**
+ * Code units below which `Writer.string` copies them by hand rather than calling
+ * `encodeInto`. The native call costs a flat ~45ns whatever the length while the loop
+ * costs about 0.9ns per unit, so the crossover is where they meet — `bench/string-threshold.mjs`
+ * sweeps it. It sat at 128 only because the one-byte length varint is valid up to there,
+ * which bounds the *speculation*, not the strategy.
+ */
+const ASCII_WRITE_LIMIT = 48;
 /** Floats one `Reader` must read before a `DataView` over the input pays for itself. */
 const FLOAT_VIEW_TRIP = 8;
 const MAX_BYTE_LENGTH = 64 * 1024 * 1024;
@@ -88,6 +96,36 @@ const nodeUtf8Slice: ((this: Uint8Array, start: number, end: number) => string) 
  * that has to send a string back to the fatal decoder for a second opinion.
  */
 const REPLACEMENT_CHARACTER = "�";
+
+/**
+ * Whether a string is free of unpaired surrogates, which is the one thing `encodeInto`
+ * will not report: it substitutes U+FFFD where shorn refuses, so a lone surrogate would
+ * round-trip as a different string.
+ *
+ * `String.prototype.isWellFormed` where there is one, and it is not merely a tidier
+ * spelling of the loop below — V8 answers in constant time for a one-byte string, which
+ * cannot hold a surrogate at all, and scans about seven times faster than JS when it has
+ * to. That is what lets `Writer.string` stop counting UTF-8 bytes by hand.
+ *
+ * The regex is for runtimes older than the method (Node 20 has it; Safari below 16.4 and
+ * Firefox below 119 do not). It is the same question asked another way: under `u`, a
+ * well-formed pair is one astral code point and never matches `\p{Surrogate}`, while a
+ * lone one is a surrogate code point and always does. Checked against the native method
+ * over 300k random strings before it was written down.
+ */
+const LONE_SURROGATE = /\p{Surrogate}/u;
+const isWellFormed: (value: string) => boolean =
+  // Typed here rather than by raising `lib` to ES2024, which would also let
+  // `Object.groupBy` and `Promise.withResolvers` typecheck — neither of which Node 20,
+  // the supported floor, has.
+  typeof (String.prototype as { isWellFormed?: unknown }).isWellFormed === "function"
+    ? (value) => (value as unknown as { isWellFormed(): boolean }).isWellFormed()
+    : (value) => !LONE_SURROGATE.test(value);
+
+/** Bytes `varuint` will spend on a value, for a length written before it is known. */
+function varuintWidth(value: number): number {
+  return value < 0x80 ? 1 : value < 0x4000 ? 2 : value < 0x200000 ? 3 : 4;
+}
 
 /**
  * One eight-byte staging buffer for reading floats. A Reader is built per `decode()`,
@@ -291,12 +329,12 @@ export class Writer {
   }
 
   string(value: string): void {
-    // Short ASCII in one pass, speculatively: under 128 code units the length varint is
-    // one byte whatever the UTF-8 length turns out to be, so write it before it is
-    // confirmed and rewind on the first unit at or above 0x80. `bench/string-threshold.mjs`
-    // is what measures the gate.
+    // Short ASCII in one pass, speculatively: below the gate an ASCII string's UTF-8
+    // length is its code-unit count, so the length byte can be written before that is
+    // confirmed and rewound on the first unit at or above 0x80.
+    // `bench/string-threshold.mjs` is what measures the gate.
     const units = value.length;
-    if (units < 0x80) {
+    if (units < ASCII_WRITE_LIMIT) {
       this.ensure(units + 1);
       const buffer = this.buffer;
       const start = this.offset;
@@ -312,40 +350,71 @@ export class Writer {
         this.offset = offset;
         return;
       }
+      // Not ASCII after all: rewind and let the general path below write the whole
+      // string, `encodeInto`'s flat ~45ns included. Finishing it here with a hand-written
+      // UTF-8 loop instead measured 2x on a short accented string and cost 238 gzip
+      // bytes — the worst byte-per-benefit on this path, for 25 lines reimplementing
+      // `TextEncoder`. Worth revisiting only if short non-ASCII encode becomes the
+      // complaint, and the flush-against-the-buffer-end case it needs is already pinned
+      // in `test/core.test.ts`.
       this.offset = start;
     }
 
-    // The surrogate scan touches every code unit anyway, so it also totals the UTF-8
-    // length — which is what lets the varint go first and encodeInto land the bytes in
-    // their final place instead of 5 bytes past it.
-    let byteLength = 0;
-    for (let index = 0; index < value.length; index++) {
-      const code = value.charCodeAt(index);
-      if (code < 0x80) {
-        byteLength += 1;
-      } else if (code < 0x800) {
-        byteLength += 2;
-      } else if (code >= 0xd800 && code <= 0xdbff) {
-        const next = value.charCodeAt(++index);
-        if (!(next >= 0xdc00 && next <= 0xdfff)) {
-          throw new EncodeError("String contains an unpaired surrogate");
-        }
-        byteLength += 4;
-      } else if (code >= 0xdc00 && code <= 0xdfff) {
-        throw new EncodeError("String contains an unpaired surrogate");
-      } else {
-        byteLength += 3;
-      }
+    // Nothing counts UTF-8 bytes by hand any more. `encodeInto` already knows the total
+    // and reports it, so the only question left for JS is well-formedness — and that is
+    // free on a one-byte string. The hand-written scan this replaced was 85% of an ASCII
+    // encode at 256 units and 99% at 64K; `bench/string-threshold.mjs` measures both.
+    if (!isWellFormed(value)) throw new EncodeError("String contains an unpaired surrogate");
+    if (units > MAX_BYTE_LENGTH) throw new EncodeError("String is too large");
+
+    // Written before the length is known, so the length varint has to be reserved. The
+    // width of `units` is the right guess: UTF-8 is never shorter than the code-unit
+    // count, so the real width is this or wider — never narrower — and for ASCII, which
+    // is most strings, it is exactly this and nothing moves afterwards.
+    const reserved = varuintWidth(units);
+    // Capped rather than the plain 3x bound: a 30M-unit string of 3-byte characters is
+    // over the ceiling and must be refused *without* first growing the buffer to 90MB.
+    // `encodeInto` stops on a character boundary when the destination fills, and a short
+    // `read` is how that is detected.
+    //
+    // ponytail: reserving 3x means a 60MB ASCII string peaks at a 128MB buffer where the
+    // scan this replaced sized it exactly at 64MB — traded for not walking 60M code units
+    // to learn a length `encodeInto` reports for free. `Writer.reset` drops the buffer
+    // straight after, so it is a peak and not a leak. Size it exactly for strings past a
+    // megabyte if that peak ever matters.
+    const capacity = Math.min(units * 3, MAX_BYTE_LENGTH + 1);
+    // Room for the *widest* varint the payload could need, not the one guessed above.
+    // The backfill shifts the payload up by a byte when the guess is short, and that
+    // shift has to land inside the buffer: reserving only the guess truncated the last
+    // byte of, say, a 48-character CJK string whenever the reserve ended flush on the
+    // end of the buffer — silently, since a store past a Uint8Array is dropped, not
+    // thrown. `varuintWidth` is monotonic and `written <= capacity`, so this bounds it.
+    this.ensure(varuintWidth(capacity) + capacity);
+    const start = this.offset + reserved;
+    const { read, written } = textEncoder.encodeInto(
+      value,
+      this.buffer.subarray(start, start + capacity),
+    );
+    if (read < units || written > MAX_BYTE_LENGTH) throw new EncodeError("String is too large");
+
+    // The move comes first: a wider varint than was reserved reaches into the payload's
+    // first byte, so writing it before the bytes are out of the way corrupts them.
+    // A native memmove, and only when the guess was a byte short — never for ASCII.
+    const width = varuintWidth(written);
+    if (width !== reserved) this.buffer.copyWithin(this.offset + width, start, start + written);
+    this.putVaruint(this.offset, written, width);
+    this.offset += width + written;
+  }
+
+  /** A varint of a known width at a known offset, for a length reserved before it was known. */
+  private putVaruint(at: number, value: number, width: number): void {
+    const buffer = this.buffer;
+    let word = value;
+    for (let index = at; index < at + width - 1; index++) {
+      buffer[index] = (word & 0x7f) | 0x80;
+      word >>>= 7;
     }
-
-    if (byteLength > MAX_BYTE_LENGTH) throw new EncodeError("String is too large");
-    this.varuint(byteLength);
-    this.ensure(byteLength);
-
-    // Only non-ASCII or 128+ code units reach here, so there is no short-ASCII charCode
-    // loop left to beat encodeInto's native-boundary cost.
-    textEncoder.encodeInto(value, this.buffer.subarray(this.offset, this.offset + byteLength));
-    this.offset += byteLength;
+    buffer[at + width - 1] = word;
   }
 
   float32(value: number): void {
@@ -508,7 +577,17 @@ export class Reader {
         }
       }
     }
-    const bytes = this.bytes(length);
+    // `bytes()` inlined rather than called, for the view it would allocate: both decoders
+    // below can read a range of the input directly, so the only string that needs one is
+    // the malformed one on the way to being refused.
+    if (length > MAX_BYTE_LENGTH) {
+      throw new DecodeError(`Invalid byte length ${length}`, this.offset);
+    }
+    const from = this.offset;
+    const to = from + length;
+    if (to > this.buffer.length) throw new DecodeError("Unexpected end of input", from);
+    this.offset = to;
+
     // Node's decoder first, and it keeps the fatal contract rather than weakening it.
     // `utf8Slice` substitutes U+FFFD for every malformed sequence, so a result with no
     // U+FFFD in it *proves* the input was well formed — that is the whole check, and
@@ -520,13 +599,13 @@ export class Reader {
     // intact instead of being mistaken for corruption. Both cases are rare and pay one
     // extra pass; nothing is accepted that the fatal decoder would have refused.
     if (nodeUtf8Slice !== undefined) {
-      const decoded = nodeUtf8Slice.call(bytes, 0, length);
+      const decoded = nodeUtf8Slice.call(this.buffer, from, to);
       if (decoded.indexOf(REPLACEMENT_CHARACTER) < 0) return decoded;
     }
     try {
-      return textDecoder.decode(bytes);
+      return textDecoder.decode(this.buffer.subarray(from, to));
     } catch (error) {
-      throw new DecodeError("Invalid UTF-8", this.offset - bytes.length, { cause: error });
+      throw new DecodeError("Invalid UTF-8", from, { cause: error });
     }
   }
 
@@ -718,6 +797,10 @@ export abstract class Schema<T> {
     if (!isUint8Array(value)) {
       throw new DecodeError(`Expected a Uint8Array, received ${typeof value}`, 0);
     }
+    // Not pooled, though `Writer` is. Reusing one Reader across decodes was measured at
+    // -35% on a person decode: the `try`/`finally` a pool needs to return it blocks V8
+    // from optimizing this function, whose `this._decode(reader)` is megamorphic, and a
+    // nursery allocation is cheaper than that. Same finding as `encodePath`'s.
     const reader = new Reader(value);
     const decoded = this._decode(reader);
     if (!reader.done) {
@@ -1056,8 +1139,13 @@ export class ArraySchema<T> extends Schema<T[]> {
     } else if (value.length !== this.length) {
       throw new EncodeError(`Expected an array with ${this.length} items`);
     }
-    for (let index = 0; index < value.length; index++) {
-      this.item._encode(writer, value[index]!);
+    // Both hoisted, and the count matters more than the field load: the length varint is
+    // already written, so re-reading `value.length` each turn would let an element getter
+    // that pushes onto the array write more elements than the count it declared.
+    const item = this.item;
+    const count = value.length;
+    for (let index = 0; index < count; index++) {
+      item._encode(writer, value[index]!);
     }
   }
 
@@ -1077,20 +1165,21 @@ export class ArraySchema<T> extends Schema<T[]> {
   _decode(reader: Reader): T[] {
     // A fixed length still faces the budget check below: `minItems` may come from a
     // fetched JSON Schema, so it is no more trusted than a length varint.
+    const item = this.item;
     const length = this.length ?? reader.varuint();
     if (length > MAX_COLLECTION_LENGTH) {
       throw new DecodeError(`Array length ${length} exceeds the limit`, reader.position);
     }
     // Before allocating a slot: `length` elements need at least `length *
     // item._minWidth` bytes, so a larger count is unsatisfiable.
-    if (length * this.item._minWidth > reader.remaining) {
+    if (length * item._minWidth > reader.remaining) {
       throw new DecodeError(
         `Array length ${length} exceeds the remaining input`,
         reader.position,
       );
     }
     const values = new Array<T>(length);
-    for (let index = 0; index < length; index++) values[index] = this.item._decode(reader);
+    for (let index = 0; index < length; index++) values[index] = item._decode(reader);
     return values;
   }
 }
@@ -1625,12 +1714,17 @@ function buildRecordDecoder(
       body = `return{${properties.join(",")}}`;
     } else {
       const statements: string[] = [];
+      // One local per bitmap byte, not the `r.bytes(width)` subarray this replaced: the
+      // width is fixed by the schema, so the view was one allocation per decoded object
+      // — the whole of it on an array of small optional-carrying records.
+      const load = Array.from({ length: bitmapWidth }, (_, byte) => `b${byte}=r.byte()`);
+      statements.push(`const ${load.join(",")}`);
       // The same rejection the interpreted path makes, before any field is read: padding
       // above the last optional must be zero, or two payloads decode to one value.
       const spare = optionalCount % 8;
       if (spare !== 0) {
         statements.push(
-          `if((b[${bitmapWidth - 1}]>>>${spare})!==0)throw new x0("Non-canonical presence bitmap padding",r.position)`,
+          `if((b${bitmapWidth - 1}>>>${spare})!==0)throw new x0("Non-canonical presence bitmap padding",r.position)`,
         );
       }
       statements.push("const o={}");
@@ -1642,10 +1736,10 @@ function buildRecordDecoder(
         statements.push(
           optionalIndex < 0
             ? read
-            : `if(b[${optionalIndex >> 3}]&${1 << (optionalIndex & 7)})${read}`,
+            : `if(b${optionalIndex >> 3}&${1 << (optionalIndex & 7)})${read}`,
         );
       }
-      body = `const b=r.bytes(${bitmapWidth});${statements.join(";")};return o`;
+      body = `${statements.join(";")};return o`;
     }
     const make = new Function(...parameters, `return function(r){${body}}`) as (
       ...args: unknown[]
@@ -1659,20 +1753,50 @@ function buildRecordDecoder(
 /**
  * The encode-side twin of `buildRecordDecoder`, for its reasons and under its rules.
  * Here the shared loop that goes megamorphic is `for (const field of this.fields)`.
+ *
+ * Objects **with** optional fields are generated too, which they were not — the same
+ * oversight the decoder had, and the one `bench/fixtures.mjs` named. A presence bitmap
+ * makes *which* fields arrive dynamic, but each optional's bit is fixed by the schema,
+ * so a bitmap byte is a constant OR of literals rather than the `Uint8Array` and
+ * parallel value array the interpreted path allocates per encode.
  */
 function buildRecordEncoder(
   fields: readonly ObjectField[],
+  optionalCount: number,
+  bitmapWidth: number,
 ): ((writer: Writer, value: Record<string, unknown>) => void) | undefined {
   try {
     // `EncodeError` arrives as argument `x0` rather than a capture: a wrapper closure
     // would be one creation site shared by every schema — the megamorphism this exists
     // to avoid.
     const { parameters, args } = recordParts(fields, [EncodeError]);
-    const statements = fields.map((_, index) => `s${index}._encode(w,v[k${index}])`);
-    const make = new Function(
-      ...parameters,
-      `return function(w,v){if(typeof v!=="object"||v===null||Array.isArray(v))throw new x0("Expected an object");${statements.join(";")}}`,
-    ) as (...args: unknown[]) => (writer: Writer, value: Record<string, unknown>) => void;
+    const guard = `if(typeof v!=="object"||v===null||Array.isArray(v))throw new x0("Expected an object")`;
+    let body: string;
+    if (optionalCount === 0) {
+      body = `${guard};${fields.map((_, index) => `s${index}._encode(w,v[k${index}])`).join(";")}`;
+    } else {
+      const optionals = fields
+        .map((field, index) => ({ field, index }))
+        .filter(({ field }) => field.optionalIndex >= 0);
+      // Hoisted, and read exactly once each: the value is wanted twice — for its bit and
+      // for its bytes — and a field backed by a getter must not see two reads.
+      const hoist = `const ${optionals.map(({ index }) => `o${index}=v[k${index}]`).join(",")}`;
+      const bitmap = Array.from({ length: bitmapWidth }, (_, byte) => {
+        const bits = optionals
+          .filter(({ field }) => field.optionalIndex >> 3 === byte)
+          .map(({ field, index }) => `(o${index}===undefined?0:${1 << (field.optionalIndex & 7)})`);
+        return `w.byte(${bits.join("|")})`;
+      });
+      const writes = fields.map((field, index) =>
+        field.optionalIndex < 0
+          ? `s${index}._encode(w,v[k${index}])`
+          : `if(o${index}!==undefined)s${index}._encode(w,o${index})`,
+      );
+      body = `${guard};${hoist};${bitmap.join(";")};${writes.join(";")}`;
+    }
+    const make = new Function(...parameters, `return function(w,v){${body}}`) as (
+      ...args: unknown[]
+    ) => (writer: Writer, value: Record<string, unknown>) => void;
     return make(...args);
   } catch {
     return undefined;
@@ -1752,13 +1876,8 @@ class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     // instance the way the decoder is: a distinct `_encode` per schema tips
     // `ArraySchema`'s shared `this.item._encode(...)` site megamorphic, measured at
     // -25% on an array of plain uints — a shape holding no object schema at all.
-    if (
-      optionalIndex === 0 &&
-      !this.inheritableField &&
-      !rejectUnknownProperties &&
-      this.tail === undefined
-    ) {
-      this.generatedEncode = buildRecordEncoder(this.fields);
+    if (!this.inheritableField && !rejectUnknownProperties && this.tail === undefined) {
+      this.generatedEncode = buildRecordEncoder(this.fields, optionalIndex, this.bitmapWidth);
     }
   }
 
