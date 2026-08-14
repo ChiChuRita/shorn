@@ -19,7 +19,7 @@ const bytes = encode(Person, person);
 const back = decode(Person, bytes); // typed and validated
 ```
 
-The payload is eight bytes: field names and type tags remain in the schema. See [Byte Layout](/wire-format/layout/) for the exact encoding.
+The payload is eight bytes: field names and type tags remain in the schema. See [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) for those eight bytes labelled, and [Byte Layout](/wire-format/layout/) for every wire type.
 
 Valibot needs one additional structure argument; Zod and ArkType schemas are passed directly. See [Valibot](/validators/valibot/).
 

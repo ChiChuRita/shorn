@@ -3,7 +3,7 @@ title: Byte Layout
 description: Every wire type, byte by byte, with the rules that make the encoding canonical.
 ---
 
-The format is **tagless and positional**. Payloads contain no field names, type markers, separators, or version bytes; the schema supplies their meaning. Every example below comes from the published implementation.
+The format is **tagless and positional**. Payloads contain no field names, type markers, separators, or version bytes; the schema supplies their meaning. Every example below comes from the published implementation. For why that leaves so little to write, see [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go).
 
 ## Integers
 
@@ -262,21 +262,6 @@ One value still has exactly one encoding: an integer always takes tag 3, and a t
 A dynamic value holds `null`, a boolean, a number, a string, an array, or a plain object. A `Date`, `Map`, or class instance is refused rather than written as the empty object its own keys make it look like. Nesting is capped at 64 levels on both sides: this is the one place the *payload* chooses the depth, and an object that holds itself hits the same cap on the way out.
 
 Nothing else changes. A schema with no dynamic value in it writes no tag and pays nothing for this existing.
-
-## A whole record
-
-```ts
-encode(Person, { name: "Grace", age: 45, sex: "F" });
-```
-
-```
-[45, 5, 71, 114, 97, 99, 101, 0]
- │   │  └────────────────────┘  └─ sex: index of "F" in ["F","M","X"]
- │   └─ name: length 5
- └─ age: uint varint 45          (no bitmap: nothing is optional)
-```
-
-Eight bytes. `age` comes first because `"age"` sorts before `"name"`. JSON spends 35.
 
 ## Decoder limits
 

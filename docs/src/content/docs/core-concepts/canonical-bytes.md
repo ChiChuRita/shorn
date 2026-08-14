@@ -15,13 +15,9 @@ const Person = z.object({
   age: z.int().nonnegative(),   // rank 0
   sex: z.enum(["M", "F", "X"]), // rank 2
 });
-
-encode(Person, { name: "Grace", age: 45, sex: "F" });
-// [45, 5, 71, 114, 97, 99, 101, 0]
-//  ^age ^len "Grace"           ^sex
 ```
 
-`age` is written first even though it was declared second. The order is derived from field names, so validators and the high- and low-level APIs all produce the same result.
+`age` is written first even though it was declared second, as [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) shows byte by byte. The order is derived from field names, so validators and the high- and low-level APIs all produce the same result.
 
 The **encoder** applies the sort. The [`m` API](/api/m/) cannot override it because canonical field order is a wire-format rule, not a schema option.
 

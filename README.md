@@ -37,8 +37,44 @@ const bytes = encode(Person, person); // Uint8Array(8)
 const back = decode(Person, bytes);   // typed and validated
 ```
 
-The same record is 35 bytes of minified JSON. Validation runs on encode and
-again on decode, and equivalent schemas across validators produce the same bytes.
+Validation runs on encode and again on decode, and equivalent schemas across
+validators produce the same bytes.
+
+## Where the bytes go
+
+The same record as minified JSON:
+
+```text
+{"name":"Grace","age":45,"sex":"F"}   35 bytes
+```
+
+The schema already knows the field names, so they do not need to be sent:
+
+```text
+["Grace",45,"F"]                      16 bytes
+```
+
+The schema also knows the order and the types, so the brackets, commas and
+quotes are not needed either, and `"F"` is one of three known values so it can
+be an index instead of a string:
+
+```text
+2d 05 47 72 61 63 65 00               8 bytes
+ │  │  └───────┬───────┘ │
+ │  │          │         └── sex, index 0 of the enum
+ │  │          └── "Grace"
+ │  └── string length, 5
+ └── age, 45
+```
+
+The middle step is the uncontroversial one: the array carries the same
+information as the object, because the reader knows what each position means.
+shorn takes that same move one step further, and the schema is what makes both
+steps safe.
+
+`2d` is age 45, first because fields are written in canonical order rather than
+declaration order. `00` is the index of `"F"` in the sorted enum
+`["F", "M", "X"]`.
 
 ## Store and queue safely
 

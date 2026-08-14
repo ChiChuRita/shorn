@@ -19,7 +19,7 @@ const bytes = encode(Person, { name: "Grace", age: 45, sex: "F" }); // 8 bytes
 const decoded = decode(Person, bytes);
 ```
 
-The same value is 35 bytes of minified JSON. Field names and type tags stay in the schema instead of being repeated in every payload.
+The same value is 35 bytes of minified JSON. Field names and type tags stay in the schema instead of being repeated in every payload. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) walks 35 down to 8 in three steps.
 
 Equivalent Zod, Valibot, and ArkType schemas encode identically. Your validator runs on encode and again on decode. The runtime is small and tree-shakes per feature, so optional helpers cost nothing until imported. MIT licensed.
 
