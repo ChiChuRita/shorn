@@ -4,7 +4,7 @@
 
 **Same bytes, faster.** Nothing on the wire moves and no API changes; payloads written by 0.2.0 decode unchanged and vice versa. If you store or queue shorn payloads, this upgrade needs nothing from you.
 
-### Documents encode 78% faster and decode 58% faster
+### Documents encode 68% faster and decode 60% faster
 
 Document-shaped data — many keys, optional fields, most of the payload being string content — was the shape shorn was slowest on, and it moved for three reasons.
 
