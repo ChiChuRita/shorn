@@ -21,11 +21,11 @@ The schema also knows the order and the types, so the brackets, commas and quote
 
 ```text
 2d 05 47 72 61 63 65 00               8 bytes
- │  │  └───────┬───────┘ │
- │  │          │         └── sex, index 0 of the enum
- │  │          └── "Grace"
- │  └── string length, 5
- └── age, 45
+│  │  └─────┬──────┘ │
+│  │        │        └── sex, index 0 of the enum
+│  │        └── "Grace"
+│  └── string length, 5
+└── age, 45
 ```
 
 The middle step is the uncontroversial one: the array carries the same information as the object, because the reader knows what each position means. shorn takes that same move one step further. The schema is what makes both steps safe.

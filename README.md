@@ -60,11 +60,11 @@ be an index instead of a string:
 
 ```text
 2d 05 47 72 61 63 65 00               8 bytes
- │  │  └───────┬───────┘ │
- │  │          │         └── sex, index 0 of the enum
- │  │          └── "Grace"
- │  └── string length, 5
- └── age, 45
+│  │  └─────┬──────┘ │
+│  │        │        └── sex, index 0 of the enum
+│  │        └── "Grace"
+│  └── string length, 5
+└── age, 45
 ```
 
 The middle step is the uncontroversial one: the array carries the same
