@@ -40,7 +40,7 @@ type({ name: "string", age: "number.integer >= 0" });
 
 This works because the wire shape comes from JSON Schema. The signature excludes `rejectUnknown`, which validators handle differently but which does not change the encoded bytes.
 
-A recursive type holds too, though the validators write it differently: one points a `$ref` at its definition from wherever the type is used, another inlines a copy there and refers back from inside that copy. A copy of a definition is folded onto the definition, so the two spellings derive one signature rather than two — without that, a `fingerprinted()` codec built from one validator rejects a payload written by the other and decodable by both.
+Recursive types hold too, though validators spell them differently: one points a `$ref` at its definition, another inlines a copy and refers back from inside it. A copy of a definition is folded onto the definition, so both spellings derive one signature.
 
 ## Integers have one spelling
 
@@ -50,12 +50,8 @@ Overlong varints are rejected: `1` must be `0x01`, never `0x81 0x00`. This keeps
 
 - **Floats.** `-0` and `0` are distinct byte strings. Validator-backed schemas refuse `NaN`; low-level `m.float32()` and `m.float64()` accept it, and multiple NaN bit patterns decode successfully. Do not use low-level NaN values for content addressing.
 - **String normalization.** `"é"` as one code point and as `e` plus a combining accent are different strings, both encoded faithfully. Normalize first if you need them equal.
-- **Decoded key order.** The bytes are canonical; the decoded object's key order is shorn's, not your original object's. A decoded record is the same *value*, so `toEqual`, `isDeepStrictEqual` and any structural comparison pass — but `JSON.stringify(decoded) === JSON.stringify(original)` does not, because `JSON.stringify` is key-order sensitive. Compare values rather than serialized strings; a test suite that asserts on `JSON.stringify` output will report a difference where there is none.
-
-  Decoding in your declaration order instead was measured and rejected: the generated decoder builds one object literal, so emitting keys in a different order than they are read requires a temporary per field, which cost 6-15% of decode. Canonical order also mirrors the wire, which is the more useful thing for a reader to see.
+- **Decoded key order.** The decoded object's key order is shorn's, not your original object's. It is the same *value*, so `toEqual` and `isDeepStrictEqual` pass — but `JSON.stringify(decoded) === JSON.stringify(original)` does not, since `JSON.stringify` is key-order sensitive. Compare values, not serialized strings. (Restoring declaration order was measured and rejected: it cost 6–15% of decode.)
 
 ## Round-tripping is a fixed point
 
-`decode(encode(x))` returns `x`, not merely an equivalent value. Converting a `format: "date-time"` string to an epoch integer could reduce it from about 25 bytes to 5, but it would not preserve the original ISO-8601 spelling. For example, `Z` could come back as `+00:00`.
-
-That conversion preserves the instant but changes its representation. shorn therefore leaves it to the application. See [Date, BigInt, Map, Set](/schemas/rich-types/).
+`decode(encode(x))` returns `x`, not merely an equivalent value. Converting a `format: "date-time"` string to an epoch integer would cut it from about 25 bytes to 5, but `Z` could come back as `+00:00` — the instant survives, the spelling does not. shorn leaves that trade to the application. See [Date, BigInt, Map, Set](/schemas/rich-types/).

@@ -3,7 +3,7 @@ title: Payload Size
 description: Smallest raw payload in every measured fixture, smallest gzip in both large profiles, second under Brotli in both.
 ---
 
-Size is the axis shorn leads. Every number is from Node v22.23.1, Apple M4 Pro, macOS arm64. Each table below comes from a single run — the raw-bytes table from `pnpm bench`, the two compressed tables from `pnpm bench:large` and `pnpm bench:entropy` respectively — because compressed sizes from different fixture runs are not comparable and must not share a table.
+Size is the axis shorn leads. Every number is from Node v22.23.1, Apple M4 Pro, macOS arm64. Each table comes from a single run — raw bytes from `pnpm bench`, the compressed tables from `pnpm bench:large` and `pnpm bench:entropy` — since sizes from different runs are not comparable.
 
 ## Fixtures
 
@@ -68,7 +68,7 @@ Roughly 4.2 MB of shorn bytes against 16 MB of JSON — a batch large enough tha
 | Protobuf.js | 5,826,966 | 1,402,471 | 1,054,692 |
 | JSON | 16,498,152 | 1,769,924 | 1,731,672 |
 
-shorn is smallest raw and under gzip, and second under Brotli. **SchemaPack is 12% smaller under Brotli** while being 100,000 bytes larger raw, and the reason is specific rather than general: this fixture's `id`, `timestamp` and `memory` are counters, and a fixed-width big-endian integer leaves its high bytes unchanged across thousands of consecutive records, which LZ77 matches as long identical runs. shorn writes LEB128 — 40% fewer bytes for the same counter, but little-endian 7-bit groups lead with the byte that changes every record and straddle boundaries no byte-level matcher lines up with. Density and LZ-friendliness are in tension here, and shorn is on the density side of it by design.
+shorn is smallest raw and under gzip, and second under Brotli. **SchemaPack is 12% smaller under Brotli** while being 100,000 bytes larger raw, for a reason specific to this fixture: `id`, `timestamp` and `memory` are counters, and SchemaPack's fixed-width big-endian integers leave their high bytes unchanged across thousands of records, which LZ77 matches as long runs. shorn's LEB128 spends 40% fewer bytes on the same counter but leads with the byte that changes every record. Density and LZ-friendliness are in tension, and shorn is on the density side by design.
 
 Compression CPU for the shorn payload: gzip 48.22 ms, gunzip 4.46 ms, Brotli q6 62.87 ms, unbrotli 5.79 ms.
 
@@ -88,7 +88,7 @@ shorn is smallest raw and under gzip, and second under Brotli. Against JSON it i
 
 Compression CPU: gzip 99.27 ms, gunzip 8.75 ms, Brotli q6 170.65 ms, unbrotli 13.44 ms.
 
-**The caveat, stated plainly:** shorn is not smallest under every compressor. Under Brotli, SchemaPack wins on repetitive data and msgpackr's bundled strings wins on high-entropy data — and both are in the tables above rather than left out of them. shorn is smallest raw and smallest under gzip in both 100,000-event profiles.
+**The caveat:** shorn is not smallest under every compressor. Under Brotli, SchemaPack wins on repetitive data and msgpackr's bundled strings wins on high-entropy data. shorn is smallest raw and smallest under gzip in both profiles.
 
 ## Cutting bytes further
 

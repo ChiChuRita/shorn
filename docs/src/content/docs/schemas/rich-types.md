@@ -37,7 +37,7 @@ const back = z.decode(Rich, codec.decode(bytes));  // bytes → wire → rich
 
 Valibot and ArkType transforms do not expose a reverse direction through Standard Schema, so write both conversions explicitly. Either way, use a `Wire` schema for shorn and convert outside it.
 
-The conversion has to stay separate because Standard Schema v1 exposes only `validate` and `jsonSchema` — there is no reverse operation, and `z.encode` is Zod-specific. Supplying `structure` does not rescue a bidirectional codec either: rich values fail validation as wire values, while wire values are transformed into rich values the wire codec cannot encode. For a Zod codec, `jsonSchema.output()` throws outright, and shorn needs both sides to agree.
+The conversion has to stay separate because Standard Schema v1 exposes only `validate` and `jsonSchema` — there is no reverse operation, and `z.encode` is Zod-specific. Supplying `structure` does not rescue a bidirectional codec either: rich values fail validation as wire values, and wire values become rich values the wire codec cannot encode.
 
 ## Choosing a wire form
 

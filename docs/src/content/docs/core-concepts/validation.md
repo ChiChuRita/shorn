@@ -35,7 +35,7 @@ const back = await decodeAsync(Person, bytes);
 
 Both take either the Standard Schema or a codec built from it. There are no safe async variants; use `try`/`catch`.
 
-Nothing shorn does is itself asynchronous: reading and writing bytes is synchronous work with no I/O. The only `await` is your validator's, which is why these are separate functions rather than a `Promise` every caller has to unwrap.
+Nothing shorn does is itself asynchronous — reading and writing bytes has no I/O. The only `await` is your validator's, which is why these are separate functions rather than a `Promise` every caller must unwrap.
 
 Fingerprints compose. Pass the fingerprinted codec to the async entry points and the prefix is written and checked exactly as on the sync path:
 
@@ -65,7 +65,7 @@ What you give up:
 
 - **Refinements, both ways.** A negative age, a malformed email, a string over its maximum — all encode and decode fine if the wire type can carry them.
 - **Transforms, not only checks.** The validator is not run at all, so a `z.string().trim()` or a `z.coerce` no longer changes the value. It goes out exactly as handed over.
-- **Semantic version skew.** Bytes written against a schema that differs only in its refinements now decode silently. `fingerprinted()` still catches a *structural* difference — it composes, prefix check included — but a fingerprint has never covered refinements.
+- **Semantic version skew.** Bytes written against a schema that differs only in its refinements now decode silently. `fingerprinted()` still catches a *structural* difference, but a fingerprint has never covered refinements.
 
 What you keep: every structural check. Bounds on each read, the length limits, the trailing-byte refusal. Malformed input still throws `DecodeError` rather than escaping as a wrong value. See [Hostile Input](/hostile-input/).
 

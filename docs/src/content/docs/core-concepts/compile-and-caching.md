@@ -24,7 +24,9 @@ For Valibot the cache is keyed on the schema **and** the structure object, so `t
 
 ## Runtime specialization
 
-For eligible object schemas, shorn creates specialized encode and decode functions with `new Function` when the codec is constructed. Both sides are generated for schemas with optional fields as well: which fields arrive varies per payload, but each optional's byte and bit in the presence bitmap are fixed by the schema, so the generated function tests a constant mask on decode and builds each bitmap byte from constants on encode. Encoding takes the interpreted path when a schema must reject unknown properties, when it is an open object, or when a field shadows `Object.prototype`; decoding does the same for a `__proto__` field, an open object, or an absent optional named after an `Object.prototype` member, each of which needs `defineProperty` rather than an assignment.
+For eligible object schemas, shorn creates specialized encode and decode functions with `new Function` when the codec is constructed. Optional fields are generated too: which fields arrive varies per payload, but each optional's bit in the presence bitmap is fixed by the schema, so the generated code tests a constant mask.
+
+The interpreted path is used instead when a schema must reject unknown properties, when it is an open object, or when a field name collides with `Object.prototype` — cases that need `defineProperty` rather than a plain assignment.
 
 Schema keys are passed as function arguments rather than inserted into generated source, so keys from external JSON Schemas are not executable code.
 

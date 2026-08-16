@@ -27,9 +27,7 @@ ZigZag doubles the magnitude, so a signed integer crosses every size boundary at
 
 **Overlong varints are rejected.** `1` must be `[1]`, never `[129, 0]`.
 
-**`-0` is not an integer on the wire.** Both integer encodings write it as `0` and read it back as `0`, which is what `JSON.stringify` does with it too. Encoding `-0` against an enum that lists `0` normalizes the same way, since member lookup matches `-0` to `0`. A field that has to tell `-0` from `0` needs a float — `float64` carries the sign bit — or a string.
-
-Normalizing is the exception here, not the rule: `-0` as an [enum member or literal](/schemas/rejected-shapes/) is refused when the codec is built, because there the value *is* the schema and a member that cannot survive its own round trip has no index worth giving it.
+**`-0` is not an integer on the wire.** Both integer encodings write it as `0` and read it back as `0`, exactly as `JSON.stringify` does. A field that has to tell `-0` from `0` needs a float — `float64` carries the sign bit — or a string. As an [enum member or literal](/schemas/rejected-shapes/), `-0` is refused when the codec is built rather than normalized, because there the value *is* the schema.
 
 ## Floats
 
@@ -54,9 +52,9 @@ A varint **byte** length, then the contents. Strings are UTF-8; `m.bytes()` is r
 Uint8Array([9, 9]) -> [2, 9, 9]
 ```
 
-UTF-8 decoding is strict. Invalid sequences cause a `DecodeError` instead of being replaced with `U+FFFD`. That holds regardless of which decoder the runtime provides: on Node, string decoding goes through `Buffer.prototype.utf8Slice` because it is measurably cheaper, and because that function substitutes `U+FFFD` rather than failing, any result containing one is re-decoded strictly to get a definitive answer. A string that legitimately contains `U+FFFD` round-trips; a malformed payload throws.
+UTF-8 decoding is strict: invalid sequences cause a `DecodeError` rather than being replaced with `U+FFFD`. On Node the faster `Buffer.prototype.utf8Slice` substitutes instead of failing, so any result containing `U+FFFD` is re-decoded strictly for a definitive answer. A string that legitimately contains `U+FFFD` round-trips; a malformed payload throws.
 
-**String content stays where its field is, and that is a commitment rather than an accident.** Writing every string into one contiguous region instead — as msgpackr's `bundleStrings` mode does — would let a decoder turn all of them into text in a single call, which is worth about 32% of decode on a document-shaped payload. It is deliberately not done: it would change the bytes of every existing shape, it would still not overtake `bundleStrings`, and substrings of one large region keep that whole region alive in memory for as long as any field decoded from it is retained. If it is ever offered it will be an opt-in wrapper alongside [`fingerprinted()`](/versioning/fingerprinting/), which adds a new shape rather than redefining this one.
+**String content stays where its field is.** Writing every string into one contiguous region, as msgpackr's `bundleStrings` does, would buy about 32% of decode on document-shaped payloads — but it would change the bytes of every existing shape, still not overtake `bundleStrings`, and keep the whole region alive in memory for as long as any field decoded from it. If it is ever offered it will be an opt-in wrapper alongside [`fingerprinted()`](/versioning/fingerprinting/).
 
 ## Literals
 
@@ -216,7 +214,7 @@ const Node = z.object({ value: z.string(), get children() { return z.array(Node)
 
 The recursion is bounded by whatever lets it stop — an empty array here, a `null` back-edge in a linked list. Depth is capped at 256 levels on both sides, since a recursive schema takes its nesting from the payload rather than from the schema; see [Hostile Input](/hostile-input/).
 
-A `$ref` reached twice but never through itself is not a cycle. It is inlined, so a shared definition writes, and fingerprints, exactly as it would written out in full — unless what it inlines is a copy of a *recursive* definition, which is folded back onto that definition instead. The bytes are the same either way; the fold is what keeps one recursive type on one fingerprint across validators that spell it differently.
+A `$ref` reached twice but never through itself is not a cycle. It is inlined, so a shared definition writes and fingerprints exactly as it would written out in full — unless it is a copy of a *recursive* definition, which is folded back onto that definition instead. Same bytes either way; the fold is what keeps one recursive type on one fingerprint across validators that spell it differently.
 
 ## Open objects
 
@@ -230,7 +228,7 @@ z.looseObject({ a: z.string() })
                                   └─ one extra: key "n", then a dynamic 5
 ```
 
-An object with nothing extra still pays the one-byte count, which is what an open object costs over a closed one. Extras are ordered and refused out of order like any record, and a key repeating a declared field is refused too — it would otherwise overwrite the field decoded moments earlier, so two payloads would decode alike.
+An object with nothing extra still pays the one-byte count — that is what an open object costs over a closed one. Extras are ordered and refused out of order like any record. A key repeating a declared field is refused too, since it would overwrite the field decoded moments earlier and let two payloads decode alike.
 
 `z.object().catchall(T)` is the same layout with `T` in place of the dynamic value, so the extras' values are tagless and only their keys are on the wire.
 
@@ -259,9 +257,9 @@ true    -> [2]
 
 One value still has exactly one encoding: an integer always takes tag 3, and a tag 4 payload holding an integer is refused rather than accepted as a second spelling. Objects under a dynamic value follow the record rules above, key order included.
 
-A dynamic value holds `null`, a boolean, a number, a string, an array, or a plain object. A `Date`, `Map`, or class instance is refused rather than written as the empty object its own keys make it look like. Nesting is capped at 64 levels on both sides: this is the one place the *payload* chooses the depth, and an object that holds itself hits the same cap on the way out.
+A dynamic value holds `null`, a boolean, a number, a string, an array, or a plain object. A `Date`, `Map`, or class instance is refused rather than written as the empty object it looks like. Nesting is capped at 64 levels on both sides, since this is the one place the *payload* chooses the depth.
 
-Nothing else changes. A schema with no dynamic value in it writes no tag and pays nothing for this existing.
+A schema with no dynamic value in it writes no tag and pays nothing for this.
 
 ## Decoder limits
 
@@ -280,6 +278,6 @@ Nothing else changes. A schema with no dynamic value in it writes no tag and pay
 
 No schema identifier, version byte, length prefix on the whole value, or type tags. The format version is hashed into the [fingerprint](/versioning/fingerprinting/) instead of spent as a wire byte.
 
-Two things are on the wire only where the schema declined to supply them: a record's keys, and a dynamic value's type tag. Both are paid for per use, by the shapes that asked for them, and a schema that names everything it holds still writes nothing but values.
+Two things reach the wire only where the schema declined to supply them: a record's keys, and a dynamic value's type tag. A schema that names everything it holds writes nothing but values.
 
 Bare payloads are compact, but they are neither self-describing nor confidential. **Encrypt them when secrecy is required.**

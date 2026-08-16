@@ -76,9 +76,9 @@ m.object<S extends Shape>(shape: S): Schema<ObjectOutput<S>>;
 
 Presence bitmap for optional fields (`ceil(n / 8)` bytes, omitted when nothing is optional), then values in **canonical key order**, UTF-16 ascending. Declaration order is irrelevant.
 
-**Undeclared properties are dropped, not rejected.** `m.object({ a: m.uint() }).encode({ a: 1, extra: "x" })` writes one byte and decodes to `{ a: 1 }`; `extra` is not on the wire and does not come back. The schema is the statement of what the shape is, and this matches Zod's own default, which strips unknown keys before shorn ever sees the value.
+**Undeclared properties are dropped, not rejected.** `m.object({ a: m.uint() }).encode({ a: 1, extra: "x" })` writes one byte and decodes to `{ a: 1 }`. This matches Zod's own default, which strips unknown keys before shorn ever sees the value.
 
-If an undeclared property should be an error rather than a silent omission, say so in the schema and use a validator: `compile(z.strictObject({ … }))` rejects with `Unrecognized key: "extra"`. The `m` builders have no strict variant, because rejecting means scanning every key on every encode and that cost belongs to the schemas that ask for it.
+If an extra property should be an error instead, use a validator: `compile(z.strictObject({ … }))` rejects with `Unrecognized key: "extra"`. The `m` builders have no strict variant, since rejecting means scanning every key on every encode.
 
 ## `.optional()` and `.nullable()`
 
@@ -94,7 +94,7 @@ m.object({
 
 ### Markers never stack
 
-A second marker for a value the schema can already produce would give that value two encodings, so `[0]` and `[1, 0]` would both decode to `undefined` and decoding would stop being injective. shorn refuses that, in one of two ways.
+A second marker for a value the schema can already produce would give that value two encodings — `[0]` and `[1, 0]` would both decode to `undefined` — so shorn refuses it, in one of two ways.
 
 **Repeating the same wrapper is a no-op.** It returns the identical object, so this is safe in generic code that does not know what it was handed:
 

@@ -34,13 +34,13 @@ A naive decoder can allocate far more memory than the payload size suggests: a s
 
 Every schema carries a **`_minWidth`**, the fewest bytes one value can occupy. Before allocating an array, the decoder multiplies this width by the declared count and checks that enough input remains. `_minWidth` is computed during codec construction, so the runtime check costs one multiplication per decoded array.
 
-A recursive schema's back-edge reports the smallest width that is always true of it, one byte, rather than a measured one: a cycle a value can escape has to pass through an optional field, a nullable marker, an array count, a record count or a union index, and each of those costs a byte. So the check holds, at the same strength it has for any one-byte element such as a string.
+A recursive schema's back-edge reports one byte rather than a measured width: a cycle a value can escape must pass through an optional field, a nullable marker, an array count, a record count, or a union index, and each of those costs a byte. The check holds at the same strength it has for a string.
 
 This is why **arrays of zero-width elements are rejected during codec construction**. Literals, empty tuples, and empty objects use no bytes, so the decoder could not verify the declared count against the payload length. A tuple may still contain them because its length comes from the schema.
 
 ### The one exception
 
-An array whose count the schema fixes — `minItems` equal to `maxItems` — is exempt from that rejection for the same reason a tuple is, and its `_minWidth` is then `count × 0 = 0`. A variable-length container around it therefore repeats that free allocation once per byte of input: `z.array(z.object({ n: z.int(), pad: z.array(z.literal("x")).length(1_000_000) }))` turns 101 bytes into 100 million array slots. Nothing an attacker sends reaches this on its own — it needs a schema that declares a large fixed-count array of a constant — but if you write one, bound the outer collection yourself.
+An array whose count the schema fixes (`minItems` equal to `maxItems`) is exempt for the same reason a tuple is, so its `_minWidth` can be `count × 0 = 0`. A variable-length container around one repeats that free allocation once per byte of input: `z.array(z.object({ n: z.int(), pad: z.array(z.literal("x")).length(1_000_000) }))` turns 101 bytes into 100 million array slots. No payload reaches this on its own — it needs a schema declaring a large fixed-count array of a constant — but if you write one, bound the outer collection yourself.
 
 ## Security boundaries
 

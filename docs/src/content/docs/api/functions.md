@@ -87,7 +87,7 @@ codec.fingerprint;     // Uint8Array, a fresh copy every read
 codec.fingerprintHex;  // "7236d1", the Map key for dispatch
 ```
 
-`fingerprint` returns a copy so callers cannot mutate the codec's internal bytes; an accidental write would otherwise make the codec non-canonical while it still round-trips against itself. Use `fingerprintHex` as a `Map` key.
+`fingerprint` returns a copy so callers cannot mutate the codec's internal bytes — an accidental write would make the codec non-canonical while it still round-trips against itself. Use `fingerprintHex` as a `Map` key.
 
 Throws `EncodeError` for a codec without a signature, and for `bytes` outside 1–4. The default is 3 bytes; use 4 for persistent data. See [Wire Fingerprints](/versioning/fingerprinting/).
 

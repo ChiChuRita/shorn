@@ -50,7 +50,7 @@ All four variants compile.
 | `v.looseObject` | shorn throws `Unknown object property "b"` |
 | `v.record` | encodes as a record: keys on the wire |
 
-Only `v.strictObject` emits `additionalProperties: false`. The converter omits that setting for `v.object` and `v.looseObject`, so shorn checks extras itself — which is why `looseObject` produces shorn's error instead of passing the property through. Zod's `z.looseObject` emits `additionalProperties: true` and is an open shape instead. The similar API names diverge because their JSON Schema converters emit different structures.
+Only `v.strictObject` emits `additionalProperties: false`. The converter omits it for `v.object` and `v.looseObject`, so shorn checks extras itself — which is why `looseObject` produces shorn's error rather than passing the property through. Zod's `z.looseObject` emits `additionalProperties: true` and is an open shape instead; the similar names diverge because the two converters emit different structures.
 
 The [fingerprint](/versioning/fingerprinting/) excludes `rejectUnknown`, so `v.object`, `v.strictObject`, and equivalent Zod schemas share the same bytes and fingerprint.
 

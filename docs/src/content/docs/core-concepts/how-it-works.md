@@ -28,7 +28,7 @@ The schema also knows the order and the types, so the brackets, commas and quote
 └── age, 45
 ```
 
-The middle step is the uncontroversial one: the array carries the same information as the object, because the reader knows what each position means. shorn takes that same move one step further. The schema is what makes both steps safe.
+The middle step is the uncontroversial one: the array carries the same information as the object, because the reader knows what each position means. shorn takes that move one step further, and the schema is what makes both steps safe.
 
 `2d` is age 45, and it comes first because fields are written in [canonical order](/core-concepts/canonical-bytes/) rather than declaration order. `00` is the index of `"F"` in the sorted enum `["F", "M", "X"]`. [Byte Layout](/wire-format/layout/) has every wire type.
 
@@ -62,7 +62,7 @@ any | boolean | float64 | int | string | uint | uuid
 
 The two union variants are the two ways a branch can be named without trying it: `on`/`cases` is a discriminant property, `types` is the JSON type of the value. A union whose branches could overlap has neither and is [refused](/schemas/rejected-shapes/#overlapping-unions).
 
-A `{ ref }` is the back-edge of a cycle, and the only shape that is not self-contained: it indexes a definition table the document carries beside its root shape. The table appears only when a `$ref` actually closes a cycle — a `$ref` reached twice but never through itself is inlined — so no non-recursive schema's signature moved when recursion was added.
+A `{ ref }` is the back-edge of a cycle, and the only shape that is not self-contained: it indexes a definition table the document carries beside its root shape. That table appears only when a `$ref` actually closes a cycle; a `$ref` reached twice but never through itself is inlined.
 
 Two details drive the choices that matter:
 
@@ -77,8 +77,8 @@ The `WireShape` becomes a tree of `Schema` objects, the same objects the [`m` AP
 
 Each node carries a `_minWidth`: the fewest bytes any value of that shape can occupy. That is what lets an array refuse an impossible element count *before* allocating. See [Hostile Input](/hostile-input/).
 
-A cycle is built definitions first, as nodes that exist before the schemas they stand for do — every container reads its children's `_minWidth` in its own constructor, so a back-edge has to be answerable before the cycle it closes is built. Those nodes are also where nesting depth is counted, since depth comes from the payload there rather than from the schema.
+A cycle is built definitions first, so a back-edge can answer for its `_minWidth` before the cycle it closes exists. Those nodes are also where nesting depth is counted, since there depth comes from the payload rather than the schema.
 
-shorn also stores a canonical string signature: the `WireShape` as JSON without `rejectUnknown`. [`fingerprinted()`](/versioning/fingerprinting/) hashes this signature. Removing `rejectUnknown` lets equivalent Zod and ArkType schemas agree even though they handle extra properties differently. The `m` API has no signature, so `fingerprinted()` refuses codecs built with `m`.
+shorn also stores a canonical string signature: the `WireShape` as JSON, without `rejectUnknown` so that equivalent Zod and ArkType schemas agree despite handling extra properties differently. [`fingerprinted()`](/versioning/fingerprinting/) hashes that signature; the `m` API has none, so `fingerprinted()` refuses `m` codecs.
 
 The plan is cached in a `WeakMap` keyed by schema identity, so conversion runs once per schema. See [Compilation and Caching](/core-concepts/compile-and-caching/).

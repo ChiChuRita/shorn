@@ -18,7 +18,9 @@ Use a fingerprint for stored, queued, or version-crossing payloads. Bare payload
 
 The fingerprint hashes the canonical **wire structure**. It changes when bytes can move: adding, removing, or renaming a field; changing a type; required ↔ optional; changing enum members; signed ↔ unsigned integer; or reordering a tuple.
 
-It does **not** change for refinements, property declaration order, strictness, validator choice, or conversion functions. Validator choice holds for recursive schemas too, though the vendors spell them differently — zod points the cycle at the root, Valibot inlines the root and repeats it under `$defs` — because a root that merely duplicates a definition is folded back onto it. One exception is known: two *mutually* recursive definitions are not deduplicated, so a mutually recursive type may fingerprint differently across vendors. Keep both codecs, or write the type in one validator. A stricter `.max()` can therefore reject old data without changing the fingerprint. If validation behavior is part of your data version, carry an application version separately in a header, column, or envelope — a wire fingerprint is not a complete schema version.
+It does **not** change for refinements, property declaration order, strictness, validator choice, or conversion functions. So a stricter `.max()` can reject old data without changing the fingerprint. If validation behavior is part of your data version, carry an application version separately in a header, column, or envelope — a wire fingerprint is not a complete schema version.
+
+Validator choice holds for recursive schemas too, even though vendors spell them differently (Zod points the cycle at the root; Valibot inlines the root and repeats it under `$defs`), because a root that merely duplicates a definition is folded back onto it. **One known exception:** two *mutually* recursive definitions are not deduplicated, so a mutually recursive type may fingerprint differently across vendors. Keep both codecs, or write the type in one validator.
 
 ## Choose a width
 
@@ -31,9 +33,9 @@ shorn supports 1–4 bytes and defaults to 3. Each width truncates a 32-bit FNV-
 | 3 | 16,777,216 | 2.9% |
 | 4 | 4,294,967,296 | 0.012% |
 
-The registry figures use the birthday approximation and assume uniform hashes. FNV-1a is not cryptographic, and a collision is deterministic rather than a fresh chance on every decode.
+These figures use the birthday approximation and assume uniform hashes. FNV-1a is not cryptographic, and a collision is deterministic rather than a fresh chance on every decode.
 
-**Use 4 bytes for persistent data.** The 3-byte default favors very small payloads and small, controlled registries. No supported width is collision-proof, so reject duplicate `fingerprintHex` values when building a registry, and use an application version or full signature when identity must be unambiguous.
+**Use 4 bytes for persistent data.** The 3-byte default favors very small payloads and small, controlled registries. No width is collision-proof, so reject duplicate `fingerprintHex` values when building a registry, and carry an application version when identity must be unambiguous.
 
 ## Carry it separately
 
@@ -44,7 +46,7 @@ codec.fingerprintHex; // lowercase hex, stable Map key
 
 These values can live in a Kafka header, database column, or filename while the payload stays bare.
 
-Pass the fingerprinted codec straight to `encodeAsync`/`decodeAsync` when the schema has an async refinement. The prefix is written and checked on that path exactly as on the sync one, so wire identity and an awaited refinement compose without carrying the fingerprint out of band.
+Pass the fingerprinted codec straight to `encodeAsync`/`decodeAsync` when the schema has an async refinement. The prefix is written and checked on that path exactly as on the sync one.
 
 ## Limits
 

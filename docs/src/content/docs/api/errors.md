@@ -35,7 +35,7 @@ To avoid exceptions, use `safeDecode`. It returns either `{ success: true, data 
 
 ## Locating the failure
 
-`EncodeError.path` names the value that failed, as `user.address.zip` or `tags[3]`, and the same path is already appended to `message`. It is set for a value the encoder refused; it is absent when no single field is at fault, such as an array passed where an object was expected.
+`EncodeError.path` names the value that failed, as `user.address.zip` or `tags[3]`, and is also appended to `message`. It is absent when no single field is at fault — an array passed where an object was expected, for instance.
 
 ```ts
 try {
@@ -45,7 +45,7 @@ try {
 }
 ```
 
-`issues` is set when a validator rejected the value, and holds the vendor's own [Standard Schema issues](https://standardschema.dev) rather than the `; `-joined summary in `message`. Use it to answer with a field-keyed response without running the validator a second time. It survives the class change on the way out, so a `DecodeError` from a failed validation carries the same array.
+`issues` is set when a validator rejected the value, and holds the vendor's own [Standard Schema issues](https://standardschema.dev) rather than the `; `-joined summary in `message`. Use it to build a field-keyed response without running the validator twice. A `DecodeError` from a failed validation carries the same array.
 
 ```ts
 const result = safeDecode(Person, bytes);
@@ -78,7 +78,7 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 | `Unsupported JSON Schema combinator X` | `allOf` (an intersection) or `not` (`z.never()`) |
 | `The second argument must be a Standard JSON Schema implementation — toStandardJsonSchema(schema) for Valibot` | a raw JSON Schema object, or the structure wrapped in `{ structure }` |
 | `Required property "x" has no schema` | `required` names a property absent from `properties` |
-| `A "__proto__" property does not survive a JSON Schema; rename the field` | a field named `__proto__`. No validator's JSON Schema can carry it — the key sets the prototype of the `properties` object rather than joining it, or is dropped outright — so the field would be missing from the wire shape |
+| `A "__proto__" property does not survive a JSON Schema; rename the field` | a field named `__proto__`. No validator's JSON Schema can carry it: the key sets the prototype of the `properties` object rather than joining it, so the field would be missing from the wire shape |
 | `Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported` | a default or widening refinement makes the sides differ |
 | `Standard Schema provides validation but not structure; pass a Standard JSON Schema implementation as the second argument` | Valibot, Zod < 4.2, ArkType < 2.1.28 |
 | `This schema already decodes to null; wrapping it in nullable() would give null two encodings` | `m.literal(null).nullable()`, or a second null marker over one already reachable. Never from a vendor schema — `compile()` drops a redundant wrapper instead of reaching this |
@@ -103,7 +103,7 @@ This Standard Schema validates asynchronously; use encodeAsync/decodeAsync,
 which accept either this schema or a codec built from it.
 ```
 
-The remedy is followable from every codec that reaches this error, fingerprinted ones included. A codec that has no validator at all gets a different message:
+Every codec that reaches this error can follow that remedy, fingerprinted ones included. A codec with no validator at all gets a different message:
 
 ```
 This codec has no validator to await; async validation needs a codec from

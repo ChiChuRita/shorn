@@ -18,7 +18,7 @@ An esbuild-minified browser bundle for each imported codec API. Validation libra
 
 **shorn's wire codec is the smallest measured, 7% under `@msgpack/msgpack` gzipped.** `compile` is 62% larger gzipped because it validates on encode and decode, which no other row does — it is still under both msgpackr and cbor-x, which validate nothing. Compare the row that matches what you ship.
 
-That margin was 26% three releases ago and 13% one release ago, and is narrowing on purpose: the throughput work below bought speed with bytes, and each trade was argued against this table rather than assumed. It is a lead to defend, not a settled one, and at 7% it is closer to a tie than to a claim.
+That margin is narrowing on purpose — recent throughput work bought speed with bytes — and at 7% it is closer to a tie than to a claim.
 
 `avsc` needs a browser `stream` polyfill and SchemaPack needs a `buffer` polyfill, so neither has a comparable zero-polyfill result.
 
@@ -35,11 +35,7 @@ That margin was 26% three releases ago and 13% one release ago, and is narrowing
 
 **Only users who import a feature pay for it.** Fingerprinting is the most expensive single import at 418 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it.
 
-These numbers grew over the previous release, spent on schema coverage: discriminated unions, records, open objects, dynamic values, packed UUIDs, non-string enums, fixed-length arrays, and tuple rest elements — shapes that previously did not compile at all.
-
-The 949 gzip bytes before that bought the last three shapes: **type-disjoint unions**, **recursive schemas**, and a round of cross-validator agreement — 179 of them for four shapes that compiled from one validator and not another, or lost a field on the way to the wire. All three landed in the `compile` row, since the adapter is what reads a `$ref`, what decides a union's branches cannot overlap, and what reads one validator's JSON Schema as the same shape as another's.
-
-The most recent 334 gzip bytes are the first spend in a while that lands on `m` as well, because they are all in the codec rather than the adapter: a generated encoder for objects with optional fields, and a string encoder that lets `encodeInto` report the UTF-8 length instead of walking the string to total it first. They bought 68% on document encode and 60% on document decode, as the median of three runs — that row spans 61-68% between runs, so treat it as "about two thirds faster" rather than a figure to quote to one decimal. A fourth candidate — hand-written UTF-8 for short non-ASCII strings, worth 2x on those — was measured, costed at a further 238 gzip bytes, and **dropped**: the same win per byte as the others could not be argued for a case this narrow, and it was the only one of the four to produce a bug.
+These numbers have grown across releases, spent on schema coverage — discriminated unions, records, open objects, dynamic values, packed UUIDs, non-string enums, fixed-length arrays, tuple rest elements, type-disjoint unions, and recursive schemas — and, most recently, 334 gzip bytes on a generated encoder for objects with optional fields and a faster string encoder, worth about two thirds on document encode and decode.
 
 The functional helpers and fingerprinting tree-shake by export. `m` is one object, so importing it retains all of its builders. Add the size of your validator if it is not already part of the application.
 
@@ -76,9 +72,12 @@ Steady-state retained memory after repeated forced GC in isolated processes, for
 
 shorn targets `es2022` with esbuild's `neutral` platform setting. It is ESM-only and imports no Node built-in, so it runs in Node 20+, Bun, Deno, browsers, and workers.
 
-One Node facility is used when it happens to be there: string decoding prefers `Buffer.prototype.utf8Slice`, which is 45% cheaper than `TextDecoder`. It is found by a global lookup and never imported, so a browser, a worker, or a Deno without the Node shim simply uses `TextDecoder` instead — same bytes, same rejection of malformed UTF-8, slower decode.
+Two fast paths are used when the runtime happens to offer them, found by global lookup and never imported:
 
-One standard facility is used the same way: string encoding checks for unpaired surrogates with `String.prototype.isWellFormed`, which V8 answers in constant time for a one-byte string. Runtimes without it (Safari below 16.4, Firefox below 119) fall back to a `\p{Surrogate}` regex — same answer, same rejection, slower encode. Nothing about the wire format or the API changes with either.
+- **Decoding** prefers `Buffer.prototype.utf8Slice`, 45% cheaper than `TextDecoder`. Without it (browsers, workers, Deno without the Node shim), `TextDecoder` is used instead.
+- **Encoding** checks for unpaired surrogates with `String.prototype.isWellFormed`. Without it (Safari below 16.4, Firefox below 119), a `\p{Surrogate}` regex is used instead.
+
+Either way the bytes, the API, and the rejection of malformed input are identical — only the speed changes.
 
 The full comparison and a smoke test also ran under **Bun 1.3.14**. Rankings vary by runtime. Browser bundle size is measured, but browser execution is not part of the benchmark matrix.
 

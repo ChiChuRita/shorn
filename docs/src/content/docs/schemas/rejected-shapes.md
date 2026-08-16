@@ -40,9 +40,9 @@ z.union([z.int(), z.number()]);                                      // both num
 z.union([z.string(), z.any()]);                                      // any overlaps everything
 ```
 
-Picking a branch there would mean trying each in turn and keeping the first that fits, and where two branches both fit, the wrong choice decodes silently into a valid-looking value. Give the branches a discriminant, or give each variant its own codec and select it by [fingerprint](/versioning/schema-evolution/).
+Picking a branch there would mean trying each in turn and keeping the first that fits — and where two fit, the wrong choice decodes silently into a valid-looking value. Give the branches a discriminant, or give each variant its own codec and select it by [fingerprint](/versioning/schema-evolution/).
 
-`z.union([z.int(), z.number()])` is refused for a reason worth naming: `integer` and `number` are one type at runtime, since nothing about `5` says which of the two it was declared as. A branch with a `type` array, or with no `type` at all, is refused for the same reason — it overlaps whatever sits beside it.
+`integer` and `number` are one type at runtime, since nothing about `5` says which it was declared as. A branch with a `type` array, or with no `type` at all, is refused for the same reason: it overlaps whatever sits beside it.
 
 Extra properties are a separate question from open objects, which are [supported](/schemas/supported-types/#records-open-objects-and-dynamic-values). When a validator omits `additionalProperties` entirely — ArkType, and some Valibot object schemas — the object is closed with no tail to hold extras, so the codec builds and encoding an extra property throws `Unknown object property "x"`.
 
@@ -52,9 +52,9 @@ Extra properties are a separate question from open objects, which are [supported
 
 Recursive schemas are [supported](/schemas/supported-types/#recursive-schemas). Two things about them are still refused.
 
-A cycle needs a way out — a nullable back-edge, an optional field, or an array that may be empty. A cycle without one describes no finite value, and rather than a build-time proof of that, shorn lets the depth counter report it the first time the schema is used.
+A cycle needs a way out — a nullable back-edge, an optional field, or an array that may be empty. A cycle without one describes no finite value; rather than prove that at build time, shorn lets the depth counter report it the first time the schema is used.
 
-Depth itself is capped at 256 levels on both sides, because a recursive schema takes its nesting from the payload rather than from the schema: without a cap, a couple of bytes per level would buy unbounded stack. A structure deeper than that wants an array rather than a cycle.
+Depth is capped at 256 levels on both sides, since a recursive schema takes its nesting from the payload and a couple of bytes per level would otherwise buy unbounded stack. Anything deeper wants an array rather than a cycle.
 
 > Unsupported JSON Schema reference "…"; only same-document references are supported
 
@@ -88,9 +88,9 @@ No valid value means no index to write.
 
 > Enum member NaN has no JSON text of its own
 
-An enum whose members are not all strings indexes them in the order of their JSON text, because `<` is not a total order across mixed types. Four numbers do not survive that trip: `NaN`, `Infinity` and `-Infinity` all write as `null`, so they would share an index with each other and with a real `null` member, and `-0` writes as `0` and reads back as `0`. Either way a member would be unencodable or two indexes would decode to one value, so all four are refused rather than reordered. JSON Schema cannot express any of them either.
+An enum whose members are not all strings indexes them by their JSON text, because `<` is not a total order across mixed types. Four numbers do not survive that trip: `NaN`, `Infinity` and `-Infinity` all write as `null`, so they would share an index with each other and with a real `null` member, and `-0` writes and reads back as `0`. All four are refused rather than reordered.
 
-The same four as a **single literal** are not caught, because the vendor's JSON Schema has already lost them by the time shorn reads it: `z.literal(NaN)` and both infinities arrive as `{ type: "number", const: null }`, and `z.literal(-0)` arrives as `{ const: 0 }`. The first three produce a codec that refuses every value it is given (*"Expected literal null"*) and decodes to `null`; `-0` round-trips to `0`. Do not use a non-finite number or `-0` as a literal.
+The same four as a **single literal** are not caught, because the vendor's JSON Schema has already lost them: `z.literal(NaN)` and both infinities arrive as `{ type: "number", const: null }`, and `z.literal(-0)` as `{ const: 0 }`. The first three build a codec that refuses every value it is given and decodes to `null`; `-0` round-trips to `0`. Do not use a non-finite number or `-0` as a literal.
 
 ## Arrays of zero-width elements
 
@@ -116,11 +116,11 @@ m.string().optional().nullable().optional(); // undefined would have two spellin
 compile(z.string().nullable()).nullable();   // the flag survives compile()
 ```
 
-Two markers for the same value would make `[0]` and `[1, 0]` decode alike, so distinct payloads would produce the same value and decoding would no longer be injective. Repeating one wrapper (`x.optional().optional()`) is not an error: it collapses and returns the identical object, because `T | undefined | undefined` is exactly `T | undefined`.
+Two markers for the same value would make `[0]` and `[1, 0]` decode alike, so decoding would no longer be injective. Repeating one wrapper (`x.optional().optional()`) is not an error: it collapses and returns the identical object.
 
 Drop the redundant wrapper. Mixing the two once is supported and meaningful: `m.string().optional().nullable()` tells absent apart from null.
 
-A **vendor schema** that spells the same thing twice is not this error. `z.any().nullable()`, `z.null().nullable()` and `z.literal(null).nullable()` all compile: `compile()` sees that the shape under the wrapper already holds `null` and drops the wrapper, so the codec writes exactly what the inner shape alone would write. This error is about a marker you stacked yourself — on an `m` schema, or on a codec `compile()` already returned.
+A **vendor schema** that spells the same thing twice is not this error. `z.any().nullable()`, `z.null().nullable()` and `z.literal(null).nullable()` all compile, because `compile()` sees the inner shape already holds `null` and drops the wrapper. This error is about a marker you stacked yourself — on an `m` schema, or on a codec `compile()` already returned.
 
 ## Missing structural interface
 
@@ -132,9 +132,9 @@ Valibot always needs this, as do Zod before 4.2 and ArkType before 2.1.28. Pass 
 
 > Expected a lowercase UUID, received X
 
-A `format: "uuid"` string is stored as its 16 bytes, and 16 bytes have no case. A validator accepts either spelling (RFC 4122 says to generate lowercase and accept both), so this is refused at encode rather than at build, and only for the values that would not survive the round trip. Lowercase at the edge; `String.prototype.toLowerCase` is exact for hexadecimal.
+A `format: "uuid"` string is stored as its 16 bytes, and 16 bytes have no case. Validators accept either spelling (RFC 4122 says to generate lowercase and accept both), so this is refused at encode and only for values that would not survive the round trip. Lowercase at the edge; `String.prototype.toLowerCase` is exact for hexadecimal.
 
-The same reasoning is why no other string format is packed. A `date-time` has free fractional digits and a free offset spelling, so a timestamp cannot reproduce the string it was parsed from, and it stays a string.
+No other string format is packed for the same reason. A `date-time` has free fractional digits and a free offset spelling, so it stays a string.
 
 ## Async validation on a sync entry point
 
