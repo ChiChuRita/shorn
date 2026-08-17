@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.2
+
+**Same bytes, better errors.** Nothing on the wire moves and no API changes; payloads written by 0.2.1 decode unchanged and vice versa. If you store or queue shorn payloads, this upgrade needs nothing from you.
+
+### `EncodeError.path` reaches every value the encoder refuses
+
+`path` names the value that failed and is documented as absent only when no single field is at fault. Three cases broke that, and all three are cases where a validator passes the value and only the writer refuses it — a lone surrogate in a string, an oversized array, a value the schema cannot hold. With a plain type error the vendor's own issue path covered the gap.
+
+**An open object's extra keys were outside the walk.** A value refused among the keys the schema does not name reported no path at all, and one level down reported the enclosing field — pointing you at a value that was fine. `{ id: "ok", note: "…lone surrogate" }` under `z.object({ id: z.string() }).catchall(z.string())` now reports `note`, and `o.note` when nested.
+
+**`optional()` and `nullable()` ended the walk.** The same schema reported `[0].a` in one position and `[0]` in another: `m.array(m.object({ a: m.string() }))` named the field, and adding `.optional()` to that object stopped at the index. Inside an object schema the wrapper was already invisible, because the object unwraps an optional when it is built, so this only ever affected an array, tuple, record, or union element.
+
+**`m.uint()` and `m.int()` threw a raw `TypeError`.** For a value JavaScript declines to coerce — a symbol, or an object whose `valueOf` or `Symbol.toPrimitive` throws — the error escaping was a `TypeError` with no path, not the `EncodeError` every other leaf throws and every other leaf documents. A caller narrowing on `EncodeError` fell through it. Neither cause was a missing type check: the fast path compared the value before the predicate that would have answered safely, and the message meant to explain the refusal interpolated a value that cannot be interpolated.
+
+Three messages moved for values that were already refused as `EncodeError`. `m.uint()` given `"5"` says `received string` where it said `received 5`, and given `null` says `received object`, matching `Expected a Uint8Array, received …` beside it.
+
+### Cost
+
+399 minified bytes and 66 gzipped on the `compile` row. The wire codec (`m`) is **unchanged gzipped** — 5514 bytes before and after — because moving the open-object walk off `ObjectSchema` and onto a shape only the Standard Schema bridge builds took 14 gzip bytes back out of `m`, and the numeric guard put the same 14 back. `m` cannot build an open object, so a branch there would have charged every wire-codec bundle for a path it can never take.
+
+Two cheaper shapes of the numeric guard were measured and dropped: both moved it into `Writer.varuint`, saving 45 and 65 minified bytes, and both cost 2-4% on multi-byte integers, where the leaf costs 1%. Every other caller of that writer hands it a number it computed itself.
+
 ## 0.2.1
 
 **Same bytes, faster.** Nothing on the wire moves and no API changes; payloads written by 0.2.0 decode unchanged and vice versa. If you store or queue shorn payloads, this upgrade needs nothing from you.
