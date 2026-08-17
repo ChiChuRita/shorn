@@ -116,6 +116,8 @@ compile(), optionally wrapped by fingerprinted()
 | --- | --- |
 | `Unknown object property "x"` | an extra property where the vendor left `additionalProperties` absent: ArkType by default, Valibot's `object` and `looseObject` |
 | `Expected a lowercase UUID, received X` | an uppercase or malformed UUID under a `format: "uuid"` schema; 16 bytes have no case to remember |
+| `Expected an unsigned safe integer, received X` | `m.uint()` given a negative number, a non-integer, an integer past `Number.MAX_SAFE_INTEGER`, or a value that is not a number |
+| `Expected a safe integer, received X` | the same through `m.int()` |
 | `Expected an array with N items` | a length that disagrees with `minItems === maxItems` |
 | `Cannot encode X as a dynamic value` | a `Date`, `Map`, `Set`, class instance, function or symbol under `z.any()`. A *plain* object is fine whatever realm minted it — a `node:vm` context, an iframe, a worker |
 | `Dynamic value nests deeper than 64` | a dynamic value 65 levels deep, or an object that holds itself |
@@ -125,6 +127,8 @@ compile(), optionally wrapped by fingerprinted()
 | `No union branch holds X` | a JSON type no branch of a type-disjoint union declares. Only reachable through `unchecked()`: a validated codec rejects the value first |
 | `Expected a tuple with at least N items` | fewer items than a rest tuple's fixed part |
 | *validation issues, joined by `; `* | your refinements failed; paths prefixed as `field.nested: message` |
+
+Every one of these is an `EncodeError`, whatever the value. A `Symbol`, or an object whose `valueOf` or `Symbol.toPrimitive` throws, is refused like any other wrong type rather than letting the coercion's own `TypeError` out, so `instanceof EncodeError` and `safeEncode` narrowing hold for anything a caller can pass. In the two integer messages above, `X` is the value when it is a number and its type — `symbol`, `object`, `string` — when it is not, because a value that cannot be coerced cannot be printed either.
 
 ## Decode-time errors
 

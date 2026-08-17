@@ -9,14 +9,14 @@ An esbuild-minified browser bundle for each imported codec API. Validation libra
 
 | Codec | Minified | Gzip |
 | --- | ---: | ---: |
-| **shorn `m`** (wire codec) | **17.82 KB** | **5.52 KB** |
+| **shorn `m`** (wire codec) | **17.89 KB** | **5.52 KB** |
 | @msgpack/msgpack | 21.20 KB | 5.93 KB |
 | msgpackr | 27.59 KB | 10.39 KB |
 | cbor-x | 29.10 KB | 10.82 KB |
-| shorn `compile` (validating) | 30.81 KB | 9.63 KB |
+| shorn `compile` (validating) | 31.21 KB | 9.69 KB |
 | protobufjs/light | 88.35 KB | 25.93 KB |
 
-**shorn's wire codec is the smallest measured, 7% under `@msgpack/msgpack` gzipped.** `compile` is 62% larger gzipped because it validates on encode and decode, which no other row does — it is still under both msgpackr and cbor-x, which validate nothing. Compare the row that matches what you ship.
+**shorn's wire codec is the smallest measured, 7% under `@msgpack/msgpack` gzipped.** `compile` is 63% larger gzipped because it validates on encode and decode, which no other row does — it is still under both msgpackr and cbor-x, which validate nothing. Compare the row that matches what you ship.
 
 That margin is narrowing on purpose — recent throughput work bought speed with bytes — and at 7% it is closer to a tie than to a claim.
 
@@ -26,14 +26,14 @@ That margin is narrowing on purpose — recent throughput work bought speed with
 
 | import set | minified | gzip | this row adds |
 | --- | ---: | ---: | ---: |
-| `compile` | 30,810 | 9,630 | — |
-| + `m` | 31,403 | 9,780 | 150 gzip |
-| + `safeEncode` / `safeDecode` | 31,636 | 9,861 | 81 gzip |
-| + `encodeAsync` / `decodeAsync` | 32,231 | 10,034 | 173 gzip |
-| + `fingerprinted` | 33,594 | 10,452 | 418 gzip |
-| everything | 34,343 | 10,679 | 227 gzip |
+| `compile` | 31,210 | 9,695 | — |
+| + `m` | 31,802 | 9,847 | 152 gzip |
+| + `safeEncode` / `safeDecode` | 32,035 | 9,929 | 82 gzip |
+| + `encodeAsync` / `decodeAsync` | 32,630 | 10,100 | 171 gzip |
+| + `fingerprinted` | 33,993 | 10,510 | 410 gzip |
+| everything | 34,742 | 10,745 | 235 gzip |
 
-**Only users who import a feature pay for it.** Fingerprinting is the most expensive single import at 418 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it.
+**Only users who import a feature pay for it.** Fingerprinting is the most expensive single import at 410 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it.
 
 These numbers have grown across releases, spent on schema coverage — discriminated unions, records, open objects, dynamic values, packed UUIDs, non-string enums, fixed-length arrays, tuple rest elements, type-disjoint unions, and recursive schemas — and, most recently, 334 gzip bytes on a generated encoder for objects with optional fields and a faster string encoder, worth about two thirds on document encode and decode.
 

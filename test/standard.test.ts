@@ -331,6 +331,46 @@ describe("Standard Schema adapter", () => {
       expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     });
 
+    it("names the extras key holding a value the writer refuses", () => {
+      // A lone surrogate, because the validator passes it and only the writer refuses it:
+      // the one way to reach the walk at all, since a type error arrives with a validator
+      // issue that already names the field.
+      const Open = z.object({ id: z.string() }).catchall(z.string());
+      const top = safeEncode(Open, { id: "ok", note: "bad\ud800" });
+      expect(top.success).toBe(false);
+      if (!top.success) {
+        const error = top.error as EncodeError;
+        expect(error.path).toBe("note");
+        expect(error.message).toBe("String contains an unpaired surrogate at note");
+      }
+
+      // One level down this named `o` — the enclosing field, which points a caller at the
+      // wrong value rather than at none. An extras key is a direct child of the object.
+      const deep = safeEncode(z.object({ o: Open }), { o: { id: "ok", note: "bad\ud800" } });
+      expect(deep.success).toBe(false);
+      if (!deep.success) {
+        const error = deep.error as EncodeError;
+        expect(error.path).toBe("o.note");
+        expect(error.message).toBe("String contains an unpaired surrogate at o.note");
+      }
+    });
+
+    it("searches an open object's declared fields before its extras", () => {
+      // The order encode writes them in. With both refused, the field wins.
+      const Open = z.object({ id: z.string() }).catchall(z.string());
+      const both = safeEncode(Open, { id: "bad\ud800", note: "bad\ud800" });
+      expect(both.success).toBe(false);
+      if (!both.success) expect((both.error as EncodeError).path).toBe("id");
+
+      // A closed object of the same shape has no tail to walk, and reports what it always
+      // did: the declared field, or nothing when the failure is the value's own type.
+      const Closed = z.object({ id: z.string() });
+      const closed = safeEncode(Closed, { id: "bad\ud800" });
+      expect(closed.success).toBe(false);
+      if (!closed.success) expect((closed.error as EncodeError).path).toBe("id");
+      expect(() => compile(Open).encode("nope" as never)).toThrow(/received string$/);
+    });
+
     it("does not re-type an overlapping union as a dynamic value", () => {
       // Reaches the same typeless node the `any` mapping reads, and keeps the refusal it
       // had: two object branches with no discriminant have nothing that says which one to
@@ -746,14 +786,40 @@ describe("Standard Schema adapter", () => {
     });
 
     it("keeps the field path through the recursion", () => {
-      const Tree = compile(Node);
+      // A type error, so this covers the path a validator issue takes; the case below
+      // covers the one only the writer refuses. The regex matches the suffix the walk
+      // appends rather than the vendor's own issue path, which shorn dot-joins — zod
+      // writes `children.0.value` there, which this deliberately does not match.
       const error = safeEncode(Node, {
         value: "r",
         children: [{ value: 1 as never, children: [] }],
       });
       expect(error.success).toBe(false);
-      expect(Tree).toBeDefined();
       if (!error.success) expect(error.error.message).toMatch(/children\[0\]\.value/);
+    });
+
+    it("names every level of the recursion, not only the first", () => {
+      // The back-edge is the one walk that runs once per level of the payload, so a drift
+      // here truncates rather than vanishes: stubbing its delegation out after one step
+      // reported `children[1]`, which reads like an answer. A lone surrogate is the value
+      // that reaches the writer at all — a type error carries a validator issue that
+      // already names the field, so the message would say `value` either way.
+      const result = safeEncode(Node, {
+        value: "r",
+        children: [
+          { value: "a", children: [] },
+          {
+            value: "b",
+            children: [{ value: "c", children: [{ value: "bad\ud800", children: [] }] }],
+          },
+        ],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const error = result.error as EncodeError;
+        expect(error.path).toBe("children[1].children[0].children[0].value");
+        expect(error.issues).toBeUndefined();
+      }
     });
   });
 

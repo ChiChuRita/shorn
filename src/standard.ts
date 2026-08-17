@@ -4,7 +4,6 @@ import {
   BooleanSchema,
   canonicalEnumOrder,
   canonicalKeyOrder,
-  createObjectSchema,
   DecodeError,
   DynamicSchema,
   EncodeError,
@@ -14,6 +13,8 @@ import {
   IntSchema,
   LazySchema,
   LiteralSchema,
+  ObjectSchema,
+  OpenObjectSchema,
   Reader,
   RecordSchema,
   Schema,
@@ -694,15 +695,16 @@ function compileWireShape(shape: WireShape, lazies?: Lazies): Schema<unknown> {
     const schema = compileWireShape(field.value, lazies);
     objectShape[field.key] = field.optional ? schema.optional() : schema;
   }
-  return createObjectSchema(
-    objectShape,
-    shape.rejectUnknown,
-    // Built here rather than inside `ObjectSchema`, so `m` does not carry
-    // `RecordSchema` in its bundle.
-    shape.extras === undefined
-      ? undefined
-      : new RecordSchema(compileWireShape(shape.extras, lazies)),
-  );
+  // The open half is built here rather than inside `ObjectSchema`, so `m` carries neither
+  // `RecordSchema` nor the walk over the keys it holds.
+  if (shape.extras !== undefined) {
+    return new OpenObjectSchema(
+      objectShape,
+      shape.rejectUnknown,
+      new RecordSchema(compileWireShape(shape.extras, lazies)),
+    );
+  }
+  return new ObjectSchema(objectShape, shape.rejectUnknown);
 }
 
 /**

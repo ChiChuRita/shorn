@@ -183,6 +183,10 @@ function encodePath(schema: Schema<unknown>, value: unknown): string | undefined
     for (let step = 0; step < MAX_RECURSION_DEPTH; step++) {
       const child: FailingChild | undefined = node._failingChild(current);
       if (child === undefined) break;
+      // ponytail: a record or extras key is data, so a key of `a.b`, `[0]` or `""` joins
+      // into a path indistinguishable from nesting. Quoting the segment — `a["a.b"]` — is
+      // the upgrade, and it changes the documented `user.address.zip` shape for every
+      // caller who parses a path, so it waits for someone the ambiguity hurts.
       path =
         path === "" || child.segment.startsWith("[")
           ? path + child.segment
@@ -281,7 +285,12 @@ export class Writer {
 
   varuint(value: number): void {
     // Most varints on the wire are one byte, so take them before the guard and the
-    // loop: skips Number.isSafeInteger, the 8-byte reserve and the shift loop.
+    // loop: skips Number.isSafeInteger, the 8-byte reserve and the shift loop. The
+    // comparison leads and `Number.isInteger` trails, so a multi-byte value never pays
+    // for the predicate — hoisting it measured -4% on a 500-element array of millisecond
+    // timestamps. That order also means a value JavaScript declines to coerce throws out
+    // of `value >= 0` before anything here could refuse it politely, which is why
+    // `UintSchema` refuses one before the call.
     if (value >= 0 && value < 0x80 && Number.isInteger(value)) {
       this.ensure(1);
       this.buffer[this.offset++] = value;
@@ -884,6 +893,16 @@ export class BooleanSchema extends Schema<boolean> {
 
 export class UintSchema extends Schema<number> {
   _encode(writer: Writer, value: number): void {
+    // On the leaf and not in `varuint`, because every other caller of that hands it a
+    // number it computed itself — an array length, a record count, an enum or union
+    // index — so a check there charges all of them for a case only a caller's value can
+    // reach. Measured on 500 millisecond timestamps, every value multi-byte: this 1%, the
+    // same check inside `varuint` 2%, hoisting `Number.isInteger` there 4%, against a
+    // byte-identical control at 0.1%. `Float64Schema` guards its leaf the same way, and
+    // the type is all the message can report: interpolating the value throws on a Symbol.
+    if (typeof value !== "number") {
+      throw new EncodeError(`Expected an unsigned safe integer, received ${typeof value}`);
+    }
     writer.varuint(value);
   }
 
@@ -895,7 +914,14 @@ export class UintSchema extends Schema<number> {
 export class IntSchema extends Schema<number> {
   _encode(writer: Writer, value: number): void {
     if (!Number.isSafeInteger(value)) {
-      throw new EncodeError(`Expected a safe integer, received ${value}`);
+      // The type, not the value, for anything that is not a number: `${value}` throws on a
+      // Symbol and on an object whose `valueOf` throws, so the message meant to explain
+      // the refusal would replace it with an error of its own. This leaf needs no guard
+      // beside it, unlike `UintSchema` — `Number.isSafeInteger` already answers false for
+      // both without coercing anything.
+      throw new EncodeError(
+        `Expected a safe integer, received ${typeof value === "number" ? value : typeof value}`,
+      );
     }
     const zigzag = value >= 0 ? value * 2 : -value * 2 - 1;
     if (Number.isSafeInteger(zigzag)) {
@@ -970,6 +996,18 @@ export class OptionalSchema<T> extends Schema<T | undefined> {
     if (value !== undefined) this.inner._encode(writer, value);
   }
 
+  /**
+   * No segment of its own, as `UnionSchema` and `LazySchema` also have none: the
+   * position holding the wrapper is the parent's to name, and without this the path
+   * stops there. The absent case ends the walk rather than descending — `_encode` never
+   * reached `inner`, so no failure came from there, and `inner` would refuse the
+   * sentinel that only means "not present".
+   */
+  override _failingChild(value: unknown): FailingChild | undefined {
+    if (value === undefined) return undefined;
+    return this.inner._failingChild(value);
+  }
+
   _decode(reader: Reader): T | undefined {
     const present = reader.byte();
     if (present > 1) throw new DecodeError("Invalid optional marker", reader.position - 1);
@@ -987,6 +1025,15 @@ export class NullableSchema<T> extends Schema<T | null> {
   _encode(writer: Writer, value: T | null): void {
     writer.byte(value === null ? 0 : 1);
     if (value !== null) this.inner._encode(writer, value);
+  }
+
+  /**
+   * Descends for the reason `OptionalSchema._failingChild` does, with `null` as the
+   * sentinel that ends the walk. Copied rather than shared, per that class's brand.
+   */
+  override _failingChild(value: unknown): FailingChild | undefined {
+    if (value === null) return undefined;
+    return this.inner._failingChild(value);
   }
 
   _decode(reader: Reader): T | null {
@@ -1803,9 +1850,9 @@ function buildRecordEncoder(
   }
 }
 
-class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
+export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
   private readonly fields: ObjectField[];
-  private readonly fieldNames: Set<string> | undefined;
+  protected readonly fieldNames: Set<string> | undefined;
   private readonly hasProtoField: boolean;
   private readonly inheritableField: boolean;
   private readonly optionalCount: number;
@@ -1817,7 +1864,7 @@ class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
 
   constructor(
     shape: S,
-    private readonly rejectUnknownProperties: boolean,
+    private readonly rejectUnknownProperties = false,
     /**
      * The open half of an open object: undeclared keys follow the declared fields
      * through here, a `RecordSchema` in practice.
@@ -1828,7 +1875,7 @@ class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
      * express. Undefined for a closed object, which is also what keeps the generated
      * encoder and decoder — both of which would drop the tail — off an open shape.
      */
-    private readonly tail?: Schema<Record<string, unknown>>,
+    protected readonly tail?: Schema<Record<string, unknown>>,
   ) {
     super();
     // Integer-like keys need no special case, though it looks as though they might:
@@ -1941,17 +1988,10 @@ class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
   }
 
   /**
-   * The keys the schema did not name, written as a record after the declared fields.
-   * A closed object returns on the first line.
+   * The keys the schema did not name, written as a record after the declared fields. A
+   * closed object has none and stops here; `OpenObjectSchema` overrides.
    */
-  private writeExtras(writer: Writer, record: Record<string, unknown>): void {
-    if (this.tail === undefined) return;
-    const extras = Object.create(null) as Record<string, unknown>;
-    for (const key of Object.keys(record)) {
-      if (!this.fieldNames!.has(key)) extras[key] = record[key];
-    }
-    this.tail._encode(writer, extras);
-  }
+  protected writeExtras(_writer: Writer, _record: Record<string, unknown>): void {}
 
   /**
    * `defineProperty` throughout, not `Object.assign`: assignment goes through
@@ -2053,12 +2093,43 @@ class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
   }
 }
 
-export function createObjectSchema<S extends Shape>(
-  shape: S,
-  rejectUnknownProperties = false,
-  tail?: Schema<Record<string, unknown>>,
-): Schema<ObjectOutput<S>> {
-  return new ObjectSchema(shape, rejectUnknownProperties, tail);
+/**
+ * Everything an open object does with its undeclared keys on the way out: deriving them,
+ * and walking them for a path. Out here rather than in `ObjectSchema` because only the
+ * Standard Schema bridge builds a tail, so an `m`-only bundle can run neither — and pays
+ * for them anyway when they sit there: the derivation alone measured 164 minified bytes.
+ * The same finding that keeps `new RecordSchema(...)` out of that constructor. Nothing `m`
+ * exports names this class, so a bundle without `compile` drops it whole.
+ */
+export class OpenObjectSchema<S extends Shape> extends ObjectSchema<S> {
+  protected override writeExtras(writer: Writer, record: Record<string, unknown>): void {
+    this.tail!._encode(writer, this.extras(record));
+  }
+
+  /**
+   * Declared fields first, in the order encode writes them, then the undeclared keys. The
+   * tail names the key itself, so an extras key is a direct child of the object in path
+   * terms — `o.note` rather than `o.<extras>.note`.
+   *
+   * The guard repeats the base's because a non-object has no undeclared keys either: the
+   * extras of a string would be its character indices.
+   */
+  override _failingChild(value: unknown): FailingChild | undefined {
+    if (typeof value !== "object" || value === null) return undefined;
+    return (
+      super._failingChild(value) ??
+      this.tail!._failingChild(this.extras(value as Record<string, unknown>))
+    );
+  }
+
+  /** Which keys are undeclared, decided here for both the write and the walk. */
+  private extras(record: Record<string, unknown>): Record<string, unknown> {
+    const extras = Object.create(null) as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      if (!this.fieldNames!.has(key)) extras[key] = record[key];
+    }
+    return extras;
+  }
 }
 
 export const m = {
@@ -2079,5 +2150,5 @@ export const m = {
   // `RecordSchema`, `UnionSchema` and `DynamicSchema` are absent for the same reason.
   tuple: <const S extends readonly Schema<unknown>[]>(items: S): Schema<TupleOutput<S>> =>
     new TupleSchema(items),
-  object: <S extends Shape>(shape: S): Schema<ObjectOutput<S>> => createObjectSchema(shape),
+  object: <S extends Shape>(shape: S): Schema<ObjectOutput<S>> => new ObjectSchema(shape),
 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { compile, decode, DecodeError, encode, m, type Schema } from "../src/index.js";
+import { compile, decode, DecodeError, EncodeError, encode, m, type Schema } from "../src/index.js";
 import {
   below,
   containsNaN,
@@ -176,6 +176,68 @@ describe("property: generated schemas crossed with generated values", { timeout:
       expect(countArrayElements(gen.schema.decode(bytes)), `seed ${seed}`).toBeLessThanOrEqual(
         bytes.length,
       );
+    }
+  });
+
+  it("names the one position holding a value no schema accepts", async () => {
+    // `EncodeError.path` comes from a second traversal of the children `_encode` visits,
+    // written once per container. A container that declares fewer children than it
+    // encodes does not report nothing — it reports its own position, which is a
+    // plausible-looking wrong answer. So: walk the value the way the path is built,
+    // corrupt one position, and hold the report against it.
+    //
+    // A function: every schema refuses one, and it is not an `object`, so a container
+    // handed one ends the walk at its own position rather than descending into it. A
+    // `Symbol` would do as well now — it was the first choice and could not be used,
+    // because the numeric leaves threw a raw TypeError out of a comparison or out of the
+    // message meant to explain the refusal, and `withPath` decorates only an EncodeError.
+    // That is fixed; this stays a function because nothing here needs it to change.
+    const poison = (): void => {};
+
+    /** Every position the value carries, paired with the path `encodePath` would build. */
+    type Position = { readonly corrupt: () => void; readonly path: string };
+    const positions = (value: unknown, prefix: string): Position[] => {
+      // A `Uint8Array`'s indices are bytes rather than schema positions; `containsNaN`
+      // and `countArrayElements` stop at one for the same reason.
+      if (value === null || typeof value !== "object" || value instanceof Uint8Array) return [];
+      const record = value as Record<string, unknown>;
+      const found: Position[] = [];
+      for (const key of Object.keys(record)) {
+        const segment = Array.isArray(value) ? `[${key}]` : key;
+        const path =
+          prefix === "" || segment.startsWith("[") ? prefix + segment : `${prefix}.${segment}`;
+        found.push({
+          corrupt: () => {
+            record[key] = poison;
+          },
+          path,
+        });
+        // Only what the value carries, which is the whole of what encode visits: an
+        // absent optional is never encoded, so no failure can come from one.
+        found.push(...positions(record[key], path));
+      }
+      return found;
+    };
+
+    for (let seed = 1; seed <= CASES; seed++) {
+      await breathe(seed);
+      const rng = mulberry32(seed * 15_485_863);
+      const gen = schemaGen(rng, 4);
+      const value = gen.sample(rng);
+      const found = positions(value, "");
+      // A leaf schema, or an empty container: no position for a path to name.
+      if (found.length === 0) continue;
+      const target = pick(rng, found);
+      target.corrupt();
+
+      let thrown: unknown;
+      try {
+        gen.schema.encode(value);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, `seed ${seed}: ${target.path}`).toBeInstanceOf(EncodeError);
+      expect((thrown as EncodeError).path, `seed ${seed}`).toBe(target.path);
     }
   });
 });

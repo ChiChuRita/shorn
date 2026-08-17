@@ -91,6 +91,37 @@ describe("shorn core", () => {
     expect(Value.decode(Value.encode(value))).toEqual(value);
   });
 
+  it("refuses a value JavaScript declines to coerce like every other leaf", () => {
+    // A Symbol, and the general case a caller's getter produces: an object whose
+    // coercion throws. Both used to escape as the coercion's own error rather than an
+    // EncodeError — `m.uint()` compared the value, `m.int()` interpolated it into the
+    // message meant to explain the refusal.
+    const uncoercible = {
+      [Symbol.toPrimitive]() {
+        throw new RangeError("this object has no primitive");
+      },
+    };
+    for (const value of [Symbol("x"), uncoercible, () => 1]) {
+      expect(() => m.uint().encode(value as never)).toThrow(EncodeError);
+      expect(() => m.int().encode(value as never)).toThrow(EncodeError);
+    }
+    // The type, because naming the value is the thing that threw.
+    expect(() => m.uint().encode(Symbol("x") as never)).toThrow(
+      "Expected an unsigned safe integer, received symbol",
+    );
+    expect(() => m.int().encode(uncoercible as never)).toThrow(
+      "Expected a safe integer, received object",
+    );
+    // Refusals of a number still name it, which is where the value is the useful half.
+    expect(() => m.uint().encode(-1)).toThrow("Expected an unsigned safe integer, received -1");
+    expect(() => m.uint().encode(1.5)).toThrow("Expected an unsigned safe integer, received 1.5");
+    expect(() => m.int().encode(2 ** 53)).toThrow("Expected a safe integer, received 9007199254740992");
+    // And the other leaves are untouched by any of it.
+    expect(() => m.string().encode(Symbol("x") as never)).toThrow("Expected a string");
+    expect(() => m.boolean().encode(Symbol("x") as never)).toThrow("Expected a boolean");
+    expect(() => m.float64().encode(Symbol("x") as never)).toThrow("Expected a number");
+  });
+
   // The encoder switches from a charCode loop to encodeInto partway up, and the
   // decoder from fromCharCode to TextDecoder. Both crossovers are tuning constants,
   // so every length either side of both is walked rather than sampled.
@@ -491,6 +522,60 @@ describe("shorn core", () => {
           tags: [{ id: 1 }, { id: "x" as never }],
         }),
       ).toThrow("at tags[1].id");
+    });
+
+    it("passes through an optional() or nullable() a container holds directly", () => {
+      const optional = m.array(m.object({ a: m.string() }).optional());
+      expect(() => optional.encode([{ a: 5 as never }])).toThrow("at [0].a");
+      const nullable = m.array(m.object({ a: m.string() }).nullable());
+      expect(() => nullable.encode([{ a: 5 as never }])).toThrow("at [0].a");
+      // The same schema in a field position always reported `o.a`, because
+      // `ObjectSchema` unwraps the optional into the field and the wrapper is never
+      // asked. That inconsistency is what this restores.
+      const field = m.object({ o: m.object({ a: m.string() }).optional() });
+      expect(() => field.encode({ o: { a: 5 as never } })).toThrow("at o.a");
+      // A wrapper at the top level holds no position of its own, so the path is the
+      // inner schema's alone.
+      expect(() => m.object({ a: m.string() }).nullable().encode({ a: 5 as never })).toThrow(
+        "at a",
+      );
+    });
+
+    it("stops at the position holding a wrapper's own sentinel", () => {
+      // Handed the sentinel, `_encode` never reached the inner schema, so nothing inside
+      // it failed: the path names the position and goes no further. Here the sentinel is
+      // the wrong one for the wrapper, which is what makes the stop observable.
+      const optional = m.array(m.object({ a: m.string() }).optional());
+      expect(() => optional.encode([null as never])).toThrow("Expected an object at [0]");
+      const nullable = m.array(m.object({ a: m.string() }).nullable());
+      expect(() => nullable.encode([undefined as never])).toThrow("Expected an object at [0]");
+      // An absent optional beside a failure is skipped rather than blamed.
+      expect(() => optional.encode([undefined, { a: 5 as never }])).toThrow("at [1].a");
+    });
+
+    it("names the field holding a value that cannot be coerced or printed", () => {
+      // The walk re-encodes each child and keeps the first that throws, so it finds this
+      // one like any other — but only because the leaf refuses with an EncodeError now.
+      // `withPath` decorates nothing else, so a raw TypeError arrived with no path at all.
+      const schema = m.object({ n: m.uint(), s: m.int() });
+      const failure = (encode: () => unknown): EncodeError => {
+        try {
+          encode();
+        } catch (thrown) {
+          return thrown as EncodeError;
+        }
+        throw new Error("expected a throw");
+      };
+      const first = failure(() => schema.encode({ n: Symbol("x") as never, s: 1 }));
+      expect(first).toBeInstanceOf(EncodeError);
+      expect(first.path).toBe("n");
+      expect(first.message).toBe("Expected an unsigned safe integer, received symbol at n");
+      expect(failure(() => schema.encode({ n: 1, s: Symbol("x") as never })).path).toBe("s");
+      // Both encode paths, since a generated encoder walks its fields itself.
+      const nested = m.array(m.object({ n: m.uint() }));
+      expect(failure(() => nested.encode([{ n: 1 }, { n: Symbol("x") as never }])).path).toBe(
+        "[1].n",
+      );
     });
 
     it("locates a field behind a presence bitmap", () => {
