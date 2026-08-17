@@ -3,6 +3,9 @@ dist/
 coverage/
 *.tsbuildinfo
 /internal/
+# The local issue tracker: specs and tickets, which are how the work is run rather
+# than part of it.
+/.scratch/
 .astro/
 
 # Scratch probes from debugging sessions. Never part of a change.
