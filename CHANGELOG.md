@@ -1,5 +1,80 @@
 # Changelog
 
+## 0.3.0
+
+**Same bytes, and one class of schema stops compiling.** Every payload written by 0.2.x decodes unchanged, every fingerprint is the one it was, and no export changed shape — the byte-layout rows of the regression gate and the golden vectors are identical, and 8,000 generated schemas encode to the same bytes as before. The minor bump is for schemas, not payloads: a shape that could allocate unboundedly from an empty payload is now refused when the codec is built, and one that used to be refused now compiles.
+
+Found by a fuzzing pass over the JSON Schema translation — 60,000 generated schema documents crossed with generated values, byte mutations and arbitrary bytes, plus every schema shape crossed with a pool of hostile values, and a separate 200,000-case run aimed at the allocation bound below.
+
+### An empty payload could exhaust memory and kill the process
+
+An array whose count the schema fixes (`minItems` equal to `maxItems`) may hold a zero-width element — a literal, an empty tuple, an empty object — because its count comes from the schema rather than from the payload. Nothing bounded that count once it was nested, and nesting multiplies:
+
+```ts
+const bomb = z.array(z.array(z.array(z.literal("x")).length(1_000_000)).length(1_000_000)).length(1_000_000);
+decode(bomb, new Uint8Array(0));  // 10^18 slots. Process gone.
+```
+
+This was **not** the documented exemption, which needed a variable-length outer container and told you to cap it yourself. Here there is no payload and no outer container to cap, so no caller could intervene, and the failure was an unrecoverable out-of-memory abort rather than a catchable error.
+
+Codec construction now bounds the slots such a schema can fill from no input — multiplied through nesting, summed through zero-width objects and tuples — at the same 1,000,000 collection limit a length varint answers to. One fixed array of a million literals still works. Two of them nested do not:
+
+```
+Array elements must occupy at least one byte, or a fixed count of them must stay under the collection limit
+```
+
+That message replaces the array-of-zero-width-elements refusal and now covers both cases, since both come of an element that costs nothing. What counts as zero-width moved into the [error reference](https://shorn.dev/api/errors/).
+
+The bound needed two attempts. The first counted a tuple's items but not the tuple's own array, so `m.array(m.tuple([m.literal(true)]), 999_999)` passed the guard and then allocated *twice* the ceiling — 999,999 outer slots plus one array per tuple. Found by fuzzing the bound itself over 200,000 schemas rather than by re-reading it.
+
+### A validator that throws escaped every entry point
+
+A Standard Schema is expected to report problems as issues, but nothing stops one throwing — `z.int().refine((v) => { … })` whose body throws is all it takes. That error came out of `encode`, `decode`, `encodeAsync` and `decodeAsync` unchanged: a `RangeError` from functions documented to throw only `EncodeError` and `DecodeError`, so `instanceof` narrowing and the `safeEncode`/`safeDecode` error type all fell through it. The async pair are reachable from an ordinary zod schema.
+
+A throw from the validator is now an `EncodeError` on the way in and a `DecodeError` on the way out, with `cause` set to the original and a thrown non-`Error` reported as `The validator threw a value that is not an Error`. A getter or proxy trap of your own that throws while the encoder reads a property still propagates unchanged — only the validator's own call is wrapped, because that is the only layer that knows a validator ran.
+
+### `-0` silently became `0` through an enum
+
+`m.enum([0, 1])` accepted `-0` and decoded it back as `0`, with nothing on either side reporting it. A `Map` keys by SameValueZero, so `-0` found the `0` member and went out as that member's index. `m.literal(0).encode(-0)` has always been refused for exactly this reason; the enum now agrees, with `Unknown enum value -0`.
+
+### A recursive nullable type did not compile
+
+`T | null` where `T` is itself a recursive `T | null` failed to build:
+
+```
+This schema already decodes to null; wrapping it in nullable() would give null two encodings
+```
+
+The message blamed a `.nullable()` the caller had written for a marker shorn had added. Whether a cycle admits `null` cannot be answered while the cycle is still being built, so the redundant marker went on and was then refused. It now comes off where the definition table exists — which is also where the signature is taken, so the bytes and the fingerprint still agree. No fingerprint moves: every schema this affected threw, so none has payloads.
+
+### Four refusals reported the wrong error
+
+A message that quotes a value has to be able to print it. These interpolated values the schema does not constrain to a primitive, so an object with a null prototype, an object whose `toString` or `toJSON` throws, a `BigInt`, or a cycle replaced the `EncodeError` with a `TypeError` of its own — and told the caller about their getter instead of about their field. `EncodeError` narrowing and `safeEncode` now hold for all of them.
+
+| Where | Was | Now |
+| --- | --- | --- |
+| an unmatched enum value | `TypeError: Cannot convert object to primitive value` | `Unknown enum value object` |
+| a malformed UUID | the same | `Expected a lowercase UUID, received object` |
+| an unmatched union discriminant | `TypeError: Do not know how to serialize a BigInt` | `No union branch has "kind" = bigint` |
+| an out-of-range `fingerprinted({ bytes })` | `TypeError` | `Fingerprint bytes must be 1, 2, 3 or 4, received object` |
+| an unreadable `type` in a fetched JSON Schema | `TypeError` | `Unsupported Standard JSON Schema type object` |
+
+This is the rule `m.uint()` and `m.int()` adopted in 0.2.2, applied to the rest. A getter or proxy trap of your own that throws while the encoder reads a property still propagates unchanged — swallowing it would report a wrong field instead of the real fault.
+
+### Documented: a cached codec is built from the schema as it first read
+
+`compile`, `encode` and `decode` derive the wire plan once per schema object and never ask again, so a hand-built Standard Schema that reports a *different* structure later keeps the old plan and encodes to the old shape silently. This is a property of the cache rather than something shorn can check — re-deriving the JSON Schema to compare it is the entire cost the cache exists to remove — and it cannot arise from Zod, Valibot or ArkType, whose schemas are immutable. Now stated in [Compilation and Caching](https://shorn.dev/core-concepts/compile-and-caching/): treat a hand-built schema as frozen once encoded.
+
+### Corrected: the documented schema depth limit
+
+The docs said a schema nested about 5,900 levels deep throws `RangeError` instead of `DecodeError`. Re-measured on Node 22: it is about **1,400** levels through `compile()` and **1,600** through `m`, and it is thrown while the codec is being built rather than while a payload is read. The boundary is unchanged; only the number was wrong. A depth budget is still [on the roadmap](https://shorn.dev/hostile-input/).
+
+### Cost
+
+**96 gzip bytes on the wire codec (`m`)** — 5,443 → 5,539 — and 265 on the full export surface, over the 1% bundle gate. It was 175 on `m` before trimming: one shared message replaced two (56 bytes), the sentence naming the three zero-width shapes moved to the docs (28), and a `try`/`catch` gave way to a `typeof` gate (28). The remainder is the slot counter and its propagation through objects and tuples, which is what makes the bound sound rather than local, plus 7 bytes for a tuple's own array. Wrapping the validator's throw costs nothing in `m`, which has no validator to wrap.
+
+Throughput did not move. The `-0` guard leads with `value === 0` so the comparison short-circuits before the call; checking the enum member instead measured **-12%** on the unchecked person fixture and was dropped. Every payload-size row is byte-identical, and the hostile-input, startup and memory gates report no regressions.
+
 ## 0.2.3
 
 **Same bytes, smaller bundles.** Nothing on the wire moves and no API changes; payloads written by 0.2.2 decode unchanged and vice versa. If you store or queue shorn payloads, this upgrade needs nothing from you.
