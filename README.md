@@ -9,6 +9,8 @@ provides them. The saving comes from the schema, not a compressor, so it costs
 no CPU: up to 6.0× faster to encode and 13.6× faster to decode than JSON bytes.
 
 shorn is experimental alpha and runs in Node, Bun, Deno, browsers, and workers.
+The low-level `m` API bundles to 5.45 KB gzip; `compile` with validation is
+9.62 KB (esbuild-minified browser bundles, schema declarations excluded).
 
 ## Installation
 

@@ -409,18 +409,19 @@ function refShape(pointer: string, ctx: RefContext): WireShape {
  * itself, and folding that would leave a definition standing for nothing but its own
  * back-edge. Callers that need the top tested compare it themselves.
  */
-function foldDefs(node: unknown, defs: readonly string[]): unknown {
-  const fold = (child: unknown): unknown => {
+function foldDefs(node: unknown, defs: readonly string[], child = false): unknown {
+  if (typeof node !== "object" || node === null) return node;
+  if (child) {
     // A shape's JSON text is what the signature is taken from, so comparing the text is
     // comparing the shape. Rebuilt key by key rather than by variant: a `WireShape` is
     // plain JSON either way, and the walk costs a fifth of the bytes the variants did.
-    const index =
-      typeof child === "object" && child !== null ? defs.indexOf(JSON.stringify(child)) : -1;
-    return index < 0 ? foldDefs(child, defs) : { ref: index };
-  };
-  if (typeof node !== "object" || node === null) return node;
-  if (Array.isArray(node)) return node.map(fold);
-  return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, fold(value)]));
+    const index = defs.indexOf(JSON.stringify(node));
+    if (index >= 0) return { ref: index };
+  }
+  if (Array.isArray(node)) return node.map((value) => foldDefs(value, defs, true));
+  return Object.fromEntries(
+    Object.entries(node).map(([key, value]) => [key, foldDefs(value, defs, true)]),
+  );
 }
 
 /**
@@ -1000,7 +1001,7 @@ export function safeDecode(
 function asyncParts(
   schemaOrCodec: StandardSchemaV1 | Schema<unknown>,
   jsonSchema: StandardJSONSchemaV1 | undefined,
-): { source: StandardSchemaV1<unknown, unknown>; structure: Schema<unknown> } {
+): readonly [source: StandardSchemaV1<unknown, unknown>, structure: Schema<unknown>] {
   const codec =
     schemaOrCodec instanceof Schema ? schemaOrCodec : getCompiled(schemaOrCodec, jsonSchema);
   const source = codec._source;
@@ -1012,7 +1013,7 @@ function asyncParts(
       "This codec has no validator to await; async validation needs a codec from compile(), optionally wrapped by fingerprinted()",
     );
   }
-  return { source, structure };
+  return [source, structure];
 }
 
 export async function encodeAsync<T>(codec: Schema<T>, value: T): Promise<Uint8Array>;
@@ -1030,7 +1031,7 @@ export async function encodeAsync(
   value: unknown,
   jsonSchema?: StandardJSONSchemaV1,
 ): Promise<Uint8Array> {
-  const { source, structure } = asyncParts(schema, jsonSchema);
+  const [source, structure] = asyncParts(schema, jsonSchema);
   return structure.encode(await validateAsync(source, value));
 }
 
@@ -1049,7 +1050,7 @@ export async function decodeAsync(
   value: Uint8Array,
   jsonSchema?: StandardJSONSchemaV1,
 ): Promise<unknown> {
-  const { source, structure } = asyncParts(schema, jsonSchema);
+  const [source, structure] = asyncParts(schema, jsonSchema);
   // The public `decode`: a private structural decode stood here and rebuilt the same
   // framing without the `Uint8Array` brand check, so a wrong input type escaped as a
   // raw `TypeError` instead of a `DecodeError`.

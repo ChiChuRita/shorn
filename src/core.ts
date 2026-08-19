@@ -780,25 +780,20 @@ export abstract class Schema<T> {
   }
 
   encode(value: T): Uint8Array {
-    if (pooledWriterBusy) {
-      const writer = new Writer();
-      try {
-        this._encode(writer, value);
-      } catch (error) {
-        throw withPath(error, this, value);
-      }
-      return writer.finish();
-    }
-    pooledWriterBusy = true;
+    const pooled = !pooledWriterBusy;
+    const writer = pooled ? pooledWriter : new Writer();
+    if (pooled) pooledWriterBusy = true;
     try {
-      this._encode(pooledWriter, value);
-      return pooledWriter.finish();
+      this._encode(writer, value);
+      return writer.finish();
     } catch (error) {
       throw withPath(error, this, value);
     } finally {
-      // On the way out, so a throw leaves a clean Writer behind.
-      pooledWriter.reset();
-      pooledWriterBusy = false;
+      if (pooled) {
+        // On the way out, so a throw leaves a clean Writer behind.
+        writer.reset();
+        pooledWriterBusy = false;
+      }
     }
   }
 
@@ -1706,24 +1701,32 @@ export type ObjectOutput<S extends Shape> = {
   [K in OptionalKeys<S>]?: Exclude<Infer<S[K]>, undefined>;
 };
 
-interface ObjectField {
-  readonly key: string;
-  readonly schema: Schema<unknown>;
-  readonly optionalIndex: number;
-}
+/**
+ * Compact immutable metadata shared by construction, code generation, and the CSP
+ * fallback. A labeled tuple keeps those hot loops readable when destructured and avoids
+ * shipping three private property names that a consumer's minifier cannot rename.
+ */
+type ObjectField = readonly [
+  key: string,
+  schema: Schema<unknown>,
+  optionalIndex: number,
+];
 
 /**
- * One `k`/`s` pair per field, after whatever `extra` values bind as `x0`, `x1`, … —
- * which is what keeps every key a runtime argument rather than interpolated source.
+ * One `k`/`s` pair per field, after an optional dependency bound as `x` — which is
+ * what keeps every key a runtime argument rather than interpolated source.
  */
-function recordParts(fields: readonly ObjectField[], extra: readonly unknown[] = []) {
-  const parameters = extra.map((_, index) => `x${index}`);
-  const args = [...extra];
+function recordParts(
+  fields: readonly ObjectField[],
+  extra?: unknown,
+): readonly [parameters: string[], args: unknown[]] {
+  const parameters = extra === undefined ? [] : ["x"];
+  const args = extra === undefined ? [] : [extra];
   for (let index = 0; index < fields.length; index++) {
     parameters.push(`k${index}`, `s${index}`);
-    args.push(fields[index]!.key, fields[index]!.schema);
+    args.push(fields[index]![0], fields[index]![1]);
   }
-  return { parameters, args };
+  return [parameters, args];
 }
 
 /**
@@ -1750,9 +1753,12 @@ function buildRecordDecoder(
   bitmapWidth: number,
 ): ((reader: Reader) => Record<string, unknown>) | undefined {
   try {
-    // `DecodeError` arrives as `x0` rather than a capture, for `buildRecordEncoder`'s
+    // `DecodeError` arrives as `x` rather than a capture, for `buildRecordEncoder`'s
     // reason: a wrapper closure would be one creation site shared by every schema.
-    const { parameters, args } = recordParts(fields, optionalCount === 0 ? [] : [DecodeError]);
+    const [parameters, args] = recordParts(
+      fields,
+      optionalCount === 0 ? undefined : DecodeError,
+    );
     // All-required stays one object literal, which is measurably better than assigning
     // into a fresh object and is the shape most schemas have.
     let body: string;
@@ -1771,12 +1777,12 @@ function buildRecordDecoder(
       const spare = optionalCount % 8;
       if (spare !== 0) {
         statements.push(
-          `if((b${bitmapWidth - 1}>>>${spare})!==0)throw new x0("Non-canonical presence bitmap padding",r.position)`,
+          `if((b${bitmapWidth - 1}>>>${spare})!==0)throw new x("Non-canonical presence bitmap padding",r.position)`,
         );
       }
       statements.push("const o={}");
       for (let index = 0; index < fields.length; index++) {
-        const { optionalIndex } = fields[index]!;
+        const optionalIndex = fields[index]![2];
         const read = `o[k${index}]=s${index}._decode(r)`;
         // Byte and bit are fixed by the schema, so they are constants here rather than
         // the shifts the interpreted loop recomputes per field on every decode.
@@ -1813,29 +1819,29 @@ function buildRecordEncoder(
   bitmapWidth: number,
 ): ((writer: Writer, value: Record<string, unknown>) => void) | undefined {
   try {
-    // `EncodeError` arrives as argument `x0` rather than a capture: a wrapper closure
+    // `EncodeError` arrives as argument `x` rather than a capture: a wrapper closure
     // would be one creation site shared by every schema — the megamorphism this exists
     // to avoid.
-    const { parameters, args } = recordParts(fields, [EncodeError]);
-    const guard = `if(typeof v!=="object"||v===null||Array.isArray(v))throw new x0("Expected an object")`;
+    const [parameters, args] = recordParts(fields, EncodeError);
+    const guard = `if(typeof v!=="object"||v===null||Array.isArray(v))throw new x("Expected an object")`;
     let body: string;
     if (optionalCount === 0) {
       body = `${guard};${fields.map((_, index) => `s${index}._encode(w,v[k${index}])`).join(";")}`;
     } else {
       const optionals = fields
         .map((field, index) => ({ field, index }))
-        .filter(({ field }) => field.optionalIndex >= 0);
+        .filter(({ field }) => field[2] >= 0);
       // Hoisted, and read exactly once each: the value is wanted twice — for its bit and
       // for its bytes — and a field backed by a getter must not see two reads.
       const hoist = `const ${optionals.map(({ index }) => `o${index}=v[k${index}]`).join(",")}`;
       const bitmap = Array.from({ length: bitmapWidth }, (_, byte) => {
         const bits = optionals
-          .filter(({ field }) => field.optionalIndex >> 3 === byte)
-          .map(({ field, index }) => `(o${index}===undefined?0:${1 << (field.optionalIndex & 7)})`);
+          .filter(({ field }) => field[2] >> 3 === byte)
+          .map(({ field, index }) => `(o${index}===undefined?0:${1 << (field[2] & 7)})`);
         return `w.byte(${bits.join("|")})`;
       });
       const writes = fields.map((field, index) =>
-        field.optionalIndex < 0
+        field[2] < 0
           ? `s${index}._encode(w,v[k${index}])`
           : `if(o${index}!==undefined)s${index}._encode(w,o${index})`,
       );
@@ -1852,19 +1858,19 @@ function buildRecordEncoder(
 
 export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
   private readonly fields: ObjectField[];
-  protected readonly fieldNames: Set<string> | undefined;
-  private readonly hasProtoField: boolean;
-  private readonly inheritableField: boolean;
+  protected readonly knownKeys: Set<string> | undefined;
+  private readonly hasProtoKey: boolean;
+  private readonly hasInheritedKey: boolean;
   private readonly optionalCount: number;
   /** Bytes the presence bitmap occupies, and 0 when the shape has no optionals. */
   private readonly bitmapWidth: number;
-  private readonly generatedEncode:
+  private readonly encoder:
     | ((writer: Writer, value: Record<string, unknown>) => void)
     | undefined;
 
   constructor(
     shape: S,
-    private readonly rejectUnknownProperties = false,
+    private readonly rejectUnknown = false,
     /**
      * The open half of an open object: undeclared keys follow the declared fields
      * through here, a `RecordSchema` in practice.
@@ -1890,21 +1896,21 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     this.fields = keys.map((key) => {
       const declared = shape[key]!;
       if (declared instanceof OptionalSchema) {
-        return { key, schema: declared.inner, optionalIndex: optionalIndex++ };
+        return [key, declared.inner, optionalIndex++] as const;
       }
-      return { key, schema: declared, optionalIndex: -1 };
+      return [key, declared, -1] as const;
     });
     // Also built for an open object, which needs the same set to find undeclared keys
     // rather than to refuse them.
-    this.fieldNames = rejectUnknownProperties || tail !== undefined ? new Set(keys) : undefined;
-    this.hasProtoField = keys.includes("__proto__");
-    this.inheritableField = keys.some((key) => key in Object.prototype);
+    this.knownKeys = rejectUnknown || tail !== undefined ? new Set(keys) : undefined;
+    this.hasProtoKey = keys.includes("__proto__");
+    this.hasInheritedKey = keys.some((key) => key in Object.prototype);
     this.optionalCount = optionalIndex;
     this.bitmapWidth = Math.ceil(optionalIndex / 8);
     // The bitmap is always emitted; an absent optional adds nothing beyond it.
     let width = this.bitmapWidth + (this.tail?._minWidth ?? 0);
-    for (const field of this.fields) {
-      if (field.optionalIndex < 0) width += field.schema._minWidth;
+    for (const [, schema, optionalIndex] of this.fields) {
+      if (optionalIndex < 0) width += schema._minWidth;
     }
     this._minWidth = width;
 
@@ -1912,7 +1918,7 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     // whole decoder rather than a branch inside one. `__proto__` still needs
     // defineProperty, and an `Object.prototype`-shadowing key needs a non-enumerable
     // own undefined when its optional is absent; both stay interpreted.
-    if (!this.hasProtoField && this.tail === undefined && !(optionalIndex > 0 && this.inheritableField)) {
+    if (!this.hasProtoKey && this.tail === undefined && !(optionalIndex > 0 && this.hasInheritedKey)) {
       const generated = buildRecordDecoder(this.fields, optionalIndex, this.bitmapWidth);
       if (generated !== undefined) {
         this._decode = generated as (reader: Reader) => ObjectOutput<S>;
@@ -1923,14 +1929,14 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     // instance the way the decoder is: a distinct `_encode` per schema tips
     // `ArraySchema`'s shared `this.item._encode(...)` site megamorphic, measured at
     // -25% on an array of plain uints — a shape holding no object schema at all.
-    if (!this.inheritableField && !rejectUnknownProperties && this.tail === undefined) {
-      this.generatedEncode = buildRecordEncoder(this.fields, optionalIndex, this.bitmapWidth);
+    if (!this.hasInheritedKey && !rejectUnknown && this.tail === undefined) {
+      this.encoder = buildRecordEncoder(this.fields, optionalIndex, this.bitmapWidth);
     }
   }
 
   _encode(writer: Writer, value: ObjectOutput<S>): void {
-    if (this.generatedEncode !== undefined) {
-      this.generatedEncode(writer, value as Record<string, unknown>);
+    if (this.encoder !== undefined) {
+      this.encoder(writer, value as Record<string, unknown>);
       return;
     }
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -1938,8 +1944,8 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     }
 
     const record = value as Record<string, unknown>;
-    if (this.rejectUnknownProperties) {
-      const unknownKey = Object.keys(record).find((key) => !this.fieldNames!.has(key));
+    if (this.rejectUnknown) {
+      const unknownKey = Object.keys(record).find((key) => !this.knownKeys!.has(key));
       if (unknownKey !== undefined) {
         throw new EncodeError(`Unknown object property ${JSON.stringify(unknownKey)}`);
       }
@@ -1949,11 +1955,11 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     // plain object and missing from every null-prototype one, so the same own data
     // would encode to different bytes. Staging through a null-prototype record restores
     // canonical form; schemas without such a field read the caller's object directly.
-    const source = this.inheritableField ? this.ownFields(record) : record;
+    const source = this.hasInheritedKey ? this.ownFields(record) : record;
 
     if (this.optionalCount === 0) {
-      for (const field of this.fields) {
-        field.schema._encode(writer, source[field.key]);
+      for (const [key, schema] of this.fields) {
+        schema._encode(writer, source[key]);
       }
       this.writeExtras(writer, record);
       return;
@@ -1961,27 +1967,27 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
 
     const bitmap = new Uint8Array(this.bitmapWidth);
     const optionalValues = new Array<unknown>(this.optionalCount);
-    for (const field of this.fields) {
-      if (field.optionalIndex >= 0) {
-        const fieldValue = source[field.key];
-        optionalValues[field.optionalIndex] = fieldValue;
+    for (const [key, , optionalIndex] of this.fields) {
+      if (optionalIndex >= 0) {
+        const fieldValue = source[key];
+        optionalValues[optionalIndex] = fieldValue;
         if (fieldValue !== undefined) {
-          bitmap[field.optionalIndex >> 3]! |= 1 << (field.optionalIndex & 7);
+          bitmap[optionalIndex >> 3]! |= 1 << (optionalIndex & 7);
         }
       }
     }
     writer.bytes(bitmap);
 
-    for (const field of this.fields) {
-      if (field.optionalIndex >= 0) {
+    for (const [key, schema, optionalIndex] of this.fields) {
+      if (optionalIndex >= 0) {
         // The bit above was set from exactly this test, so read the value rather than
         // shifting the answer back out of the bitmap.
-        const fieldValue = optionalValues[field.optionalIndex];
+        const fieldValue = optionalValues[optionalIndex];
         if (fieldValue !== undefined) {
-          field.schema._encode(writer, fieldValue);
+          schema._encode(writer, fieldValue);
         }
       } else {
-        field.schema._encode(writer, source[field.key]);
+        schema._encode(writer, source[key]);
       }
     }
     this.writeExtras(writer, record);
@@ -2004,7 +2010,7 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     if (this.tail === undefined) return;
     const extras = this.tail._decode(reader);
     for (const key of Object.keys(extras)) {
-      if (this.fieldNames!.has(key)) {
+      if (this.knownKeys!.has(key)) {
         throw new DecodeError(
           `Extra property ${JSON.stringify(key)} repeats a declared field`,
           reader.position,
@@ -2028,23 +2034,23 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     const record = value as Record<string, unknown>;
     return firstFailing(
       this.fields
-        .filter((field) => field.optionalIndex < 0 || record[field.key] !== undefined)
-        .map((field) => ({ schema: field.schema, segment: field.key, value: record[field.key] })),
+        .filter(([key, , optionalIndex]) => optionalIndex < 0 || record[key] !== undefined)
+        .map(([key, schema]) => ({ schema, segment: key, value: record[key] })),
     );
   }
 
   private ownFields(record: Record<string, unknown>): Record<string, unknown> {
     const own = Object.create(null) as Record<string, unknown>;
-    for (const field of this.fields) {
-      if (Object.hasOwn(record, field.key)) own[field.key] = record[field.key];
+    for (const [key] of this.fields) {
+      if (Object.hasOwn(record, key)) own[key] = record[key];
     }
     return own;
   }
 
   _decode(reader: Reader): ObjectOutput<S> {
     const result: Record<string, unknown> = {};
-    if (this.optionalCount === 0 && !this.hasProtoField) {
-      for (const field of this.fields) result[field.key] = field.schema._decode(reader);
+    if (this.optionalCount === 0 && !this.hasProtoKey) {
+      for (const [key, schema] of this.fields) result[key] = schema._decode(reader);
       this.readExtras(reader, result);
       return result as ObjectOutput<S>;
     }
@@ -2056,18 +2062,18 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
         throw new DecodeError("Non-canonical presence bitmap padding", reader.position);
       }
     }
-    for (const field of this.fields) {
+    for (const [key, schema, optionalIndex] of this.fields) {
       if (
-        field.optionalIndex >= 0 &&
-        (bitmap![field.optionalIndex >> 3]! & (1 << (field.optionalIndex & 7))) === 0
+        optionalIndex >= 0 &&
+        (bitmap![optionalIndex >> 3]! & (1 << (optionalIndex & 7))) === 0
       ) {
         // An absent optional named like an `Object.prototype` member would read back as
         // the inherited member — an optional `toString` decoding to a function, which
         // the vendor's validate() then rejects. A non-enumerable own `undefined`
         // shadows it. A null-prototype record was tried and handed back objects that
         // failed `String()` and `instanceof Object`.
-        if (this.inheritableField && field.key in Object.prototype) {
-          Object.defineProperty(result, field.key, {
+        if (this.hasInheritedKey && key in Object.prototype) {
+          Object.defineProperty(result, key, {
             configurable: true,
             enumerable: false,
             value: undefined,
@@ -2076,16 +2082,16 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
         }
         continue;
       }
-      const decoded = field.schema._decode(reader);
-      if (field.key === "__proto__") {
-        Object.defineProperty(result, field.key, {
+      const decoded = schema._decode(reader);
+      if (key === "__proto__") {
+        Object.defineProperty(result, key, {
           configurable: true,
           enumerable: true,
           value: decoded,
           writable: true,
         });
       } else {
-        result[field.key] = decoded;
+        result[key] = decoded;
       }
     }
     this.readExtras(reader, result);
@@ -2126,7 +2132,7 @@ export class OpenObjectSchema<S extends Shape> extends ObjectSchema<S> {
   private extras(record: Record<string, unknown>): Record<string, unknown> {
     const extras = Object.create(null) as Record<string, unknown>;
     for (const key of Object.keys(record)) {
-      if (!this.fieldNames!.has(key)) extras[key] = record[key];
+      if (!this.knownKeys!.has(key)) extras[key] = record[key];
     }
     return extras;
   }
