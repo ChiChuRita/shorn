@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.3
+
+**Same bytes, smaller bundles.** Nothing on the wire moves and no API changes; payloads written by 0.2.2 decode unchanged and vice versa. If you store or queue shorn payloads, this upgrade needs nothing from you.
+
+### Private structure no longer ships as public-sized names
+
+Object codecs kept each field's key, schema and optional-bit position in an object. Those properties are private to shorn, but JavaScript minifiers cannot prove that and preserved their names in every bundle. They are now labeled readonly tuples: the source still destructures them as `key`, `schema` and `optionalIndex`, while the emitted bundle carries positions instead of names. The same compact return shape is used by record code generation and async validation.
+
+The encode entry point now shares one pooled and re-entrant control path instead of duplicating the whole operation, and recursive definition folding no longer creates a closure at every visited node. Private `ObjectSchema` fields were also renamed around what they mean — `encoder`, `knownKeys`, `rejectUnknown` — rather than how they happened to be implemented.
+
+### Bundle reduction
+
+The wire codec (`m`) drops **17,890 → 17,369 minified bytes (−2.9%)** and **5,514 → 5,443 gzip bytes (−1.3%)**. `compile + m` drops 1.7% minified and 0.8% gzip; the full export surface drops 1.7% minified and 0.7% gzip. No feature was removed, every payload-size regression row is byte-identical, and the throughput, hostile-input, startup and memory gates report no regressions.
+
 ## 0.2.2
 
 **Same bytes, better errors.** Nothing on the wire moves and no API changes; payloads written by 0.2.1 decode unchanged and vice versa. If you store or queue shorn payloads, this upgrade needs nothing from you.
