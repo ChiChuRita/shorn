@@ -253,6 +253,37 @@ describe("shorn core", () => {
     expect(() => m.int().decode(Uint8Array.of(0x80, 0))).toThrow(/Non-canonical/);
   });
 
+  it("bounds the slots a fixed-count array of zero-width elements can allocate", () => {
+    // A fixed count comes from the schema, so no input-length budget bounds it — that
+    // is the documented exemption, and one level of it still stands. Nesting a second
+    // one inside multiplies, and three levels of a million turned an *empty* payload
+    // into 10^18 slots and a fatal OOM, with no outer collection for a caller to cap.
+    const million = m.array(m.literal("x"), 1_000_000);
+    expect(million.decode(new Uint8Array(0))).toHaveLength(1_000_000);
+
+    // One refusal covers this and the variable-count case, since both come of an element
+    // that costs nothing: `m.array(m.literal("x"))` reads the same sentence.
+    const refusal = /or a fixed count of them must stay under the collection limit/;
+    expect(() => m.array(m.array(m.literal("x"), 1000), 1000)).toThrow(refusal);
+    expect(() => m.array(m.literal("x"))).toThrow(refusal);
+    // Through the two containers that can be zero-width themselves, or the multiplier
+    // is one object or one tuple away from being reachable again.
+    expect(() => m.array(m.object({ a: m.array(m.literal("x"), 1000) }), 1000)).toThrow(refusal);
+    expect(() => m.array(m.tuple([m.array(m.literal("x"), 1000)]), 1000)).toThrow(refusal);
+
+    // A tuple's own array is a slot too. Counting only its items' slots let this past at
+    // twice the ceiling: 999,999 outer slots plus one array per tuple. Found by fuzzing.
+    expect(() => m.array(m.tuple([m.literal(true)]), 999_999)).toThrow(refusal);
+    expect(m.array(m.tuple([m.literal(true)]), 500_000).decode(new Uint8Array(0))).toHaveLength(
+      500_000,
+    );
+
+    // Under the ceiling is still legal, and so is any element that costs a byte —
+    // that one the remaining-input check has always covered.
+    expect(m.array(m.array(m.literal("x"), 900), 1000).decode(new Uint8Array(0))).toHaveLength(1000);
+    expect(() => m.array(m.uint(), 1_000_000).decode(new Uint8Array(0))).toThrow(DecodeError);
+  });
+
   it("refuses enum members JSON cannot tell apart", () => {
     // NaN and both infinities stringify to `null`, so ordering a mixed enum by JSON
     // text would collapse them onto each other and onto a real null member.
@@ -270,6 +301,40 @@ describe("shorn core", () => {
     for (const value of members) {
       expect(Mixed.decode(Mixed.encode(value))).toBe(value);
     }
+  });
+
+  it("refuses -0 against a 0 enum member, which a Map key cannot tell apart", () => {
+    // `Map` keys compare with SameValueZero, so `indexes.get(-0)` finds the `0` member
+    // and the index written was the one for `0`: `-0` went out and `0` came back, with
+    // nothing on either side reporting it. `LiteralSchema` has always used `Object.is`
+    // for this; the enum is the same question asked through a Map.
+    const Mixed = m.enum([0, 1, "x"]);
+    expect(() => Mixed.encode(-0)).toThrow(EncodeError);
+    expect(() => Mixed.encode(-0)).toThrow("Unknown enum value -0");
+    // `0` itself is untouched, and so is every enum without a `0` member.
+    expect(Mixed.decode(Mixed.encode(0))).toBe(0);
+    expect(() => m.enum(["a", "b"]).encode(-0 as never)).toThrow("Unknown enum value -0");
+  });
+
+  it("explains a refusal without running the caller's coercion", () => {
+    // The rule the numeric leaves already follow, in the two shapes that quote a value
+    // the schema does not constrain to a primitive. `String` throws on a null-prototype
+    // object and out of a `toString` the caller wrote, so the sentence meant to explain
+    // the refusal replaced it with a TypeError — and the caller was told about their
+    // getter instead of about their field.
+    const hostile = [
+      Object.create(null) as never,
+      { toString() { throw new RangeError("no text"); } } as never,
+      Symbol("x") as never,
+    ];
+    for (const value of hostile) {
+      expect(() => m.enum(["a"]).encode(value)).toThrow(EncodeError);
+    }
+    expect(() => m.enum(["a"]).encode(Object.create(null) as never)).toThrow(
+      "Unknown enum value object",
+    );
+    // A string member still names itself, which is the half worth reading.
+    expect(() => m.enum(["a"]).encode("b" as never)).toThrow("Unknown enum value b");
   });
 
   it("matches a literal by identity, so NaN and -0 literals survive their own decode", () => {

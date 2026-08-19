@@ -20,6 +20,20 @@ export const write = (p) => encode(z.object({ name: z.string() }), p);
 
 The second form pays the full conversion on every call. Hoist schemas to module scope.
 
+### A cached schema is assumed not to change
+
+The plan is derived once from what `jsonSchema.input()` and `jsonSchema.output()` returned the first time, and shorn never asks again. A schema object that reports a *different* structure later keeps the plan built from the old one, and encodes to the old shape with no error:
+
+```ts
+let type = "integer";
+const mutable = { "~standard": { /* … */ jsonSchema: { output: () => ({ type }) } } };
+encode(mutable, 5);   // plan built for integer
+type = "string";
+encode(mutable, 5);   // still the integer plan
+```
+
+This is a property of the cache, not a bug shorn can check: re-deriving the JSON Schema to compare it is the whole cost the cache exists to remove. Zod, Valibot and ArkType schemas are immutable, so it cannot arise from them — if you build a Standard Schema by hand, treat it as frozen once encoded, and construct a new object rather than mutating one.
+
 For Valibot the cache is keyed on the schema **and** the structure object, so `toStandardJsonSchema` must be hoisted too — it returns a fresh object each call and is not free itself, so an inline call pays twice. See [Valibot](/validators/valibot/).
 
 ## Runtime specialization

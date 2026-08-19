@@ -26,16 +26,18 @@ Recent throughput work narrowed that margin from 26%; at 8% it remains a lead to
 
 | import set | minified | gzip | this row adds |
 | --- | ---: | ---: | ---: |
-| `compile` | 30,676 | 9,623 | — |
-| + `m` | 31,268 | 9,771 | 148 gzip |
-| + `safeEncode` / `safeDecode` | 31,501 | 9,854 | 83 gzip |
-| + `encodeAsync` / `decodeAsync` | 32,045 | 10,025 | 171 gzip |
-| + `fingerprinted` | 33,408 | 10,441 | 416 gzip |
-| everything | 34,157 | 10,669 | 228 gzip |
+| `compile` | 31,424 | 9,871 | — |
+| + `m` | 32,016 | 10,018 | 147 gzip |
+| + `safeEncode` / `safeDecode` | 32,249 | 10,100 | 82 gzip |
+| + `encodeAsync` / `decodeAsync` | 32,820 | 10,276 | 176 gzip |
+| + `fingerprinted` | 34,231 | 10,709 | 433 gzip |
+| everything | 34,980 | 10,934 | 225 gzip |
 
-**Only users who import a feature pay for it.** Fingerprinting is the most expensive single import at 416 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it.
+**Only users who import a feature pay for it.** Fingerprinting is the most expensive single import at 433 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it.
 
-These numbers have grown across releases, spent on schema coverage — discriminated unions, records, open objects, dynamic values, packed UUIDs, non-string enums, fixed-length arrays, tuple rest elements, type-disjoint unions, and recursive schemas — and, most recently, 334 gzip bytes on a generated encoder for objects with optional fields and a faster string encoder, worth about two thirds on document encode and decode.
+These numbers have grown across releases, spent on schema coverage — discriminated unions, records, open objects, dynamic values, packed UUIDs, non-string enums, fixed-length arrays, tuple rest elements, type-disjoint unions, and recursive schemas — and earlier, 334 gzip bytes on a generated encoder for objects with optional fields and a faster string encoder, worth about two thirds on document encode and decode.
+
+0.3.0 spent 98 gzip bytes on the wire codec (`m`), the first release to spend them on correctness rather than coverage: a bound on what a fixed-count array of zero-width elements can allocate from an empty payload, which without it was an unrecoverable out-of-memory abort, and refusals that report a hostile value's type instead of running its `toString`. It was 175 bytes before trimming — the message that names the three zero-width shapes moved to [the error reference](/api/errors/) at 28 bytes, one shared message replaced two at 56, and a `try`/`catch` gave way to a `typeof` gate at 28. Throughput and the bytes on the wire did not move.
 
 The functional helpers and fingerprinting tree-shake by export. `m` is one object, so importing it retains all of its builders. Add the size of your validator if it is not already part of the application.
 

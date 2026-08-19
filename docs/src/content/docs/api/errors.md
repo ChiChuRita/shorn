@@ -70,8 +70,9 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 | `Empty enums are unsupported` | an enum with no members |
 | `Enum member … has no JSON text of its own` | `NaN`, an infinity or `-0` in a mixed enum; none of the four survives the JSON text a mixed enum is ordered by |
 | `Invalid fixed array length X` | `minItems === maxItems` outside 0 to 1,000,000 |
+| `Array elements must occupy at least one byte, or a fixed count of them must stay under the collection limit` | an array of zero-width elements — a literal, an empty tuple, an empty object, or an object or tuple built only from those. A variable count can never be checked against the payload; a fixed count can be, but only up to 1,000,000 elements in total across nesting, since a fixed count needs no payload at all to satisfy |
 | `Unsupported JSON Schema literal` | a literal that is not string, number, boolean, or null |
-| `Unsupported Standard JSON Schema type X` | a type with no wire shape |
+| `Unsupported Standard JSON Schema type X` | a type with no wire shape. `X` is the type keyword, or `object` when the document put an object there |
 | `Unsupported Standard JSON Schema node` | a non-object node where a schema was expected |
 | `Unsupported JSON Schema reference "…"; only same-document references are supported` | a `$ref` naming another document |
 | `JSON Schema reference "…" does not resolve` | a `$ref` whose pointer names nothing in the document |
@@ -84,7 +85,7 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 | `This schema already decodes to null; wrapping it in nullable() would give null two encodings` | `m.literal(null).nullable()`, or a second null marker over one already reachable. Never from a vendor schema — `compile()` drops a redundant wrapper instead of reaching this |
 | `This schema already decodes to undefined; wrapping it in optional() would give undefined two encodings` | a second presence marker over one already reachable |
 | `fingerprinted() needs a codec built from a Standard JSON Schema; compile() returns one, the low-level m API does not` | `fingerprinted(m.object(...))` |
-| `Fingerprint bytes must be 1, 2, 3 or 4, received X` | out-of-range `bytes` option |
+| `Fingerprint bytes must be 1, 2, 3 or 4, received X` | out-of-range `bytes` option. `X` is the value, or its type when the value is neither a number nor a string |
 | `unchecked() needs a codec with a validator to remove; compile() returns one, optionally wrapped by fingerprinted(), and the low-level m API is already unvalidated` | `unchecked(m.object(...))`, or `unchecked(compile(schema).nullable())` |
 
 ### Rich types
@@ -123,12 +124,15 @@ compile(), optionally wrapped by fingerprinted()
 | `Dynamic value nests deeper than 64` | a dynamic value 65 levels deep, or an object that holds itself |
 | `Recursive value nests deeper than 256` | a recursive schema 257 levels deep, or a cycle with no way out of it |
 | `Record is too large` | a record with more than 1,000,000 entries |
-| `No union branch has "kind" = X` | a discriminant value no branch declares |
+| `No union branch has "kind" = X` | a discriminant value no branch declares. Only reachable through `unchecked()`; a validated codec rejects the value first |
+| `Unknown enum value X` | a value no enum member equals. `-0` against a `0` member is one of them: a `0` and a `-0` cannot both survive one index, and `-0` is the one with no way back |
 | `No union branch holds X` | a JSON type no branch of a type-disjoint union declares. Only reachable through `unchecked()`: a validated codec rejects the value first |
 | `Expected a tuple with at least N items` | fewer items than a rest tuple's fixed part |
 | *validation issues, joined by `; `* | your refinements failed; paths prefixed as `field.nested: message` |
 
-Every one of these is an `EncodeError`, whatever the value. A `Symbol`, or an object whose `valueOf` or `Symbol.toPrimitive` throws, is refused like any other wrong type rather than letting the coercion's own `TypeError` out, so `instanceof EncodeError` and `safeEncode` narrowing hold for anything a caller can pass. In the two integer messages above, `X` is the value when it is a number and its type — `symbol`, `object`, `string` — when it is not, because a value that cannot be coerced cannot be printed either.
+Every one of these is an `EncodeError`, whatever the value. A `Symbol`, an object with a null prototype, and an object whose `valueOf`, `toString`, `toJSON` or `Symbol.toPrimitive` throws are all refused like any other wrong type rather than letting the coercion's own `TypeError` out, so `instanceof EncodeError` and `safeEncode` narrowing hold for anything a caller can pass. Wherever a message quotes a value it does not constrain to a primitive, `X` is the value when naming it is safe and its type — `symbol`, `object`, `bigint`, `function` — when it is not, because a value that cannot be printed cannot explain its own refusal.
+
+The one thing that still escapes as itself is the caller's own code: a getter or a proxy trap that throws while the encoder reads a property propagates unchanged, because swallowing it would report a wrong field instead of the real fault.
 
 ## Decode-time errors
 
@@ -158,4 +162,4 @@ Handle fingerprint mismatches explicitly. Fingerprints are short wire-shape iden
 
 ## One error that is not a `DecodeError`
 
-A schema nested about 5,900 levels deep can overflow the JavaScript stack and throw `RangeError` instead of `DecodeError`. This requires a hostile **schema**, not only hostile bytes. Limit schema depth if schemas come from untrusted input. See [Hostile Input](/hostile-input/).
+A deeply nested schema overflows the JavaScript stack and throws `RangeError` rather than an `EncodeError` or a `DecodeError` — measured on Node 22 at about **1,400** levels of nested objects through `compile()` and **1,600** through `m`, so it is reached while the codec is built rather than while a payload is read. This requires a hostile **schema**, not only hostile bytes. Limit schema depth if schemas come from untrusted input. See [Hostile Input](/hostile-input/).

@@ -36,7 +36,7 @@ A `uuid` is stored as the 16 bytes it stands for, not the 36 characters it is wr
 
 An array's count is on the wire; a tuple's comes from the schema. That is why a tuple may contain zero-width elements and an array may not.
 
-An array whose `minItems` equals its `maxItems` is the third case: the count is fixed by the schema, so it is not written and the element may be zero-width, exactly as in a tuple. The count is still checked against the remaining input before anything is allocated, since `minItems` may have arrived from a fetched JSON Schema.
+An array whose `minItems` equals its `maxItems` is the third case: the count is fixed by the schema, so it is not written and the element may be zero-width, exactly as in a tuple. The count is still checked against the remaining input before anything is allocated, since `minItems` may have arrived from a fetched JSON Schema — and when the element is zero-width there is no input to check it against, so the total number of slots such a schema can fill from nothing is capped at 1,000,000 across nesting instead. See [Hostile Input](/hostile-input/).
 
 ## Discriminated unions
 
@@ -80,6 +80,8 @@ A recursive schema adds nothing to the wire. The cycle lives in the schema, so a
 Recursion needs a way out, and that way out is what bounds the payload — a nullable back-edge, an optional field, or an array that can be empty. A cycle without one, such as `{ next: Node }` with no `null` and no `?`, has no finite value and reports a depth error the first time it is used. Nesting is capped at **256 levels** on both sides, since depth comes from the payload rather than the schema. A linked list longer than that wants an array; recursion is for trees.
 
 A definition reached twice but never through itself is not recursive: it is inlined, and encodes and fingerprints exactly as it would written out in full.
+
+A nullable marker over a recursive definition that already admits `null` is dropped rather than doubled, the same rule non-recursive shapes have always followed. Whether the cycle admits `null` cannot be answered while it is still being built, so before 0.3.0 the marker was added and then refused, and `T | null` where `T` was itself a recursive `T | null` did not compile at all.
 
 Recursion composes with both union forms, which is what a JSON value needs:
 
@@ -126,7 +128,7 @@ Objects write a presence bitmap for optional fields (`ceil(n / 8)` bytes, omitte
 
 `z.nullable(T)` · `v.nullable(T)` · `"T | null"` → one discriminator byte + value. Both JSON Schema spellings work: an `anyOf` of two branches where one is `null`, and a `type` array of two entries where one is `"null"`. A two-branch nullable is the cheapest union: one byte and no index.
 
-Objects, arrays, and tuples nest without a per-level header — a nested object encodes as only its fields. Nesting the schema fixes has no limit, though at about 5,900 levels JavaScript throws a `RangeError` instead of a `DecodeError`; that needs a hostile *schema*, not merely hostile bytes. Nesting the *payload* chooses is capped: 256 levels for a recursive schema, 64 for a dynamic value.
+Objects, arrays, and tuples nest without a per-level header — a nested object encodes as only its fields. Nesting the schema fixes has no limit, though at about 1,400 levels through `compile()` — 1,600 through `m` — JavaScript throws a `RangeError` while the codec is being built; that needs a hostile *schema*, not merely hostile bytes. Nesting the *payload* chooses is capped: 256 levels for a recursive schema, 64 for a dynamic value.
 
 ## Refinements are validated, not encoded
 

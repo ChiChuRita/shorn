@@ -58,7 +58,7 @@ m.array<T>(item: Schema<T>, length?: number): Schema<T[]>;
 
 Writes a varint count followed by the elements in order. Codec construction fails if `item` can use zero bytes. Arrays are limited to 1,000,000 elements, and impossible counts are rejected before allocation.
 
-Pass `length` for a fixed-size array: the count comes from the schema and is not written, and the element may be zero-width, exactly as in a tuple. `compile` selects this when `minItems` equals `maxItems`. An encoded value whose length disagrees is an `EncodeError`.
+Pass `length` for a fixed-size array: the count comes from the schema and is not written, and the element may be zero-width, exactly as in a tuple. `compile` selects this when `minItems` equals `maxItems`. An encoded value whose length disagrees is an `EncodeError`. A zero-width element makes the count answerable to the schema alone, so construction fails when the slots one would fill from no input — multiplied through nesting, summed through zero-width objects and tuples — pass 1,000,000.
 
 ## `m.tuple(items)`
 

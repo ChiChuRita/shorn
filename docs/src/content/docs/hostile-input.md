@@ -38,14 +38,18 @@ A recursive schema's back-edge reports one byte rather than a measured width: a 
 
 This is why **arrays of zero-width elements are rejected during codec construction**. Literals, empty tuples, and empty objects use no bytes, so the decoder could not verify the declared count against the payload length. A tuple may still contain them because its length comes from the schema.
 
-### The one exception
+### The one exception, and its own ceiling
 
-An array whose count the schema fixes (`minItems` equal to `maxItems`) is exempt for the same reason a tuple is, so its `_minWidth` can be `count × 0 = 0`. A variable-length container around one repeats that free allocation once per byte of input: `z.array(z.object({ n: z.int(), pad: z.array(z.literal("x")).length(1_000_000) }))` turns 101 bytes into 100 million array slots. No payload reaches this on its own — it needs a schema declaring a large fixed-count array of a constant — but if you write one, bound the outer collection yourself.
+An array whose count the schema fixes (`minItems` equal to `maxItems`) is exempt for the same reason a tuple is, so its `_minWidth` can be `count × 0 = 0`. Such an array needs no payload at all to fill, so it answers to a second bound instead: the **total** slots a codec can allocate from no input, summed through zero-width objects and tuples and multiplied through nesting, must stay under the 1,000,000 collection limit. Codec construction fails otherwise. One fixed array of a million literals is fine; a second one wrapped around it is not, and nor is `z.array(z.array(z.literal("x")).length(1000)).length(1000)`.
+
+Without that bound, nesting multiplied without limit and no caller could intervene: three levels of a million turned an **empty** payload into 10¹⁸ slots and took the process down with an unrecoverable out-of-memory abort. Fixed in 0.3.0.
+
+A variable-length container around a fixed one is still yours to bound, because there the payload chooses how many times to repeat it: `z.array(z.object({ n: z.int(), pad: z.array(z.literal("x")).length(1_000_000) }))` turns 101 bytes into 100 million array slots. Cap the outer collection yourself.
 
 ## Security boundaries
 
 - **No security audit or coverage-guided fuzzing.** Property-based and mutation tests are not substitutes for either.
-- **No depth limit from the schema.** A schema nested about 5,900 levels deep can exhaust the JavaScript stack and throw `RangeError` instead of `DecodeError`. This requires a hostile **schema**, not merely hostile bytes. Limit depth if schemas come from untrusted input. Depth chosen by the *payload* is capped on both sides: a dynamic value nests at most 64 levels and a recursive schema at most 256, so neither can turn a few bytes per level into unbounded stack.
+- **No depth limit from the schema.** Every walk over a schema recurses with it, so a deeply nested one exhausts the JavaScript stack and throws `RangeError` rather than an `EncodeError` or a `DecodeError`. Measured on Node 22: `compile()` gives out at about **1,400** levels of nested objects and the `m` builders at about **1,600**, so the ceiling is reached while the codec is being built, before any payload is read. This requires a hostile **schema**, not merely hostile bytes; a `RangeError` is recoverable, unlike the allocation abort above. Limit depth if schemas come from untrusted input. Depth chosen by the *payload* is capped on both sides: a dynamic value nests at most 64 levels and a recursive schema at most 256, so neither can turn a few bytes per level into unbounded stack.
 - **Not a sandbox.** Validation code runs with the same privileges as the application.
 - **Not authentication or encryption.** Fingerprints are unkeyed and payloads are readable to anyone with the schema.
 

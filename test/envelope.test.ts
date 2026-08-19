@@ -200,5 +200,10 @@ describe("fingerprint envelope", () => {
     expect(() => fingerprinted(m.object({ a: m.uint() }))).toThrow(EncodeError);
     expect(() => fingerprinted(compile(Person), { bytes: 0 as 1 })).toThrow(EncodeError);
     expect(() => fingerprinted(compile(Person), { bytes: 5 as 4 })).toThrow(EncodeError);
+    // And it says so without stringifying whatever arrived: an object with no prototype
+    // replaced the refusal with a TypeError out of the message explaining it.
+    expect(() => fingerprinted(compile(Person), { bytes: Object.create(null) as 4 })).toThrow(
+      "Fingerprint bytes must be 1, 2, 3 or 4, received object",
+    );
   });
 });

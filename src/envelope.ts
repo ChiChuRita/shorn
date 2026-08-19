@@ -135,7 +135,13 @@ export function fingerprinted<T>(
   }
   const retain = options?.bytes ?? DEFAULT_FINGERPRINT_BYTES;
   if (retain !== 1 && retain !== 2 && retain !== 3 && retain !== 4) {
-    throw new EncodeError(`Fingerprint bytes must be 1, 2, 3 or 4, received ${String(retain)}`);
+    // The type when it is not a number: `String` on a null-prototype object, or on one
+    // whose `toString` throws, would replace this refusal with a TypeError of its own.
+    throw new EncodeError(
+      `Fingerprint bytes must be 1, 2, 3 or 4, received ${
+        typeof retain === "number" || typeof retain === "string" ? String(retain) : typeof retain
+      }`,
+    );
   }
   return new FingerprintedSchema(codec, signature, retain);
 }

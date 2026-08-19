@@ -120,8 +120,34 @@ function validationError(issues: ReadonlyArray<StandardSchemaV1.Issue>): EncodeE
   return error;
 }
 
+/**
+ * A validator that throws instead of returning issues, in the class the entry point
+ * promises. `z.int().refine((v) => { … })` whose body throws is all it takes, and until
+ * 0.3.0 that error escaped `encode`, `decode` and both async twins as itself — a
+ * `RangeError` out of a function documented to throw only `EncodeError`, so a caller
+ * narrowing on the class fell straight through it. Wrapped here rather than at the four
+ * entry points, which is also the only layer that knows a validator ran at all: an
+ * arbitrary throw from inside `_encode` is the caller's own getter and must stay its own
+ * error. `cause` keeps the original.
+ */
+function thrownByValidator(error: unknown): EncodeError {
+  if (error instanceof EncodeError) return error;
+  return new EncodeError(
+    error instanceof Error ? error.message : "The validator threw a value that is not an Error",
+    { cause: error },
+  );
+}
+
 function validateSync<T>(schema: StandardSchemaV1<unknown, T>, value: unknown): T {
-  const result = schema["~standard"].validate(value);
+  // The `try` covers the validator's call and nothing else, so the structural halves keep
+  // the catch-free bodies `encodePath` explains. One per encode or decode, not one per
+  // leaf, and the validated person fixture measured no change either way.
+  let result: ReturnType<StandardSchemaV1<unknown, T>["~standard"]["validate"]>;
+  try {
+    result = schema["~standard"].validate(value);
+  } catch (error) {
+    throw thrownByValidator(error);
+  }
   // Thenable rather than `instanceof Promise`: a vendor may hand back a promise
   // from another realm, which fails the instance check while being one.
   if (typeof (result as { then?: unknown } | null)?.then === "function") {
@@ -135,7 +161,12 @@ function validateSync<T>(schema: StandardSchemaV1<unknown, T>, value: unknown): 
 }
 
 async function validateAsync<T>(schema: StandardSchemaV1<unknown, T>, value: unknown): Promise<T> {
-  const result = await schema["~standard"].validate(value);
+  let result: StandardSchemaV1.Result<T>;
+  try {
+    result = await schema["~standard"].validate(value);
+  } catch (error) {
+    throw thrownByValidator(error);
+  }
   if (result.issues) throw validationError(result.issues);
   return result.value;
 }
@@ -450,10 +481,47 @@ function toWireShape(document: JsonSchema): WireDocument {
   const defsJson = defs.map((def) => JSON.stringify(def));
   const rootJson = JSON.stringify(root);
   const duplicate = defsJson.indexOf(rootJson);
+  const folded = defs.map((def) => foldDefs(def, defsJson) as WireShape);
+  const foldedRoot: WireShape =
+    duplicate < 0 ? (foldDefs(root, defsJson) as WireShape) : { ref: duplicate };
+  // Now, and only now, is `admitsNull` answerable for a back-edge, so this is where the
+  // marker `nullableOf` had to guess about comes off. It has to happen at this level
+  // rather than in `compileShape`, because this is the level the signature is taken at.
+  const nulls = defNulls(folded);
   return {
-    defs: defs.map((def) => foldDefs(def, defsJson) as WireShape),
-    root: duplicate < 0 ? (foldDefs(root, defsJson) as WireShape) : { ref: duplicate },
+    defs: folded.map((def) => dropDefNullable(def, nulls) as WireShape),
+    root: dropDefNullable(foldedRoot, nulls) as WireShape,
   };
+}
+
+/**
+ * A `{ nullable: { ref } }` over a definition that already decodes to `null`, collapsed
+ * to the definition. This is `nullableOf`'s rule, applied where the answer exists: a
+ * cycle is still open when that function runs, so `admitsNull` reads a back-edge as "no"
+ * and wraps a marker that `Schema.nullable()` then refuses outright — `T.nullable()`
+ * where `T` is a recursive `T | null` did not compile at all, and the message blamed the
+ * `.nullable()` the caller had written for a marker this compiler added.
+ *
+ * Nothing that compiled before changes shape: every occurrence of this pattern threw, so
+ * no payload and no fingerprint depended on it. Collapsing cannot cascade, because
+ * `nullableOf` never nests one nullable inside another.
+ */
+function dropDefNullable(node: unknown, nulls: readonly boolean[]): unknown {
+  if (typeof node !== "object" || node === null) return node;
+  if (Array.isArray(node)) return node.map((value) => dropDefNullable(value, nulls));
+  const shape = node as { readonly nullable?: unknown };
+  const inner = shape.nullable;
+  if (
+    typeof inner === "object" &&
+    inner !== null &&
+    "ref" in inner &&
+    nulls[(inner as { readonly ref: number }).ref] === true
+  ) {
+    return inner;
+  }
+  return Object.fromEntries(
+    Object.entries(node).map(([key, value]) => [key, dropDefNullable(value, nulls)]),
+  );
 }
 
 function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
@@ -646,7 +714,14 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
         if (combinator === undefined) return "any";
         throw new EncodeError(`Unsupported JSON Schema combinator ${combinator}`);
       }
-      throw new EncodeError(`Unsupported Standard JSON Schema type ${String(schema.type)}`);
+      // Not `String(schema.type)`: the document may have been fetched, and a node
+      // carrying an object with no prototype — or a `toString` of its own — would
+      // replace this refusal with a TypeError of its own.
+      throw new EncodeError(
+        `Unsupported Standard JSON Schema type ${
+          typeof schema.type === "object" ? "object" : String(schema.type)
+        }`,
+      );
     }
   }
 }

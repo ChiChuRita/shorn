@@ -90,6 +90,8 @@ No valid value means no index to write.
 
 An enum whose members are not all strings indexes them by their JSON text, because `<` is not a total order across mixed types. Four numbers do not survive that trip: `NaN`, `Infinity` and `-Infinity` all write as `null`, so they would share an index with each other and with a real `null` member, and `-0` writes and reads back as `0`. All four are refused rather than reordered.
 
+Encoding `-0` against an enum that *does* list `0` is refused too, at encode time rather than at build time. A `Map` keys by SameValueZero, so `-0` used to find the `0` member, go out as that member's index and come back as `0` — the round trip broke silently. `m.literal(0).encode(-0)` has always been refused for the same reason; since 0.3.0 the enum agrees.
+
 The same four as a **single literal** are not caught, because the vendor's JSON Schema has already lost them: `z.literal(NaN)` and both infinities arrive as `{ type: "number", const: null }`, and `z.literal(-0)` as `{ const: 0 }`. The first three build a codec that refuses every value it is given and decodes to `null`; `-0` round-trips to `0`. Do not use a non-finite number or `-0` as a literal.
 
 ## Arrays of zero-width elements
@@ -100,7 +102,16 @@ z.array(z.tuple([]));
 z.array(z.object({}));
 ```
 
-An array element must be able to use at least one byte. Otherwise a tiny payload could declare a million elements without providing any element data, and the decoder could not bound the allocation. A **tuple** may contain zero-width elements because its length comes from the schema. See [Hostile Input](/hostile-input/).
+An array element must be able to use at least one byte. Otherwise a tiny payload could declare a million elements without providing any element data, and the decoder could not bound the allocation. A **tuple** may contain zero-width elements because its length comes from the schema.
+
+An array whose count the schema fixes may too, for the same reason — but only up to 1,000,000 slots in total, counted through nesting and through any zero-width object or tuple in between. Past that the same message refuses it: a fixed count needs no payload to satisfy, so nothing but the schema can bound it.
+
+```ts
+z.array(z.literal("x")).length(1_000_000);                     // fine: a million slots
+z.array(z.array(z.literal("x")).length(1000)).length(1000);     // refused: a million and one
+```
+
+See [Hostile Input](/hostile-input/).
 
 If you need a count of a constant, encode the count: `z.int().nonnegative()`.
 

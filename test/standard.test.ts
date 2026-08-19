@@ -14,9 +14,11 @@ import {
   encodeAsync,
   fingerprinted,
   m,
+  safeDecode,
   safeEncode,
   unchecked,
 } from "../src/index.js";
+import type { EncodableStandardSchema } from "../src/index.js";
 
 describe("Standard Schema adapter", () => {
   const value = { name: "Rahul", age: 25, sex: "M" as const };
@@ -271,6 +273,38 @@ describe("Standard Schema adapter", () => {
         ]),
       );
       expect([...one.encode({ kind: "a", v: 1 })]).toEqual([...other.encode({ kind: "a", v: 1 })]);
+    });
+
+    it("names an unmatched discriminant without serializing it", () => {
+      // The message quotes the discriminant as JSON, and `JSON.stringify` throws on a
+      // BigInt, on a cycle, and out of a `toJSON` the caller wrote — so a value no branch
+      // declares was reported as that TypeError instead of as this EncodeError.
+      // Through `unchecked`, because that is where the wire half answers for itself: with
+      // the validator in front, zod refuses the discriminant before shorn sees it.
+      const Event = unchecked(
+        compile(
+          z.discriminatedUnion("kind", [
+            z.object({ kind: z.literal("a"), v: z.int() }),
+            z.object({ kind: z.literal("b"), v: z.int() }),
+          ]),
+        ),
+      );
+      const circular: Record<string, unknown> = { v: 1 };
+      circular.kind = circular;
+      for (const value of [
+        { kind: 10n, v: 1 },
+        circular,
+        { kind: { toJSON() { throw new RangeError("no json"); } }, v: 1 },
+      ]) {
+        expect(() => Event.encode(value as never)).toThrow(EncodeError);
+      }
+      expect(() => Event.encode({ kind: 10n, v: 1 } as never)).toThrow(
+        'No union branch has "kind" = bigint',
+      );
+      // An ordinary discriminant still reads back as its own JSON text.
+      expect(() => Event.encode({ kind: "c", v: 1 } as never)).toThrow(
+        'No union branch has "kind" = "c"',
+      );
     });
 
     it("refuses a branch index no branch answers to", () => {
@@ -653,6 +687,75 @@ describe("Standard Schema adapter", () => {
     });
   });
 
+  describe("a validator that throws instead of returning issues", () => {
+    // `z.int().refine((v) => { … })` whose body throws is all it takes, and the raw error
+    // escaped all four entry points — a `RangeError` out of functions documented to throw
+    // only `EncodeError` or `DecodeError`, so narrowing on the class fell through it.
+    const thrower = (thrown: unknown, async = false): EncodableStandardSchema<number, number> =>
+      ({
+        "~standard": {
+          version: 1,
+          vendor: "test",
+          validate: async
+            ? () => Promise.reject(thrown)
+            : () => {
+                throw thrown;
+              },
+          jsonSchema: {
+            input: () => ({ type: "integer", minimum: 0 }),
+            output: () => ({ type: "integer", minimum: 0 }),
+          },
+        },
+      }) as unknown as EncodableStandardSchema<number, number>;
+
+    const boom = new RangeError("the refinement blew up");
+
+    it("reports it as an EncodeError on the way in", () => {
+      expect(() => encode(thrower(boom), 5)).toThrow(EncodeError);
+      expect(() => encode(thrower(boom), 5)).toThrow("the refinement blew up");
+      // `cause` keeps the original, so nothing is lost by changing the class.
+      try {
+        encode(thrower(boom), 5);
+      } catch (error) {
+        expect((error as Error).cause).toBe(boom);
+      }
+      const result = safeEncode(thrower(boom), 5);
+      expect(result.success).toBe(false);
+      expect(result.success === false && result.error).toBeInstanceOf(EncodeError);
+    });
+
+    it("reports it as a DecodeError on the way out", () => {
+      const bytes = Uint8Array.of(5);
+      expect(() => decode(thrower(boom), bytes)).toThrow(DecodeError);
+      const result = safeDecode(thrower(boom), bytes);
+      expect(result.success).toBe(false);
+      expect(result.success === false && result.error).toBeInstanceOf(DecodeError);
+    });
+
+    it("holds for the async entry points, which is where a real vendor reaches it", async () => {
+      await expect(encodeAsync(thrower(boom, true), 5)).rejects.toBeInstanceOf(EncodeError);
+      await expect(decodeAsync(thrower(boom, true), Uint8Array.of(5))).rejects.toBeInstanceOf(
+        DecodeError,
+      );
+      // `z.object({ n: z.int().refine(async (v) => { throw … }) })` reaches this same path
+      // and was how it was found, but it is not asserted here: zod leaves a *second*
+      // rejected promise floating that nobody can await — reproducible by calling its
+      // `~standard.validate` directly with no shorn in the picture — so the case would add
+      // a permanent unhandled rejection to the suite to test code the stub above covers.
+    });
+
+    it("survives a thrown value that is not an Error at all", async () => {
+      // `message` would be `undefined` and `cause` unreadable, so the class is what has
+      // to hold: a caller narrowing on it must not meet a bare string instead.
+      for (const thrown of ["a string", 42, null, undefined, Object.create(null)]) {
+        expect(() => encode(thrower(thrown), 5)).toThrow(EncodeError);
+      }
+      await expect(encodeAsync(thrower("a string", true), 5)).rejects.toThrow(
+        "The validator threw a value that is not an Error",
+      );
+    });
+  });
+
   describe("recursive schemas", () => {
     const Node = z.object({
       value: z.string(),
@@ -707,6 +810,27 @@ describe("Standard Schema adapter", () => {
       // any cycle a value can actually escape.
       const Tree = compile(Node);
       expect(Tree.encode({ value: "", children: [] })).toHaveLength(2);
+    });
+
+    it("compiles a nullable marker over a definition that already holds null", () => {
+      // `R | null` where `R` is itself a recursive `R | null`: legal, and a `.nullable()`
+      // the caller really did write. It did not compile at all — `nullableOf` cannot see
+      // through a back-edge while the cycle is open, so it wrapped a marker that
+      // `Schema.nullable()` then refused, blaming the caller for this compiler's byte.
+      // The redundant marker comes off where the definition table exists, which is also
+      // where the signature is taken, so the fingerprint still matches the bytes.
+      const R: z.ZodType = z.lazy(() => z.union([z.null(), z.object({ next: R })]));
+      const Wrapped = compile(z.object({ head: R.nullable() }));
+
+      for (const value of [{ head: null }, { head: { next: null } }, { head: { next: { next: null } } }]) {
+        expect(Wrapped.decode(Wrapped.encode(value as never))).toEqual(value);
+      }
+      // One spelling of null, not two: the marker really is gone rather than defaulted.
+      const bare = compile(z.object({ head: R }));
+      expect([...Wrapped.encode({ head: null } as never)]).toEqual([
+        ...bare.encode({ head: null } as never),
+      ]);
+      expect(fingerprinted(Wrapped).fingerprintHex).toBe(fingerprinted(bare).fingerprintHex);
     });
 
     it("derives one fingerprint whichever validator wrote the schema", () => {

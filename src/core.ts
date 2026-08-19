@@ -122,6 +122,26 @@ const isWellFormed: (value: string) => boolean =
     ? (value) => (value as unknown as { isWellFormed(): boolean }).isWellFormed()
     : (value) => !LONE_SURROGATE.test(value);
 
+/**
+ * A value in a message, or its type when naming it is what would fail. `String` on an
+ * object throws when it has no `toString` — one with a null prototype — and when the
+ * caller's own throws or a proxy trap does, and `JSON.stringify` adds a BigInt and a
+ * cycle to that list. So the sentence meant to explain a refusal replaced it with an
+ * error of its own, and the caller was told about their getter instead of about their
+ * field. The rule `IntSchema` follows on its leaf, said once for the shapes whose
+ * message quotes a value the schema does not constrain to a primitive.
+ *
+ * A `typeof` gate rather than a `try`: every remaining case is a primitive, and a
+ * primitive stringifies both ways without running anything — Symbol and `undefined`
+ * included, which `JSON.stringify` reports as `undefined` exactly as it always did.
+ * The catch this replaced cost 28 gzip bytes and bought nothing over the gate.
+ */
+function text(value: unknown, json?: boolean): string {
+  const kind = typeof value;
+  if (value !== null && (kind === "object" || kind === "bigint")) return kind;
+  return json === true ? `${JSON.stringify(value)}` : String(value);
+}
+
 /** Bytes `varuint` will spend on a value, for a length written before it is known. */
 function varuintWidth(value: number): number {
   return value < 0x80 ? 1 : value < 0x4000 ? 2 : value < 0x200000 ? 3 : 4;
@@ -760,6 +780,18 @@ export abstract class Schema<T> {
   _minWidth = 1;
 
   /**
+   * Array slots a decode of this schema materializes before reading a byte. Zero for
+   * everything the `_minWidth` budget already bounds: the one shape that allocates for
+   * free is a fixed-count array of a zero-width element, whose count comes from the
+   * schema rather than the input. Nesting those multiplies, so `ArraySchema` holds the
+   * product to the same collection ceiling a length varint answers to — without it three
+   * levels of a million turn an empty payload into 10^18 slots and a fatal OOM. Summed
+   * by the two containers that can be zero-width themselves; every other shape costs at
+   * least a byte, which makes its slots the input's problem and not this counter's.
+   */
+  _slots = 0;
+
+  /**
    * Whether a value of this schema can itself be `null` or `undefined`. Read by
    * `nullable()` and `optional()` to refuse a marker whose absent case would duplicate
    * a value the inner schema can already produce. Both propagate through the other
@@ -1077,7 +1109,21 @@ export class EnumSchema<T extends readonly [EnumValue, ...EnumValue[]]> extends 
 
   _encode(writer: Writer, value: T[number]): void {
     const index = this.indexes.get(value);
-    if (index === undefined) throw new EncodeError(`Unknown enum value ${String(value)}`);
+    // The second test is `LiteralSchema`'s `Object.is`, and a Map is why it is needed
+    // here: keys compare with SameValueZero, so `-0` finds the `0` member, is written as
+    // that member's index and reads back as `0`.
+    //
+    // `value === 0` leads, and it is not redundant — it is what keeps the call off the
+    // hot path. Comparing the member instead, `!Object.is(this.values[index], value)`,
+    // reads a field and calls on every encode and measured **-12%** on the unchecked
+    // person fixture, whose one enum field is a third of the record. A `-0` against an
+    // enum with no `0` member is already `index === undefined`, so this second test only
+    // ever decides the case it is here for.
+    if (index === undefined || (value === 0 && Object.is(value, -0))) {
+      throw new EncodeError(
+        `Unknown enum value ${Object.is(value, -0) ? "-0" : text(value)}`,
+      );
+    }
     writer.varuint(index);
   }
 
@@ -1101,7 +1147,7 @@ function hexNibble(code: number): number {
  * alike. The case worth naming is uppercase, the spelling a validator lets through.
  */
 function rejectUuid(value: unknown): never {
-  throw new EncodeError(`Expected a lowercase UUID, received ${String(value)}`);
+  throw new EncodeError(`Expected a lowercase UUID, received ${text(value)}`);
 }
 
 /** Four bytes as eight hex characters, the largest chunk one `toString` can do. */
@@ -1162,15 +1208,29 @@ export class ArraySchema<T> extends Schema<T[]> {
         throw new EncodeError(`Invalid fixed array length ${length}`);
       }
       this._minWidth = length * item._minWidth;
-      return;
     }
-    if (item._minWidth === 0) {
-      // A zero-width element decouples the count from the input length, so no budget
-      // can bound it: three bytes would ask for a million literals.
+    if (item._minWidth > 0) return;
+    // A zero-width element decouples the count from the input length, so no budget can
+    // bound a *variable* count: three bytes would ask for a million literals.
+    //
+    // A fixed count is the documented exemption and needs no input at all to satisfy, so
+    // it has to be small enough to simply allocate. One fixed array of a million literals
+    // stays legal; a second one around it does not, nor does a zero-width object or tuple
+    // between them. Three levels of a million made an *empty* payload allocate 10^18
+    // slots and took the process with it, and the exemption's advice — bound the outer
+    // collection yourself — has no outer collection to bound.
+    //
+    // One refusal for both: the cause is the one thing and the ceiling is the one number,
+    // and a second message with a second throw measured 56 gzip bytes. What a zero-width
+    // element *is* moved to `api/errors.md`, which costs a reader nothing at runtime —
+    // naming the three shapes here was 28 of the 91 gzip bytes this whole guard spends.
+    const slots = length === undefined ? Infinity : length * (1 + item._slots);
+    if (slots > MAX_COLLECTION_LENGTH) {
       throw new EncodeError(
-        "Array elements must occupy at least one byte; a literal, empty tuple or empty object element leaves the element count unbounded",
+        "Array elements must occupy at least one byte, or a fixed count of them must stay under the collection limit",
       );
     }
+    this._slots = slots;
   }
 
   _encode(writer: Writer, value: T[]): void {
@@ -1370,8 +1430,9 @@ export class UnionSchema<T> extends Schema<T> {
       throw new EncodeError(
         this.key === undefined
           ? `No union branch holds ${jsonTypeOf(value) ?? typeof value}`
-          : `No union branch has ${JSON.stringify(this.key)} = ${JSON.stringify(
+          : `No union branch has ${JSON.stringify(this.key)} = ${text(
               (value as Record<string, unknown> | null)?.[this.key],
+              true,
             )}`,
       );
     }
@@ -1642,7 +1703,16 @@ export class TupleSchema<S extends readonly Schema<unknown>[]> extends Schema<Tu
     this.items = [...items] as unknown as S;
     this.tail = rest === undefined ? undefined : new ArraySchema(rest);
     let width = this.tail?._minWidth ?? 0;
-    for (const item of this.items) width += item._minWidth;
+    // `items.length` and not only the items' own slots: decoding a tuple materializes an
+    // array of exactly that many slots, and leaving its own length out let
+    // `m.array(m.tuple([m.literal(true)]), 999_999)` past the guard at *twice* the
+    // ceiling — 999,999 outer slots plus one per tuple. Found by fuzzing the bound rather
+    // than by reading it; `ArraySchema` charges the same slot through its `1 +`.
+    for (const item of this.items) {
+      width += item._minWidth;
+      this._slots += item._slots;
+    }
+    this._slots += this.items.length;
     this._minWidth = width;
   }
 
@@ -1911,6 +1981,9 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     let width = this.bitmapWidth + (this.tail?._minWidth ?? 0);
     for (const [, schema, optionalIndex] of this.fields) {
       if (optionalIndex < 0) width += schema._minWidth;
+      // Every field, not only the required ones: a present optional decodes from the
+      // bytes the bitmap says are there, and a zero-width field needs none of them.
+      this._slots += schema._slots;
     }
     this._minWidth = width;
 
