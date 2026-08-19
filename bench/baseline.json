@@ -230,42 +230,42 @@
       "floor": 0
     },
     "bundle/m only minified": {
-      "value": 17369,
+      "value": 17651,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "bundle/m only gzip": {
-      "value": 5443,
+      "value": 5539,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "bundle/compile + m minified": {
-      "value": 31264,
+      "value": 32012,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "bundle/compile + m gzip": {
-      "value": 9769,
+      "value": 10016,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "bundle/full surface minified": {
-      "value": 34153,
+      "value": 34976,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
       "floor": 0
     },
     "bundle/full surface gzip": {
-      "value": 10668,
+      "value": 10933,
       "unit": "B",
       "direction": "lower",
       "tolerance": 0.01,
