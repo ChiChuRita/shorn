@@ -74,8 +74,10 @@ bytes is a patch, and anything that changes the bytes or breaks existing payload
 breaking, however small the diff. That note becomes the release entry, so say *why* as
 well as what. Changes confined to `bench/`, `docs/`, or CI need no note.
 
-There is no changeset step. shorn is a single package on a hand-cut release, so the
-changelog is written at release time from the commits.
+There is no changeset step. shorn is a single package, so the changelog is written by hand
+at release time from the commits. Publishing itself is not manual: a maintainer pushes a
+`v*` tag and `.github/workflows/release.yml` runs `pnpm check` and publishes. Nothing about
+a contributed change needs to touch that.
 
 Tests are expected with a behaviour change. Match the file that already covers the area
 rather than adding a new one.
