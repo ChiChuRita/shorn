@@ -24,8 +24,7 @@ No IDL, no codegen, no second source of truth.</p>
 npm install @chichurita/shorn zod
 ```
 
-ESM only, Node 20 or newer. Runs in Node, Bun, Deno, browsers, and workers. `require("@chichurita/shorn")` works from Node 20.19 and 22.12 on;
-before that a CommonJS caller needs `await import("@chichurita/shorn")`.
+ESM only, Node 20 or newer. Runs in Node, Bun, Deno, browsers, and workers.
 
 ## Encode a value
 
