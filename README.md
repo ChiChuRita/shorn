@@ -102,6 +102,25 @@ pass `toStandardJsonSchema(schema)` as the trailing argument. shorn reads
 validation through [Standard Schema](https://standardschema.dev/schema) and
 structure through [Standard JSON Schema](https://standardschema.dev/json-schema).
 
+## Use it from a shell
+
+Installing the package also puts a `shorn` command on the path, for scripts and
+agents that need a payload without writing an integration:
+
+```sh
+$ echo '{"name":"Grace","age":45,"sex":"F"}' | npx shorn encode ./person.mjs --export Person --base64
+LQVHcmFjZQA=
+$ echo 'LQVHcmFjZQA=' | npx shorn decode ./person.mjs --export Person --base64
+{"name":"Grace","age":45,"sex":"F"}
+```
+
+`encode` takes a JSON value on stdin and writes bytes on stdout, `decode` does the
+reverse, and `--base64` puts text on the byte side of either. The module path is
+imported: it can export a Zod or ArkType schema, or a codec from `compile()`. Without
+`--export`, shorn takes the default export, or the only export when there is exactly
+one. Errors are one line on stderr, and the exit code is 0 for success, 1 for a
+failure, 2 for a command line shorn could not read. `shorn --help` lists the lot.
+
 ## Scope
 
 shorn covers strings, booleans, integers, numbers, literals, enums, nullable
@@ -118,7 +137,8 @@ See [getting started](https://shorn.dev/getting-started/introduction/) and the
 docs also cover the [byte layout](https://shorn.dev/wire-format/layout/),
 [supported types](https://shorn.dev/schemas/supported-types/),
 [rejected shapes](https://shorn.dev/schemas/rejected-shapes/),
-[fingerprinting](https://shorn.dev/versioning/fingerprinting/), and
-[performance](https://shorn.dev/performance/throughput/).
+[fingerprinting](https://shorn.dev/versioning/fingerprinting/),
+[performance](https://shorn.dev/performance/throughput/), and the
+[CLI](https://shorn.dev/cli/).
 
 MIT licensed.
