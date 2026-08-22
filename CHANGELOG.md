@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.0
+
+**Same bytes, and a second way to reach them.** Every payload written by 0.3.x decodes unchanged, every fingerprint is the one it was, and no export changed shape. The minor bump is for a surface added beside the library rather than anything altered inside it: installing the package now also installs a command.
+
+### A `shorn` command, for a shell instead of a module
+
+```sh
+$ echo '{"name":"Grace","age":45,"sex":"F"}' | npx shorn encode ./person.mjs --export Person --base64
+LQVHcmFjZQA=
+$ echo 'LQVHcmFjZQA=' | npx shorn decode ./person.mjs --export Person --base64
+{"name":"Grace","age":45,"sex":"F"}
+```
+
+`encode` reads a JSON value on stdin and writes the encoded bytes on stdout, `decode` reverses it, and `--base64` puts text on the byte side of either so a payload can travel through a pipe you can read. The module path is imported, so it can export a Zod schema, an ArkType type, or a codec built by `compile()`, `fingerprinted()`, or `m`. Without `--export`, shorn takes the default export, or the only export when there is exactly one, and otherwise names what the module does export and stops.
+
+Errors are one line on stderr. The exit code is 0 for success, 1 for a failure, and 2 for a command line shorn could not read, so a script can tell a bad payload apart from a bad invocation. `shorn --help` lists every flag.
+
+The point is scripting: a shell, a Makefile, or an agent driving a terminal can now produce and read payloads without writing an integration first. Arguments are parsed by `parseArgs` from `node:util`, so this adds no dependency.
+
+### The library is untouched by it
+
+`dist/index.js` comes out byte-identical to 0.3.0's, and the bundle-size rows of the regression gate are unmoved. The CLI is built separately and imports the library at runtime rather than inlining it, so importing shorn in an application costs exactly what it did before. The only new field in the manifest is `bin`.
+
+Full reference on the [CLI page](https://shorn.dev/cli/).
+
 ## 0.3.0
 
 **Same bytes, and one class of schema stops compiling.** Every payload written by 0.2.x decodes unchanged, every fingerprint is the one it was, and no export changed shape — the byte-layout rows of the regression gate and the golden vectors are identical, and 8,000 generated schemas encode to the same bytes as before. The minor bump is for schemas, not payloads: a shape that could allocate unboundedly from an empty payload is now refused when the codec is built, and one that used to be refused now compiles.
