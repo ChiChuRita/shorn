@@ -18,16 +18,13 @@ No IDL, no codegen, no second source of truth.</p>
   <a href="https://github.com/ChiChuRita/shorn/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/%40chichurita%2Fshorn" alt="MIT license"></a>
 </p>
 
-Experimental alpha. The wire format is not frozen until 1.0, so keep it off
-anything you store. Runs in Node, Bun, Deno, browsers, and workers.
-
 ## Installation
 
 ```sh
 npm install @chichurita/shorn zod
 ```
 
-ESM only, Node 20 or newer. `require("@chichurita/shorn")` works from Node 20.19 and 22.12 on;
+ESM only, Node 20 or newer. Runs in Node, Bun, Deno, browsers, and workers. `require("@chichurita/shorn")` works from Node 20.19 and 22.12 on;
 before that a CommonJS caller needs `await import("@chichurita/shorn")`.
 
 ## Encode a value

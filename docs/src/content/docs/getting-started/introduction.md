@@ -29,7 +29,7 @@ Both endpoints are TypeScript or JavaScript, the application already validates i
 
 ## Limits
 
-shorn is an experimental alpha, and some of these limits are permanent rather than unfinished:
+Some of these limits are permanent rather than unfinished:
 
 - **No schema evolution.** Only the matching wire shape can decode a payload. [`fingerprinted()`](/versioning/fingerprinting/) detects most mismatches; nothing resolves them.
 - **No streaming**, random access, or zero-copy views.
