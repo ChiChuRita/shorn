@@ -1,16 +1,25 @@
-# shorn
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+            srcset="https://raw.githubusercontent.com/ChiChuRita/shorn/main/assets/hero-dark.svg">
+    <img width="720"
+         alt='{"name":"Grace","age":45,"sex":"F"} is 35 bytes as JSON, 16 as a positional array, and 8 bytes through shorn: 2d is age 45, 05 is the string length, 47 to 65 is Grace, 00 is the enum index of "F"'
+         src="https://raw.githubusercontent.com/ChiChuRita/shorn/main/assets/hero-light.svg">
+  </picture>
+</p>
 
-shorn turns a validation schema you already have into compact binary
-serialization. Pass a Zod, Valibot, or ArkType schema to `encode` and get bytes
-back — no schema language, no code generation, no second source of truth.
+<p align="center"><b>Your Zod, Valibot, or ArkType schema is already a binary codec.</b><br>
+No IDL, no codegen, no second source of truth.</p>
 
-Field names and type tags stay out of the payload because the schema already
-provides them. The saving comes from the schema, not a compressor, so it costs
-no CPU: up to 6.0× faster to encode and 13.6× faster to decode than JSON bytes.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@chichurita/shorn"><img src="https://img.shields.io/npm/v/%40chichurita%2Fshorn" alt="npm version"></a>
+  <a href="https://github.com/ChiChuRita/shorn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ChiChuRita/shorn/ci.yml?branch=main" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/gzip-5.45_kB-blue" alt="bundle size, 5.45 kB gzip">
+  <a href="https://github.com/ChiChuRita/shorn/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/%40chichurita%2Fshorn" alt="MIT license"></a>
+</p>
 
-shorn is experimental alpha and runs in Node, Bun, Deno, browsers, and workers.
-The low-level `m` API bundles to 5.45 KB gzip; `compile` with validation is
-9.62 KB (esbuild-minified browser bundles, schema declarations excluded).
+Experimental alpha. The wire format is not frozen until 1.0, so keep it off
+anything you store. Runs in Node, Bun, Deno, browsers, and workers.
 
 ## Installation
 
@@ -44,39 +53,10 @@ validators produce the same bytes.
 
 ## Where the bytes go
 
-The same record as minified JSON:
-
-```text
-{"name":"Grace","age":45,"sex":"F"}   35 bytes
-```
-
-The schema already knows the field names, so they do not need to be sent:
-
-```text
-["Grace",45,"F"]                      16 bytes
-```
-
-The schema also knows the order and the types, so the brackets, commas and
-quotes are not needed either, and `"F"` is one of three known values so it can
-be an index instead of a string:
-
-```text
-2d 05 47 72 61 63 65 00               8 bytes
-│  │  └─────┬──────┘ │
-│  │        │        └── sex, index 0 of the enum
-│  │        └── "Grace"
-│  └── string length, 5
-└── age, 45
-```
-
-The middle step is the uncontroversial one: the array carries the same
-information as the object, because the reader knows what each position means.
-shorn takes that same move one step further, and the schema is what makes both
-steps safe.
-
-`2d` is age 45, first because fields are written in canonical order rather than
-declaration order. `00` is the index of `"F"` in the sorted enum
-`["F", "M", "X"]`.
+The picture above is the whole story: field names, brackets, and quotes never
+reach the wire because the schema already carries them, and enum members travel
+as an index. The byte-by-byte walk lives in
+[how it works](https://shorn.dev/core-concepts/how-it-works/#where-the-bytes-go).
 
 ## Store and queue safely
 
@@ -129,6 +109,11 @@ sharing a JSON type — recursive schemas, dynamic values (`z.any()`), and
 objects — closed or open, with optional fields. It does not support unions whose
 branches overlap, streaming, or automatic schema evolution. `Date`, `bigint`,
 `Map`, and `Set` need an explicit wire representation.
+
+The saving comes from the schema, not a compressor, so it costs no CPU: up to
+6.0× faster to encode and 13.6× faster to decode than JSON bytes. The low-level
+`m` API bundles to 5.45 KB gzip; `compile` with validation is 9.62 KB
+(esbuild-minified browser bundles, schema declarations excluded).
 
 ## Documentation
 

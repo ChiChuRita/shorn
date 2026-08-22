@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 336" width="720" height="336" role="img" aria-label="35 bytes of JSON become 16 as an array and 8 through shorn">
+<style>
+  .code { font: 19px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #1f2328; }
+  .cap  { font: 12.5px -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #59636e; }
+  .lab  { font: 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .n    { fill: #1f2328; } .m { fill: #59636e; }
+  .blue { fill: #0969da; } .purp { fill: #8250df; } .grn { fill: #1a7f37; }
+  .count { font: 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #59636e; }
+  .punch { font: 700 19px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #1f2328; }
+  .wire { stroke: #59636e; stroke-width: 1.4; fill: none; }
+</style>
+
+<text class="code" x="28" y="36"><tspan class="n">{"name":</tspan><tspan class="purp">"Grace"</tspan><tspan class="n">,"age":</tspan><tspan class="blue">45</tspan><tspan class="n">,"sex":</tspan><tspan class="grn">"F"</tspan><tspan class="n">}</tspan></text>
+<text class="count" x="692" y="36" text-anchor="end">35 bytes</text>
+
+<text class="cap" x="28" y="68">the schema already knows the field names, so they are never sent</text>
+
+<text class="code" x="28" y="104"><tspan class="n">[</tspan><tspan class="purp">"Grace"</tspan><tspan class="n">,</tspan><tspan class="blue">45</tspan><tspan class="n">,</tspan><tspan class="grn">"F"</tspan><tspan class="n">]</tspan></text>
+<text class="count" x="692" y="104" text-anchor="end">16 bytes</text>
+
+<text class="cap" x="28" y="136">it also knows the order, the types, and the enum members</text>
+
+<text class="code" x="28"  y="178"><tspan class="blue">2d</tspan></text>
+<text class="code" x="62"  y="178"><tspan class="purp">05</tspan></text>
+<text class="code" x="96"  y="178"><tspan class="purp">47</tspan></text>
+<text class="code" x="130" y="178"><tspan class="purp">72</tspan></text>
+<text class="code" x="164" y="178"><tspan class="purp">61</tspan></text>
+<text class="code" x="198" y="178"><tspan class="purp">63</tspan></text>
+<text class="code" x="232" y="178"><tspan class="purp">65</tspan></text>
+<text class="code" x="266" y="178"><tspan class="grn">00</tspan></text>
+<text class="punch" x="692" y="178" text-anchor="end">8 bytes</text>
+
+<path class="wire" d="M 96 192 H 255"/>
+<path class="wire" d="M 277 186 V 221 Q 277 226 282 226 H 296"/>
+<path class="wire" d="M 175.5 192 V 249 Q 175.5 254 180.5 254 H 296"/>
+<path class="wire" d="M 73 186 V 277 Q 73 282 78 282 H 296"/>
+<path class="wire" d="M 39 186 V 305 Q 39 310 44 310 H 296"/>
+
+<text class="lab grn"  x="302" y="231">sex, index 0 of the enum</text>
+<text class="lab purp" x="302" y="259">"Grace"</text>
+<text class="lab purp" x="302" y="287">string length, 5</text>
+<text class="lab blue" x="302" y="315">age, 45</text>
+</svg>
