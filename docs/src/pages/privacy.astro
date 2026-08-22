@@ -1,0 +1,83 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { REPO } from "../lib/agent-metadata";
+
+// Every claim below was checked against the tree rather than written from intent: no
+// analytics or third-party script in `docs/`, one `localStorage` write in Head.astro,
+// Starlight's own `sessionStorage` sidebar key, no `fetch` in `src/`, and a playground
+// whose evaluation is a `new Function` in the visitor's tab. If any of those stops being
+// true, this page becomes a false statement, so `test/docs-agent-readiness.test.ts`
+// guards the ones a grep can see.
+const issues = `${REPO}/issues`;
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Privacy",
+    description:
+      "This site has no analytics, no cookies, and no third-party scripts, and the shorn library makes no network requests.",
+    tableOfContents: false,
+  }}
+>
+  <p>
+    This site collects nothing about you, and the shorn package collects nothing about the
+    programs that import it. There is no account to create and no form to fill in, so there
+    is no personal data here to lose. The specifics follow, because "we respect your
+    privacy" is worth nothing without them.
+  </p>
+
+  <h2>No analytics and no third-party scripts</h2>
+
+  <p>
+    There is no analytics service, no tag manager, no advertising, no error reporting
+    service, and no embedded widget. Every script, stylesheet, font, and image the site
+    loads is served from this domain, so loading a page does not tell any other company
+    that you were here.
+  </p>
+
+  <h2>No cookies</h2>
+
+  <p>
+    The site sets no cookies of any kind. Two small values are kept in your own browser's
+    storage, and neither identifies you nor leaves your device: <code>starlight-theme</code
+    >, which pins the documentation to its dark theme, and <code>sl-sidebar-state</code>,
+    which remembers whether you had a sidebar section open. Clearing your browser storage
+    removes both, and the site works exactly the same afterwards.
+  </p>
+
+  <h2>The playground runs in your browser</h2>
+
+  <p>
+    The schema and payload boxes on the home page run the real encoder inside your own tab.
+    The validator and the codec are downloaded as ordinary JavaScript and then everything
+    happens locally: what you type is never sent anywhere, because there is nowhere for it
+    to be sent. There is no server behind that box. Paste a schema from your own codebase if
+    you want to.
+  </p>
+
+  <h2>The library makes no network requests</h2>
+
+  <p>
+    shorn encodes and decodes in your process. It opens no socket, calls no endpoint, and
+    reports no telemetry, so nothing you encode with it can leak through the library. It has
+    one dependency, the Standard Schema spec package, whose published JavaScript file is empty:
+    it is type definitions and nothing else.
+  </p>
+
+  <h2>What the hosts see</h2>
+
+  <p>
+    This site is served by GitHub Pages, so GitHub receives each request the way any web
+    host would, including your IP address and your browser's user agent. That is covered by
+    the <a href="https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement"
+      >GitHub Privacy Statement</a
+    >, and this project has no control over it. The same is true of npm if you install the package,
+    and of GitHub if you open an issue, where anything you write is public.
+  </p>
+
+  <p>
+    Questions about any of this, or a claim on this page you think is wrong, belong in <a
+      href={issues}>GitHub issues</a
+    >.
+  </p>
+</StarlightPage>

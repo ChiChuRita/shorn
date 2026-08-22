@@ -1,0 +1,70 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { REPO } from "../lib/agent-metadata";
+
+// There is exactly one channel, and until this page existed the site never said so. A
+// reader looking for a contact address found nothing and had to guess whether the project
+// was abandoned. Saying "issues only, one maintainer, no SLA" is a better answer than
+// silence, and an honest one.
+const issues = `${REPO}/issues`;
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Contact",
+    description:
+      "How to report a bug, ask a question, or propose a change to shorn, and what to expect back.",
+    tableOfContents: false,
+  }}
+>
+  <p>
+    Everything goes through <a href={issues}>GitHub issues</a>. That is the whole contact
+    surface: there is no email address, no chat room, no forum, and no support portal. One
+    public thread per topic means the next person with the same question can find the
+    answer, which a private message would not give them.
+  </p>
+
+  <h2>Reporting a bug</h2>
+
+  <p>
+    <a href={issues}>Open an issue</a> and include the schema that reproduces it, the value
+    you passed, what you expected, and what happened instead. Add the version of shorn, of
+    your validator, and of Node. A schema plus a value is usually enough to reproduce
+    something exactly, so a small runnable snippet is worth more than a description of it.
+    If the bug is that a payload no longer decodes, say which version wrote it.
+  </p>
+
+  <h2>Asking a question</h2>
+
+  <p>
+    Also an issue. Before you open one, the docs may already answer it: the API reference
+    covers every export, the wire format pages describe the bytes field by field, and the
+    performance pages give the measurements and their caveats. If the answer was in the
+    docs but hard to find, that is still worth an issue, because it is a documentation bug.
+  </p>
+
+  <h2>Proposing a change</h2>
+
+  <p>
+    Open an issue before writing much code, especially if the change would alter the bytes
+    a schema produces. The wire format is a compatibility promise: payloads carry no field
+    names and no version, so changing the layout breaks everything already written by an
+    earlier release. That conversation is cheaper before the patch than after it.
+  </p>
+
+  <p>
+    If you want to send a pull request, <a href={`${REPO}/blob/main/AGENTS.md`}
+      >AGENTS.md</a
+    > in the repository covers setup, the layout of the code, the one command that has to be
+    green, and what a change needs to say about itself.
+  </p>
+
+  <h2>What to expect</h2>
+
+  <p>
+    shorn is maintained by one person in their spare time. Replies are best effort, there is
+    no response time commitment, and no support contract exists to buy. An issue may sit for
+    a while before it gets an answer. Bugs that produce wrong bytes or that break decoding
+    come first, since those are the ones that can damage stored data.
+  </p>
+</StarlightPage>

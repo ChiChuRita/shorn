@@ -1,0 +1,104 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { DOCS_ENTRY, PACKAGE, REPO } from "../lib/agent-metadata";
+
+// Two questions decide whether anyone adopts a small package, and neither was answered
+// anywhere on this site: who stands behind it, and what it deliberately does not do. The
+// landing page argues for shorn and the docs assume you have already chosen it, so a
+// reader weighing it up had to infer both from the source.
+const root = import.meta.env.BASE_URL.replace(/\/$/, "");
+const href = (to: string) => (to.startsWith("http") ? to : `${root}${to}`);
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "About shorn",
+    description:
+      "What shorn does, where it does not fit, who maintains it, and where its source and measurements live.",
+    tableOfContents: false,
+  }}
+>
+  <p>
+    shorn is a small TypeScript library that turns a validation schema you already have
+    into a compact binary format. It works with anything that implements <a
+      href="https://standardschema.dev">Standard Schema</a
+    >, which today means Zod, Valibot, and ArkType. It is published on npm as <code
+      >{PACKAGE}</code
+    >.
+  </p>
+
+  <h2>The problem it solves</h2>
+
+  <p>
+    JSON writes every field name into every payload and then parses that text back on the
+    way in. Binary formats fix both, but the established ones ask for something in return:
+    Protobuf wants a <code>.proto</code> file and a code generation step, Avro wants its
+    own schema, SchemaPack wants the shape repeated through its builder. Now the same data
+    shape exists twice, in two languages, and the two can drift apart.
+  </p>
+
+  <p>
+    shorn removes the second copy. Your validator already knows every field, its type, and
+    its order, so shorn reads the wire layout straight from it. You pass the same schema to
+    <code>encode</code> and <code>decode</code>, and the field names and type tags leave
+    the bytes because both ends can derive them. There is nothing to define twice, nothing
+    to generate, and nothing to keep in step.
+  </p>
+
+  <h2>Where it does not fit</h2>
+
+  <p>
+    shorn is for payloads whose two ends are both TypeScript and can import the same
+    schema module: caches, RPC, WebSocket frames, worker messages, and job queues. Outside
+    that, pick something else, and the <a href={href("/comparisons/")}>comparisons page</a>
+    says which:
+  </p>
+
+  <ul>
+    <li>
+      It is not a cross-language format. A reader written in Go or Python has no way to
+      decode the bytes.
+    </li>
+    <li>
+      Payloads are not self-describing. Without the schema they are just bytes, so reach
+      for MessagePack or CBOR if a reader has to decode blind.
+    </li>
+    <li>
+      It does not migrate a payload across a schema change. <code>fingerprinted()</code> can
+      detect that the shape moved and reject the payload, but it will not upgrade it the way
+      Protobuf or Avro would.
+    </li>
+  </ul>
+
+  <h2>Who maintains it</h2>
+
+  <p>
+    One person: Rahul Singh, on GitHub as <a href="https://github.com/ChiChuRita"
+      >ChiChuRita</a
+    >. There is no company behind shorn, no team, and no paid tier. Every change goes
+    through the same public repository, and <a href={REPO + "/issues"}>GitHub issues</a> is
+    the only support channel.
+  </p>
+
+  <h2>Licence and status</h2>
+
+  <p>
+    MIT licensed, and an experimental alpha. The version is still below 1.0, so neither the
+    API nor the byte layout is frozen. Any change to the bytes a schema produces is treated
+    as breaking however small the diff, and is called out in the release notes, so read
+    those before upgrading if you have payloads in storage or in a queue. It is ESM only
+    and needs Node 20 or newer, or any modern browser.
+  </p>
+
+  <h2>Source and measurements</h2>
+
+  <p>
+    The library, its tests, and its benchmarks are all in <a href={REPO}>one repository</a>.
+    The benchmarks compare shorn against msgpackr, cbor-x, Avro, Protobuf, SchemaPack, and
+    JSON, and every number published here comes from running them rather than from an
+    estimate. The <a href={href("/performance/size/")}>performance pages</a> name the
+    machine and the Node version behind each table and give the command that reproduces it.
+    <a href={href(DOCS_ENTRY)}>The documentation</a> starts with what shorn is and how the
+    encode and decode path works.
+  </p>
+</StarlightPage>

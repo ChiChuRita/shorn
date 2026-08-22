@@ -1,0 +1,44 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { AGENT_RESOURCES } from "../lib/agent-metadata";
+
+// Starlight ships a 404 page that says only "404". GitHub Pages already serves this
+// file with a real 404 status, so the status was never the gap: the body was. An agent
+// that guessed a URL from a search result or the README lands here, and every recovery
+// route it could take is on this page rather than one click away.
+const root = import.meta.env.BASE_URL.replace(/\/$/, "");
+const href = (to: string) => (to.startsWith("http") ? to : `${root}${to}`);
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Page not found",
+    description:
+      "No page exists at this URL. Links to the shorn documentation, llms.txt, and sitemap.",
+    tableOfContents: false,
+  }}
+>
+  <p>
+    No page exists at this URL, and nothing was moved here. The documentation is small
+    enough to list in full, so pick the entry point you need:
+  </p>
+
+  <ul>
+    {
+      AGENT_RESOURCES.map((resource) => (
+        <li>
+          <a href={href(resource.href)}>{resource.label}</a> {resource.note}
+        </li>
+      ))
+    }
+  </ul>
+
+  <p>
+    Reading this as a program? Every documentation page has a markdown twin at its own
+    path plus <code>.md</code>, so <code>/getting-started/quick-start/</code> is also
+    <code>/getting-started/quick-start.md</code>. shorn is a library you import rather
+    than a service you call, so there is no API endpoint, OpenAPI document, or API key to
+    look for. <code>npm install @chichurita/shorn</code> is the whole setup, and it also
+    puts a <code>shorn</code> command on the path if you would rather script a shell.
+  </p>
+</StarlightPage>

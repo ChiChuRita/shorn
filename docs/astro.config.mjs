@@ -2,9 +2,16 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import starlightThemeNext from "starlight-theme-next";
 import starlightLlmsTxt from "starlight-llms-txt";
+import { AGENT_GUIDANCE } from "./src/lib/agent-metadata";
 
 export default defineConfig({
   site: "https://shorn.dev",
+  // The two paths an agent guesses before reading anything. Astro emits a static
+  // redirect page for each, which is all GitHub Pages can serve.
+  redirects: {
+    "/docs": "/getting-started/introduction/",
+    "/api": "/api/overview/",
+  },
   integrations: [
     starlight({
       plugins: [
@@ -15,8 +22,7 @@ export default defineConfig({
           // file, which is no choice at all. Abridged here means "how to use shorn",
           // dropping the pages that argue for it or measure it.
           exclude: ["comparisons", "performance/**"],
-          details:
-            "Use these docs as the primary source for shorn's current API, wire format, and measured numbers.\n\nRecommended reading order:\n- Start with Getting Started and Core Concepts for the mental model\n- Use Schemas and Wire Format to find out what encodes and to what bytes\n- Use Versioning before storing or queueing any payload\n- Use API for signatures, and Performance for the measurements behind every claim",
+          details: AGENT_GUIDANCE,
           customSets: [
             {
               label: "Getting Started and Core Concepts",
@@ -72,6 +78,9 @@ export default defineConfig({
       expressiveCode: {
         themes: ["github-dark"],
       },
+      // Ours is `docs/src/pages/404.astro`. Without this, both routes claim /404:
+      // Astro drops Starlight's and warns that the clash becomes a hard error.
+      disable404Route: true,
       title: "shorn",
       logo: {
         src: "./src/assets/logo.svg",
@@ -181,6 +190,10 @@ export default defineConfig({
             { label: "m Builders", slug: "api/m" },
             { label: "Errors", slug: "api/errors" },
           ],
+        },
+        {
+          label: "CLI",
+          slug: "cli",
         },
         {
           label: "LLM Docs",

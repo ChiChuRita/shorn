@@ -7,6 +7,7 @@ import "starlight-theme-next/fonts/geist-mono/index.css";
 // The same palette Starlight loads through customCss. This page renders outside
 // the Starlight shell, so it has to ask for the tokens itself.
 import "../styles/tokens.css";
+import { structuredData } from "../lib/agent-metadata";
 
 /**
  * The minimalist landing shell, extracted so the message can vary without the
@@ -63,6 +64,10 @@ const install = "npm install @chichurita/shorn";
 // Absolute, because og:image is the one URL crawlers will not resolve relatively.
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const ogImage = new URL(`${root}/og.png`, Astro.site);
+
+// The machine-readable identity of the project, for readers that will not infer it from
+// the prose. Only the landing page carries it: it describes shorn, not this page.
+const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
 ---
 
 <!doctype html>
@@ -83,6 +88,7 @@ const ogImage = new URL(`${root}/og.png`, Astro.site);
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json" is:inline set:html={jsonLd} />
   </head>
 
   <body>
@@ -104,6 +110,7 @@ const ogImage = new URL(`${root}/og.png`, Astro.site);
       </a>
       <nav>
         <a href={p("getting-started/introduction/")}>Docs</a>
+        <a href={p("api/overview/")}>API</a>
         <a href="https://github.com/ChiChuRita/shorn">GitHub</a>
       </nav>
     </header>
@@ -133,7 +140,11 @@ const ogImage = new URL(`${root}/og.png`, Astro.site);
 
     <slot name="after" />
 
-    <footer>MIT licensed. An experimental alpha.</footer>
+    <footer>
+      MIT licensed. An experimental alpha. <a href={p("about/")}>About</a> · <a
+        href={p("contact/")}>Contact</a
+      > · <a href={p("privacy/")}>Privacy</a>
+    </footer>
 
     <script>
       document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((btn) => {
@@ -248,7 +259,7 @@ const ogImage = new URL(`${root}/og.png`, Astro.site);
         color: var(--shorn-ink-2);
       }
 
-      /* Words, never mystery-meat icons: both destinations stay legible. */
+      /* Words, never mystery-meat icons: every destination stays legible. */
       nav a {
         text-decoration: none;
       }

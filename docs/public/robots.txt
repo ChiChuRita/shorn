@@ -1,0 +1,11 @@
+# shorn.dev is the documentation for the shorn npm package. Everything here is public,
+# static, and safe to crawl. There is no API, no login, and no user content.
+#
+# For a machine reader, /llms.txt is a better entry point than this file: it maps the
+# documentation, says when shorn is the right tool, and links a plain-text copy of every
+# page. Any docs page is also available as markdown at its own path plus ".md".
+
+User-agent: *
+Allow: /
+
+Sitemap: https://shorn.dev/sitemap-index.xml
