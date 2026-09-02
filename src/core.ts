@@ -1150,13 +1150,16 @@ function rejectUuid(value: unknown): never {
   throw new EncodeError(`Expected a lowercase UUID, received ${text(value)}`);
 }
 
-/** Four bytes as eight hex characters, the largest chunk one `toString` can do. */
-function hexWord(reader: Reader): string {
-  const a = reader.byte();
-  const b = reader.byte();
-  const c = reader.byte();
-  const d = reader.byte();
-  return (((a << 24) | (b << 16) | (c << 8) | d) >>> 0).toString(16).padStart(8, "0");
+/**
+ * Every byte as its two lowercase hex characters, built by the first UUID decoded rather
+ * than at load. A module-level `Array.from` is a call a bundler has to keep, and keeping
+ * it cost an `m`-only bundle 114 gzip bytes for a table nothing in it can reach; an
+ * unassigned `let` and a function only `UuidSchema` calls leave with the class.
+ */
+let hexPairs: string[] | undefined;
+
+function hexPairTable(): string[] {
+  return (hexPairs ??= Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, "0")));
 }
 
 /**
@@ -1187,12 +1190,24 @@ export class UuidSchema extends Schema<string> {
     }
   }
 
+  /**
+   * A table lookup per byte, not `toString(16)` on four-byte words: those words are heap
+   * numbers, and V8's radix conversion for them was the whole cost of the decode, 570 to
+   * 660 ns per UUID against about 80 this way. Sixteen `byte()` calls rather than one
+   * bounds check over the input: a `Reader` method to do that is never tree-shaken, so it
+   * charged every `m`-only bundle 20 gzip bytes for a shape `m` cannot build, and it
+   * saved 20 ns of the 80. `bytes(16)` measured the same as this and allocates a view.
+   */
   _decode(reader: Reader): string {
-    const first = hexWord(reader);
-    const second = hexWord(reader);
-    const third = hexWord(reader);
-    const fourth = hexWord(reader);
-    return `${first}-${second.slice(0, 4)}-${second.slice(4)}-${third.slice(0, 4)}-${third.slice(4)}${fourth}`;
+    const hex = hexPairTable();
+    return (
+      hex[reader.byte()]! + hex[reader.byte()]! + hex[reader.byte()]! + hex[reader.byte()]! + "-" +
+      hex[reader.byte()]! + hex[reader.byte()]! + "-" +
+      hex[reader.byte()]! + hex[reader.byte()]! + "-" +
+      hex[reader.byte()]! + hex[reader.byte()]! + "-" +
+      hex[reader.byte()]! + hex[reader.byte()]! + hex[reader.byte()]! +
+      hex[reader.byte()]! + hex[reader.byte()]! + hex[reader.byte()]!
+    );
   }
 }
 

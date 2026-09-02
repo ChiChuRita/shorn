@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { runInNewContext } from "node:vm";
 import { type } from "arktype";
 import { describe, expect, it } from "vitest";
@@ -96,6 +97,55 @@ describe("Standard Schema adapter", () => {
       // because 16 bytes cannot remember which case they were written in.
       expect(z.uuid().safeParse(uuid.toUpperCase()).success).toBe(true);
       expect(() => compile(z.uuid()).encode(uuid.toUpperCase())).toThrow(/Expected a lowercase UUID/);
+    });
+
+    it("decodes a digit and a letter at every hex position, in lowercase", () => {
+      // Unchecked because neither value is an RFC 4122 UUID, and it is the wire decoder
+      // under test here, not the validator behind it.
+      const Id = unchecked(compile(z.uuid()));
+      // Each of the 32 hex positions is a digit in one of these and a letter in the
+      // other, so a lookup wrong for either nibble class shows up somewhere.
+      const digitFirst = "9a9a9a9a-9a9a-9a9a-9a9a-9a9a9a9a9a9a";
+      const letterFirst = "a9a9a9a9-a9a9-a9a9-a9a9-a9a9a9a9a9a9";
+      expect(Id.decode(new Uint8Array(16).fill(0x9a))).toBe(digitFirst);
+      expect(Id.decode(new Uint8Array(16).fill(0xa9))).toBe(letterFirst);
+      for (const edge of [digitFirst, letterFirst]) expect(Id.decode(Id.encode(edge))).toBe(edge);
+    });
+
+    it("agrees with a plain hex formatter on every byte value and on random uuids", () => {
+      // Unchecked for the same reason: most 16-byte runs are not valid UUIDs to zod.
+      const Id = unchecked(compile(z.uuid()));
+      const reference = (bytes: Uint8Array): string => {
+        const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+      };
+      // Sixteen runs of sixteen consecutive values put all 256 bytes through the decoder.
+      for (let first = 0; first < 256; first += 16) {
+        const bytes = Uint8Array.from({ length: 16 }, (_, index) => first + index);
+        expect(Id.decode(bytes)).toBe(reference(bytes));
+      }
+      for (let count = 0; count < 300; count++) {
+        const random = randomUUID();
+        const bytes = Id.encode(random);
+        expect(Id.decode(bytes)).toBe(reference(bytes));
+        expect(Id.decode(bytes)).toBe(random);
+      }
+    });
+
+    it("refuses a truncated uuid with an offset inside the input", () => {
+      const Id = compile(z.uuid());
+      const bytes = Id.encode(uuid);
+      for (const length of [0, 1, 4, 15]) {
+        let thrown: unknown;
+        try {
+          Id.decode(bytes.subarray(0, length));
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown).toBeInstanceOf(DecodeError);
+        expect((thrown as DecodeError).offset).toBeGreaterThanOrEqual(0);
+        expect((thrown as DecodeError).offset).toBeLessThanOrEqual(length);
+      }
     });
 
     it("reads an exclusive lower bound as unsigned, like an inclusive one", () => {
