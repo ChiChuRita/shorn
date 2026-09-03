@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0
+
+**Same bytes, one new export.** Every payload written by 0.5.0 or earlier decodes unchanged, every fingerprint is the one it was, and nothing that existed changed shape. The minor bump is for one function added beside the others, for code that owns the buffer its messages end up in.
+
+### `encodeInto(codec, value, target, offset?)`
+
+```ts
+const frame = new Uint8Array(65_536);
+let end = 0;
+for (const event of events) end = encodeInto(codec, event, frame, end);
+socket.send(frame.subarray(0, end));
+```
+
+It writes exactly the bytes `codec.encode(value)` would, into a `Uint8Array` you provide, and returns the offset just past the last one. What it saves is the output array and the copy into the frame that follows it, which a CPU profile put at about 40% of a small encode. Measured in five separate processes: a Person goes from 48 ns to 23 ns, a nested event from 108 ns to 70 ns, and a frame of 100 Persons is built in 40% of the time it takes with `encode()` and `set()`. Any codec works: `compile()`, `fingerprinted()`, `unchecked()`, or `m`.
+
+It is for transports and frame builders. A message handed straight to `send()` gains nothing from it, and `encode()` stays the default. Decoding needs no counterpart, because `decode()` already takes any `Uint8Array` view: hand it `frame.subarray(start, end)`.
+
+It throws `EncodeError` when the value does not fit, when the offset lies outside the target, or when the target is not a `Uint8Array`, and it reports the failing field path as `encode()` does. After a too-small target, the bytes from the offset on are unspecified. A call reached from a getter that encodes during an encode gets its own writer, and a target larger than 64 KiB is released after the call so a one-off frame is not pinned.
+
+### What it costs
+
+A free function rather than a method on the codec, for the reason `encodeAsync` is one: a method is never tree-shaken. A bundle that imports it pays 185 gzip bytes; one that does not pays 12 on the `m` row, for the writer's float view now covering the target's own window, since a frame slice rarely starts at byte zero. The two helper methods that would have made this tidier measured at 91 gzip bytes on every `m` bundle and were not shipped.
+
 ## 0.5.0
 
 **Same bytes, one command fewer.** Every payload written by 0.4.x decodes unchanged, every fingerprint is the one it was, and no library export changed shape. `dist/index.js` is byte-identical to 0.4.1's, and every size and bundle row of the regression gate reads +0.0%. The minor bump is for a surface removed beside the library rather than anything altered inside it: installing the package no longer installs a command.
