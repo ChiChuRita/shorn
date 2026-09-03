@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0
+
+**Same bytes, one command fewer.** Every payload written by 0.4.x decodes unchanged, every fingerprint is the one it was, and no library export changed shape. `dist/index.js` is byte-identical to 0.4.1's, and every size and bundle row of the regression gate reads +0.0%. The minor bump is for a surface removed beside the library rather than anything altered inside it: installing the package no longer installs a command.
+
+### The `shorn` command is gone
+
+0.4.0 shipped `shorn encode` and `shorn decode` as a `bin` in the package. Both are removed, together with the `bin` field, the second build that produced `dist/cli.mjs`, and the CLI page of the docs. The command was a thin shell over `encode()` and `decode()`: import a module, pick an export, JSON on one side and bytes on the other. That is a few lines against the library for any given schema module, and not a surface worth a second build, a manifest field, and a docs page to keep true.
+
+A script that called `npx shorn` has two routes. Pin `@chichurita/shorn@0.4.1`, which keeps the command as it was. Or replace the call with a module of your own, which also spares the import-and-pick-an-export step because it names the schema directly:
+
+```js
+// encode.mjs: JSON on stdin, bytes on stdout
+import { encode } from "@chichurita/shorn";
+import { Person } from "./person.mjs";
+const json = await new Response(process.stdin).text();
+process.stdout.write(encode(Person, JSON.parse(json)));
+```
+
+### The library is untouched
+
+No source under `src/` other than the two CLI files changed, no export was added or removed, and the package is still ESM only on Node 20 or newer. Nothing a program that imports shorn does is different.
+
 ## 0.4.1
 
 **Same bytes, faster in three places.** Every payload written by 0.4.0 decodes unchanged, every fingerprint is the one it was, and no export changed shape. The patch is in how the codec runs, not in what it writes: every input that encoded or decoded before still does, to the same bytes and the same value, and every input that was refused is refused with the same message, except one retired varint message named below. Figures are medians over five separate processes against the 0.4.0 build on the same machine; the regression gate read no row outside its tolerance.
