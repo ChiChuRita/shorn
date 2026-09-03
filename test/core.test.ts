@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ObjectSchema } from "../src/core.js";
 import { DecodeError, EncodeError, m, Writer } from "../src/index.js";
 
 /**
@@ -451,6 +452,36 @@ describe("shorn core", () => {
     }
   });
 
+  // `rejectUnknown` is set by `compile()` alone, never by `m`, so the constructor is
+  // called directly. The flag no longer keeps a shape off the generated encoder: the
+  // scan for unknown keys runs first, then the generated function encodes the fields.
+  it("keeps the generated encoder on a shape that rejects unknown properties", () => {
+    const Closed = new ObjectSchema({ id: m.uint(), name: m.string() }, true);
+    expect((Closed as unknown as { encoder?: unknown }).encoder).toBeDefined();
+    expect([...Closed.encode({ id: 1, name: "a" })]).toEqual([1, 1, 97]);
+    expect(Closed.decode(Closed.encode({ id: 1, name: "a" }))).toEqual({ id: 1, name: "a" });
+    expect(() => Closed.encode({ id: 1, name: "a", extra: 1 } as never)).toThrow(EncodeError);
+    expect(() => Closed.encode({ id: 1, name: "a", extra: 1 } as never)).toThrow(
+      'Unknown object property "extra"',
+    );
+  });
+
+  // A field named like an `Object.prototype` member still takes the interpreted path:
+  // canonical bytes for that shape need the fields staged through a null-prototype
+  // record, which the generated function does not do.
+  it("keeps a shape that rejects unknown properties interpreted when a field shadows the prototype", () => {
+    const Value = new ObjectSchema({ id: m.uint(), toString: m.string() }, true);
+    expect((Value as unknown as { encoder?: unknown }).encoder).toBeUndefined();
+    const plain = { id: 1, toString: "t" };
+    const bare = Object.assign(Object.create(null) as object, plain);
+    expect([...Value.encode(plain)]).toEqual([1, 1, 116]);
+    expect([...Value.encode(bare)]).toEqual([1, 1, 116]);
+    expect(Value.decode(Value.encode(plain))).toEqual(plain);
+    expect(() => Value.encode({ ...plain, extra: 1 } as never)).toThrow(
+      'Unknown object property "extra"',
+    );
+  });
+
   it("does not return oversized backing buffers", () => {
     const encoded = m.bytes().encode(new Uint8Array(1_100_000));
     expect(encoded.buffer.byteLength).toBe(encoded.byteLength);
@@ -580,6 +611,27 @@ describe("shorn core", () => {
       const bad = { ...value, actor: { age: "old" as never, name: "Rahul" } };
       expect(() => buildUnderCsp(shape).encode(bad)).toThrow("at actor.age");
       expect(() => shape().encode(bad)).toThrow("at actor.age");
+    });
+
+    // A shape that rejects unknown properties scans for them and then runs the same
+    // generated encoder, so it too has two encode paths to keep in step. The optional
+    // field puts the presence bitmap on both.
+    it("agrees on a shape that rejects unknown properties", () => {
+      const closed = () =>
+        new ObjectSchema({ age: m.uint(), name: m.string(), tag: m.string().optional() }, true);
+      const interpreted = buildUnderCsp(closed);
+      const generated = closed();
+      expect((generated as unknown as { encoder?: unknown }).encoder).toBeDefined();
+
+      for (const value of [{ age: 25, name: "Rahul" }, { age: 25, name: "Rahul", tag: "x" }]) {
+        const bytes = generated.encode(value as never);
+        expect([...interpreted.encode(value as never)]).toEqual([...bytes]);
+        expect(interpreted.decode(bytes)).toEqual(value);
+        expect(generated.decode(bytes)).toEqual(value);
+      }
+      const extra = { age: 25, name: "Rahul", extra: true } as never;
+      expect(() => interpreted.encode(extra)).toThrow('Unknown object property "extra"');
+      expect(() => generated.encode(extra)).toThrow('Unknown object property "extra"');
     });
 
     // Optional fields decode through a generated function too, so the two paths have to

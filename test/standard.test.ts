@@ -630,6 +630,40 @@ describe("Standard Schema adapter", () => {
     );
   });
 
+  // ArkType objects and Valibot's `v.object()` both compile to this check, and it runs
+  // ahead of the generated encoder rather than in place of it: the bytes are the ones a
+  // Zod object produces, and an unknown key is reported before any field is encoded.
+  it("checks for unknown properties ahead of the generated encoder, not instead of it", () => {
+    const codec = unchecked(compile(arkSchema));
+    expect([...codec.encode(value)]).toEqual([25, 5, 82, 97, 104, 117, 108, 1]);
+    expect([...codec.encode(value)]).toEqual([...unchecked(compile(zodSchema)).encode(value)]);
+    expect(() => codec.encode({ ...value, age: "old", extra: true } as never)).toThrow(
+      /^Unknown object property "extra"/,
+    );
+  });
+
+  it("round-trips optional fields on an object that rejects unknown properties", () => {
+    const Profile = type({ id: "number.integer >= 0", "email?": "string", "nickname?": "string" });
+    const codec = compile(Profile);
+    const hand = m.object({
+      id: m.uint(),
+      email: m.string().optional(),
+      nickname: m.string().optional(),
+    });
+    for (const input of [
+      { id: 7 },
+      { id: 7, email: "a@b.co" },
+      { id: 7, email: "a@b.co", nickname: "r" },
+    ]) {
+      const bytes = codec.encode(input as never);
+      expect([...bytes]).toEqual([...hand.encode(input as never)]);
+      expect(codec.decode(bytes)).toEqual(input);
+    }
+    expect(() => codec.encode({ id: 7, extra: 1 } as never)).toThrow(
+      /Unknown object property "extra"/,
+    );
+  });
+
   // Who polices extra properties depends on what the vendor emits, which is not
   // obvious from either side alone: zod says `additionalProperties: false` for both
   // `object` and `strictObject` and handles extras itself, so shorn stands back;

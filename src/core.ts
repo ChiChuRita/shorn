@@ -2051,13 +2051,18 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     // instance the way the decoder is: a distinct `_encode` per schema tips
     // `ArraySchema`'s shared `this.item._encode(...)` site megamorphic, measured at
     // -25% on an array of plain uints — a shape holding no object schema at all.
-    if (!this.hasInheritedKey && !rejectUnknown && this.tail === undefined) {
+    //
+    // Built for a shape that rejects unknown properties too. It was not, and that held
+    // every ArkType object and Valibot `v.object()` (a JSON Schema with no
+    // `additionalProperties`) to the interpreted loop at twice the cost of the same
+    // bytes from a Zod object. `_encode` scans for unknown keys and then calls this.
+    if (!this.hasInheritedKey && this.tail === undefined) {
       this.encoder = buildRecordEncoder(this.fields, optionalIndex, this.bitmapWidth);
     }
   }
 
   _encode(writer: Writer, value: ObjectOutput<S>): void {
-    if (this.encoder !== undefined) {
+    if (this.encoder !== undefined && !this.rejectUnknown) {
       this.encoder(writer, value as Record<string, unknown>);
       return;
     }
@@ -2067,10 +2072,20 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
 
     const record = value as Record<string, unknown>;
     if (this.rejectUnknown) {
-      const unknownKey = Object.keys(record).find((key) => !this.knownKeys!.has(key));
-      if (unknownKey !== undefined) {
-        throw new EncodeError(`Unknown object property ${JSON.stringify(unknownKey)}`);
+      // A loop rather than `find` with a closure, which measured about 10ns slower on a
+      // 64ns ArkType person encode. Not an allocation: V8 removes the closure either way.
+      for (const key of Object.keys(record)) {
+        if (!this.knownKeys!.has(key)) {
+          throw new EncodeError(`Unknown object property ${JSON.stringify(key)}`);
+        }
       }
+    }
+    // Here, after the scan, rather than with the scan emitted into the generated source:
+    // that cost an `m`-only bundle 61 gzip bytes, past its 1% gate, for a check `m`
+    // cannot ask for. The generated function repeats the object guard above; cheap.
+    if (this.encoder !== undefined) {
+      this.encoder(writer, record);
+      return;
     }
 
     // A field named like an `Object.prototype` member would otherwise be found on every
