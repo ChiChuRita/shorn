@@ -99,8 +99,7 @@ See [getting started](https://shorn.dev/getting-started/introduction/) and the
 docs also cover the [byte layout](https://shorn.dev/wire-format/layout/),
 [supported types](https://shorn.dev/schemas/supported-types/),
 [rejected shapes](https://shorn.dev/schemas/rejected-shapes/),
-[fingerprinting](https://shorn.dev/versioning/fingerprinting/),
-[performance](https://shorn.dev/performance/throughput/), and the
-[CLI](https://shorn.dev/cli/).
+[fingerprinting](https://shorn.dev/versioning/fingerprinting/), and
+[performance](https://shorn.dev/performance/throughput/).
 
 MIT licensed.

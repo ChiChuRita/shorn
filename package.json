@@ -29,9 +29,6 @@
       "require": "./dist/index.js"
     }
   },
-  "bin": {
-    "shorn": "./dist/cli.mjs"
-  },
   "files": [
     "dist",
     "README.md"

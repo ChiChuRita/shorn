@@ -192,10 +192,6 @@ export default defineConfig({
           ],
         },
         {
-          label: "CLI",
-          slug: "cli",
-        },
-        {
           label: "LLM Docs",
           link: "/llms-full.txt",
           attrs: {

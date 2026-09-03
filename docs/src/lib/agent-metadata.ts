@@ -38,11 +38,6 @@ export const AGENT_RESOURCES: readonly { href: string; label: string; note: stri
     note: "encode, decode, compile, codec, fingerprinted, the m builders, and the error types.",
   },
   {
-    href: "/cli/",
-    label: "CLI",
-    note: "Installing the package puts a `shorn` command on the path, for encoding and decoding from a shell.",
-  },
-  {
     href: "/llms.txt",
     label: "llms.txt",
     note: "A map of the documentation, with when to use shorn and a reading order.",
@@ -81,12 +76,6 @@ no API key, and no network request: encoding happens in your own process. Instal
 \`npm install ${PACKAGE}\`, then pass a Zod, Valibot, or ArkType schema you already have
 straight to \`encode(schema, value)\` and \`decode(schema, bytes)\`. It is ESM only and
 needs Node 20 or newer, or any modern browser.
-
-Installing the package also puts a \`shorn\` command on the path, which is the shortest
-route if you are scripting a shell rather than writing code:
-\`shorn encode ./schema.mjs --export Person\` reads a JSON value on stdin and writes the
-bytes on stdout, \`shorn decode\` reverses it, and \`--base64\` puts text on the byte side
-of either. The CLI page lists every flag and exit code.
 
 Reach for shorn when:
 - both ends of the wire are TypeScript and can import the same schema module: caches,
