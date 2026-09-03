@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.7.0
+
+**Wire-breaking for one shape: a `format: "date-time"` string.** A schema holding `z.iso.datetime()`, or any JSON Schema string with that format, now writes different bytes and derives a different fingerprint, so payloads it wrote under 0.6.0 cannot be read by 0.7.0 and the reverse. Every other shape writes the bytes it wrote before and keeps its fingerprint. The minor bump is the pre-1.0 rule for a wire change; the bold line is the warning the number cannot carry.
+
+### `Date`, `bigint`, `Set` and `Map` encode natively
+
+```ts
+const Event = z.object({
+  when: z.date(),
+  id: z.bigint(),
+  tags: z.set(z.string()),
+  scores: z.map(z.string(), z.int()),
+});
+const codec = compile(Event);
+codec.decode(codec.encode(value)); // a Date, a bigint, a Set and a Map come back
+```
+
+All four used to be refused before shorn saw them, because JSON Schema has no keyword for any of them, and the docs said to convert at the edge. They now have wire forms of their own, on the `m` builders as `m.date()`, `m.bigint()`, `m.set(item)` and `m.map(key, value)`, and through `compile()`:
+
+| Type | Bytes |
+| --- | --- |
+| `Date` | epoch milliseconds as a ZigZag varint, the `int` encoding: 6 bytes for any current date |
+| `bigint` | a varint header of the magnitude's byte count doubled plus the sign, then the magnitude little-endian, any width |
+| `Set<T>` | a varint count then the elements, exactly what `z.array(T)` writes |
+| `Map<K, V>` | a varint count then each key followed by its value, exactly what an array of `[K, V]` tuples writes |
+
+Set and Map keep iteration order. A Set and an array of the same element write identical bytes and carry different fingerprints on purpose, since they decode to different things. An Invalid Date is refused at encode. On decode, a duplicate Set element or Map key is refused, and so is a `-0` in either position, because `Set.add` and `Map.set` would fold it into `+0` and the payload could never re-encode to itself. That keeps the rule every other shape has: one payload, one value, and back again.
+
+Zod and ArkType need nothing beyond the schema: `z.date()`, `z.bigint()`, `z.set()`, `z.map()`, and ArkType's `Date` and `bigint`. ArkType's `Set` and `Map` keywords carry no element type and are refused by name. Valibot's Standard JSON Schema wrapper takes no options, so its four go through the raw converter and a new export:
+
+```ts
+import { toJsonSchema } from "@valibot/to-json-schema";
+import { compile, valibotOverride } from "@chichurita/shorn";
+
+const structure = toJsonSchema(Person, { overrideSchema: valibotOverride(toJsonSchema) });
+const codec = compile(Person, structure);
+```
+
+Which is possible because `structure` now also accepts a plain JSON Schema document, used for both sides. The vocabulary those hooks write is shorn's own extension keyword, `x-shorn`, with values `date`, `bigint`, `set` and `map`; a hand-written document may carry it too. A recursive type reached through a Set or Map element is refused with a message saying to hold the recursion in an array or an object instead.
+
+### `date-time` strings take the Date form
+
+The one change to existing bytes. A `date-time` string is now stored as the instant it names, 6 bytes rather than 24 to 30 characters, and decodes back to the `toISOString()` spelling. Only that spelling is accepted at encode: epoch milliseconds cannot remember a fractional-digit count or an offset, so a string that would come back different is refused rather than silently normalised, the same rule uppercase UUIDs have followed since they were packed. `z.iso.date()` and `z.iso.time()` stay strings.
+
+### What still needs the edge
+
+`undefined`, `NaN` as a type, symbols, functions, transforms and class instances have no wire form, and each is refused at compile as before. Zod's refusals keep Zod's words; where a vendor's converter throws on its own, shorn appends `(shorn has no wire form for this value; convert it at the edge, see Rejected Shapes)` in place of the sentence that used to point at the README.
+
+### What it costs
+
+The `m` bundle grows from 5,573 to 6,444 B gzip and, for the first time since the size table began, sits above `@msgpack/msgpack` rather than under it, by 9%. Four schema classes, the hex table `bigint` shares with UUIDs, and nothing else: the `date-time` class is reached only from `compile()`, and `valibotOverride` only by importing it. The trade was made knowingly, one namespace over a second entry point, and it is recorded on the footprint page. Throughput did not move; every existing size fixture is byte-identical.
+
 ## 0.6.0
 
 **Same bytes, one new export.** Every payload written by 0.5.0 or earlier decodes unchanged, every fingerprint is the one it was, and nothing that existed changed shape. The minor bump is for one function added beside the others, for code that owns the buffer its messages end up in.
