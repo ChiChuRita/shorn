@@ -11,15 +11,15 @@ shorn is faster than byte-producing JSON in every measured fixture. Against the 
 
 | Fixture | shorn enc | JSON enc | shorn dec | JSON dec |
 | --- | ---: | ---: | ---: | ---: |
-| Person | **25.10M** | 4.43M | **62.54M** | 4.61M |
-| Unicode person | **8.97M** | 3.71M | **9.61M** | 3.48M |
-| Nested event | **8.33M** | 1.38M | **11.31M** | 1.67M |
-| 100-event batch | **96.1k** | 35.4k | **117.7k** | 19.7k |
-| Person, validated | **8.65M** | 3.63M | **11.62M** | 3.67M |
+| Person | **20.98M** | 4.52M | **62.57M** | 4.57M |
+| Unicode person | **8.44M** | 3.76M | **9.38M** | 3.53M |
+| Nested event | **8.19M** | 1.33M | **11.86M** | 1.68M |
+| 100-event batch | **94.9k** | 35.4k | **123.2k** | 20.2k |
+| Person, validated | **8.35M** | 3.58M | **11.56M** | 3.55M |
 
-Across these fixtures shorn is up to 6.0× faster to encode and up to 13.6× faster to decode. The ASCII payloads also use as little as 23% of JSON's bytes; the Unicode payload uses 53%.
+Across these fixtures shorn is up to 6.2× faster to encode and up to 13.7× faster to decode. The ASCII payloads also use as little as 23% of JSON's bytes; the Unicode payload uses 53%.
 
-`JSON.stringify` to a string reaches 10.39M encodes/s for Person. That baseline does less work, because it stops at a JavaScript string rather than producing bytes.
+`JSON.stringify` to a string reaches 10.17M encodes/s for Person. That baseline does less work, because it stops at a JavaScript string rather than producing bytes.
 
 ## Against binary codecs
 
@@ -27,16 +27,16 @@ Three msgpackr modes exist; this table compares against one. `bundleStrings` is 
 
 | Fixture | Op | shorn | Avro | SchemaPack | msgpackr records |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Person | enc | **25.10M** | 21.56M | 11.74M | 9.70M |
-| Person | dec | **62.54M** | 25.09M | 15.18M | 18.03M |
-| Unicode person | enc | **8.97M** | 5.90M | 6.51M | 7.30M |
-| Unicode person | dec | 9.61M | **9.98M** | 7.78M | 3.80M |
-| Nested event | enc | **8.33M** | 6.59M | 3.77M | 3.52M |
-| Nested event | dec | **11.31M** | 5.49M | 4.81M | 8.09M |
-| 100 events | enc | **96.1K** | 41.2K | 47.2K | 25.4K |
-| 100 events | dec | **117.7K** | 53.6K | 56.7K | 84.6K |
+| Person | enc | **20.98M** | 16.52M | 11.70M | 10.15M |
+| Person | dec | **62.57M** | 25.18M | 15.43M | 18.50M |
+| Unicode person | enc | **8.44M** | 5.73M | 6.69M | 7.03M |
+| Unicode person | dec | 9.38M | **9.69M** | 8.04M | 3.77M |
+| Nested event | enc | **8.19M** | 6.28M | 4.09M | 3.52M |
+| Nested event | dec | **11.86M** | 5.25M | 4.83M | 8.04M |
+| 100 events | enc | **94.9K** | 41.8K | 53.7K | 26.0K |
+| 100 events | dec | **123.2K** | 51.6K | 57.5K | 87.3K |
 
-Two margins here are ties, not leads. **Person encode** shows 16% over Avro, but measured alone in its own process the gap is 4% — quote that figure. **Unicode decode** shows Avro 4% ahead, which is the same width. The decode columns on the nested and batch fixtures are the margins with room in them.
+Two margins here are ties, not leads. **Person encode** shows 27% over Avro in this shared-process table, but measured alone in its own process the gap is 2%: quote that figure. **Unicode decode** shows Avro 3% ahead, which is the same width. The decode columns on the nested and batch fixtures are the margins with room in them.
 
 ### Documents are the other exception, and it is not about Unicode
 
@@ -44,36 +44,36 @@ The fixtures above are records: few keys, short strings, no optional fields. A d
 
 | Codec | Bytes | Encode | Decode |
 | --- | ---: | ---: | ---: |
-| **shorn** | **2,236** | **249.6K** | 310.0K |
-| msgpackr shared records | 2,268 | 85.4K | 365.7K |
-| msgpackr bundled strings | 2,341 | 154.0K | **540.7K** |
-| cbor-x shared records | 2,321 | 80.3K | 336.8K |
-| @msgpack/msgpack | 2,872 | 85.7K | 95.9K |
-| JSON bytes | 3,334 | 142.2K | 142.3K |
+| **shorn** | **2,236** | **264.2K** | 314.6K |
+| msgpackr shared records | 2,268 | 85.6K | 364.7K |
+| msgpackr bundled strings | 2,341 | 157.7K | **535.4K** |
+| cbor-x shared records | 2,321 | 82.5K | 334.7K |
+| @msgpack/msgpack | 2,872 | 85.9K | 96.6K |
+| JSON bytes | 3,334 | 140.6K | 141.1K |
 
-shorn is smallest and fastest to encode — by 62% over the next codec — and fourth to decode. The cause is one string-decode call per string: `bundleStrings` writes all string content contiguously and decodes it in a single call, which is the cost shorn pays once per string. 87% of this payload is string bytes.
+shorn is smallest and fastest to encode, by 68% over the next codec, and fourth to decode. The cause is one string-decode call per string: `bundleStrings` writes all string content contiguously and decodes it in a single call, which is the cost shorn pays once per string. 87% of this payload is string bytes.
 
-**The alphabet is irrelevant to this.** The fixture is pure ASCII and shorn still decodes it at 57% of `bundleStrings`. What costs is the *number* of strings, not what is in them.
+**The alphabet is irrelevant to this.** The fixture is pure ASCII and shorn still decodes it at 59% of `bundleStrings`. What costs is the *number* of strings, not what is in them.
 
 The remaining gap is a wire-format question rather than a tuning one: bundling strings would change the bytes.
 
 :::caution[Microbenchmark margins vary]
-The codecs share one benchmark process, so small margins can move between runs. In isolated Person-encode measurements on the same machine, shorn took 40.44 ns and Avro 42.29 ns: a 4% difference, against the 16% the shared table shows. Treat narrow results as directional and benchmark representative production data.
+The codecs share one benchmark process, so small margins can move between runs. In isolated Person-encode measurements on the same machine, shorn took 45.05 ns and Avro 46.09 ns: a 2% difference, against the 27% the shared table shows. Treat narrow results as directional and benchmark representative production data.
 :::
 
 ## Validation included
 
 | Codec | Bytes | Encode | Decode |
 | --- | ---: | ---: | ---: |
-| **shorn + Zod** | **8** | **8.65M** | **11.62M** |
-| Zod + Avro | **8** | 8.24M | 9.89M |
-| Zod + SchemaPack | 9 | 6.61M | 7.76M |
-| Zod + JSON string | 35 | 5.70M | 4.11M |
-| Zod + JSON bytes | 35 | 3.63M | 3.67M |
+| **shorn + Zod** | **8** | **8.35M** | **11.56M** |
+| Zod + Avro | **8** | 8.15M | 9.90M |
+| Zod + SchemaPack | 9 | 6.91M | 7.82M |
+| Zod + JSON string | 35 | 6.27M | 4.06M |
+| Zod + JSON bytes | 35 | 3.58M | 3.55M |
 
 Validation is most of the end-to-end cost, and it flattens the encode column: once Zod runs on every value, shorn and Avro encode at the same speed within noise, because the validator is the work. Decode still separates them, at 17% over Avro.
 
-On the Person fixture the raw codec runs at 25.10M encodes/s and 62.54M decodes/s; adding Zod reduces those to 8.65M and 11.62M.
+On the Person fixture the raw codec runs at 20.98M encodes/s and 62.57M decodes/s; adding Zod reduces those to 8.35M and 11.56M.
 
 Between services you own, `unchecked(compile(schema))` writes the same bytes at the raw-codec figures, giving up every refinement on both sides in exchange — see [Skipping Validation](/core-concepts/validation/#skipping-validation).
 
