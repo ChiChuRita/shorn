@@ -11,16 +11,20 @@ shorn refuses schemas it cannot encode exactly. Unless noted, each refusal is an
 | Input ≠ output wire shape | build | make both sides agree |
 | `$ref` to another document | build | inline the definition |
 | Recursion past 256 levels, or with no way out | encode and decode | a nullable back-edge, or an array |
-| `Date`, `bigint`, `Map`, `Set` | vendor, before shorn | convert at the edge |
-| Transform | vendor, before shorn | `z.codec()` outside the codec |
+| A recursive type inside a `Set` or `Map` | build | hold the cycle in an array or an object |
+| `z.undefined()`, `z.nan()`, a symbol, a transform | build | convert at the edge |
+| ArkType `Set` or `Map` | build | a typed collection, or convert at the edge |
 | Empty enum | build | — |
 | `NaN`, `Infinity` or `-0` enum member | build | a finite number, or a string |
 | Array of zero-width element | build | encode a count instead |
+| `Set` of a zero-width element, `Map` of a zero-width entry | build | encode a count instead |
 | A second null or presence marker | build | drop the redundant wrapper |
 | No Standard JSON Schema | build | pass `structure` |
 | Async schema on a sync entry point | encode | `encodeAsync` / `decodeAsync` |
 | Unknown property | encode | close the object, or strip first |
 | Uppercase UUID | encode | lowercase it, as RFC 4122 asks |
+| Non-canonical `date-time` string | encode | `toISOString()` it |
+| Duplicate `Set` element or `Map` key | decode | a payload one encoder wrote |
 
 ## Overlapping unions
 
@@ -72,13 +76,73 @@ An intersection (`allOf`) would need the merged shape, which the vendor has not 
 
 shorn converts and compares both `jsonSchema.input()` and `.output()`, and refuses a default or widening refinement when the two wire shapes differ, because it cannot reverse that change during encoding. With `z.codec()`, JSON Schema conversion usually throws before this check.
 
-## Rich types and transforms
+## Values with no wire form, and transforms
 
-> \<the vendor's message\> — shorn encodes the wire shape; convert rich types at the edge
+`Date`, `bigint`, `Map`, `Set` and `date-time` strings are [supported](/schemas/rich-types/). What is still refused is a type the wire format has nothing to write for at all: `undefined`, `void`, `nan`, a symbol, a function, a `custom` type, and a one-way transform.
 
-`z.date()`, `z.bigint()`, `z.map()`, `z.set()`, `v.date()`, ArkType `Date`. The wall is JSON Schema's, not any vendor's: all three throw before shorn is involved, and shorn keeps their reason and appends the remedy.
+Zod's own conversion hook names the type, and shorn keeps that wording:
 
-A one-way transform has no reverse direction in Standard Schema either, so shorn cannot undo it on decode. Use `z.codec()` for a declarative bidirectional pair, applied outside the codec. See [Date, BigInt, Map, Set](/schemas/rich-types/).
+> undefined cannot be represented in JSON Schema
+
+`nan`, `symbol`, `function`, `custom`, `void` and `transform` read the same way, in Zod's lowercase spelling. A literal is a separate line, because with the representability test off Zod would drop an `undefined` member and write a bigint one as a number:
+
+> A literal undefined or bigint cannot be represented in JSON Schema
+
+Where the refusal is the vendor's own rather than shorn's, the reason is kept and the remedy appended:
+
+> \<the vendor's message\> (shorn has no wire form for this value; convert it at
+the edge, see Rejected Shapes)
+
+That is what Valibot's converter produces, for `v.undefined()` and `v.pipe(..., v.transform(...))`, and for `v.date()`, `v.bigint()`, `v.set()` and `v.map()` when the [`valibotOverride` recipe](/validators/valibot/#rich-types) is not used. ArkType reaches it through a constraint shorn has no hook for, such as the predicate behind `"string.date"`.
+
+A one-way transform has no reverse direction in Standard Schema, so shorn cannot undo it on decode. Use `z.codec()` for a declarative bidirectional pair, applied outside the codec. See [What still needs converting at the edge](/schemas/rich-types/#what-still-needs-converting-at-the-edge).
+
+## ArkType's `Set` and `Map`
+
+> ArkType's Set carries no element type, so there is nothing to encode its members as; convert it at the edge
+
+`Set` and `Map` are keywords in ArkType, and neither carries the type of its members. A tagless format writes elements and nothing else, so there is nothing to write them as. Zod's `z.set(T)` and Valibot's `v.set(T)` name the element and are [supported](/schemas/rich-types/).
+
+## Recursion through a `Set` or `Map`
+
+> A recursive type inside a Set or Map is not supported; hold the recursion in an array or an object instead
+
+```ts
+const Node = z.object({ get kids() { return z.set(Node); } });
+```
+
+A set's element is converted as a document of its own and inlined where `items` would go, because Zod's generator writes an empty container and never descends. A `$ref` in that document would resolve against the root, where its target is not. Hold the cycle in an array or an object; both [support recursion](/schemas/supported-types/#recursive-schemas).
+
+## Non-canonical `date-time` strings
+
+> Expected a canonical ISO-8601 date-time (the toISOString() spelling), received X
+
+A `format: "date-time"` string is stored as epoch milliseconds, which hold neither a fractional-digit count nor an offset spelling. Only the one spelling that survives the round trip is accepted, and the rest are refused at encode rather than normalised:
+
+```ts
+"2026-09-03T12:00:00.000Z"       // 6 bytes
+"2026-09-03T12:00:00Z"           // refused: no fractional digits
+"2026-09-03T12:00:00.000+02:00"  // refused: an offset
+"2026-09-03T12:00:00.000000Z"    // refused: six fractional digits
+```
+
+Same reason as [uppercase UUIDs](#uppercase-uuids). Call `toISOString()` at the edge. A non-string under the same schema is refused earlier, as `Expected an ISO-8601 date-time string, received X`, where `X` is its type.
+
+## Duplicate `Set` elements and `Map` keys
+
+> Duplicate Set element
+
+> Duplicate Map key
+
+Refused on **decode**, not at build. `new Set` would fold the pair instead, and the value would then re-encode to one element for a payload that declared two, so one value would have two encodings. Only a primitive can trip either, since every decoded object is a fresh reference. No encoder shorn ships writes such a payload; a hand-made or corrupted one can.
+
+## Zero-width `Set` elements and `Map` entries
+
+> Set elements must occupy at least one byte
+
+> Map entries must occupy at least one byte
+
+The [array rule](#arrays-of-zero-width-elements), for the array's reason: a zero-width element decouples the count from the input length, so three bytes could declare a million of them. Neither has a fixed-count form to exempt, so there is no equivalent of `z.array(T).length(n)` here. A Map counts its key and value together, so `m.map(m.literal("x"), m.string())` is fine and `m.map(m.literal("x"), m.literal("y"))` is not.
 
 ## Empty enums, and members with no JSON text
 
@@ -139,13 +203,19 @@ A **vendor schema** that spells the same thing twice is not this error. `z.any()
 
 Valibot always needs this, as do Zod before 4.2 and ArkType before 2.1.28. Pass the `structure` argument; see [Valibot](/validators/valibot/).
 
+A `structure` that is neither a Standard JSON Schema implementation nor a JSON Schema document is refused by the same gate:
+
+> The second argument must be a Standard JSON Schema implementation (toStandardJsonSchema(schema) for Valibot) or a JSON Schema document
+
+A plain object counts as a document when it carries `$schema`, `$ref`, `type`, `anyOf`, `oneOf`, `const`, `enum`, `properties` or `x-shorn`. A validator passed twice, or a structure wrapped in `{ structure }`, carries none of those and would otherwise read as an empty schema and appear to work.
+
 ## Uppercase UUIDs
 
 > Expected a lowercase UUID, received X
 
 A `format: "uuid"` string is stored as its 16 bytes, and 16 bytes have no case. Validators accept either spelling (RFC 4122 says to generate lowercase and accept both), so this is refused at encode and only for values that would not survive the round trip. Lowercase at the edge; `String.prototype.toLowerCase` is exact for hexadecimal.
 
-No other string format is packed for the same reason. A `date-time` has free fractional digits and a free offset spelling, so it stays a string.
+A `format: "date-time"` string is packed too, into the 6 bytes of the Date it names, and for the same reason it accepts only [the canonical spelling](#non-canonical-date-time-strings). Those two are the only string formats shorn packs; every other one is stored as its text.
 
 ## Async validation on a sync entry point
 

@@ -19,7 +19,13 @@ export {
   safeDecode,
   safeEncode,
   unchecked,
+  valibotOverride,
 } from "./standard.js";
-export type { EncodableStandardSchema, SafeResult } from "./standard.js";
+export type {
+  EncodableStandardSchema,
+  JsonSchemaDocument,
+  SafeResult,
+  ValibotOverrideContext,
+} from "./standard.js";
 export { FingerprintedSchema, fingerprinted } from "./envelope.js";
 export type { FingerprintOptions } from "./envelope.js";

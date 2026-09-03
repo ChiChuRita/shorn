@@ -57,7 +57,7 @@ if (!result.success && result.error instanceof DecodeError) {
 }
 ```
 
-Errors that wrap another error set `cause`: a validation failure rethrown as a `DecodeError`, a rich-type rejection from a validator's JSON Schema conversion, and an invalid UTF-8 read.
+Errors that wrap another error set `cause`: a validation failure rethrown as a `DecodeError`, a refusal from a validator's own JSON Schema conversion, and an invalid UTF-8 read.
 
 ## Schema-construction errors
 
@@ -71,13 +71,21 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 | `Enum member … has no JSON text of its own` | `NaN`, an infinity or `-0` in a mixed enum; none of the four survives the JSON text a mixed enum is ordered by |
 | `Invalid fixed array length X` | `minItems === maxItems` outside 0 to 1,000,000 |
 | `Array elements must occupy at least one byte, or a fixed count of them must stay under the collection limit` | an array of zero-width elements — a literal, an empty tuple, an empty object, or an object or tuple built only from those. A variable count can never be checked against the payload; a fixed count can be, but only up to 1,000,000 elements in total across nesting, since a fixed count needs no payload at all to satisfy |
+| `Set elements must occupy at least one byte` | the same for a Set, which has no fixed-count form to exempt |
+| `Map entries must occupy at least one byte` | the same for a Map, counting key and value together |
 | `Unsupported JSON Schema literal` | a literal that is not string, number, boolean, or null |
 | `Unsupported Standard JSON Schema type X` | a type with no wire shape. `X` is the type keyword, or `object` when the document put an object there |
 | `Unsupported Standard JSON Schema node` | a non-object node where a schema was expected |
 | `Unsupported JSON Schema reference "…"; only same-document references are supported` | a `$ref` naming another document |
 | `JSON Schema reference "…" does not resolve` | a `$ref` whose pointer names nothing in the document |
 | `Unsupported JSON Schema combinator X` | `allOf` (an intersection) or `not` (`z.never()`) |
-| `The second argument must be a Standard JSON Schema implementation — toStandardJsonSchema(schema) for Valibot` | a raw JSON Schema object, or the structure wrapped in `{ structure }` |
+| `Unsupported x-shorn kind X` | shorn's own keyword carrying anything but `date`, `bigint`, `set` or `map`. `X` is the value, or its type when it is not a string |
+| `A recursive type inside a Set or Map is not supported; hold the recursion in an array or an object instead` | a cycle reached through a Set element or a Map key or value. That child is converted as a document of its own, so a `$ref` in it would resolve against the root instead |
+| `A Set or Map element has no Standard JSON Schema of its own` | a Set or Map whose element is not a schema shorn can convert on its own |
+| `ArkType's Set carries no element type, so there is nothing to encode its members as; convert it at the edge` | ArkType's `Set` or `Map` keyword. Neither names the type of its members, and a tagless format writes members and nothing else |
+| `X cannot be represented in JSON Schema` | a Zod or ArkType type with no wire form: `undefined`, `void`, `symbol`, `nan`, `custom`, `function`, `transform`, and ArkType protos such as `RegExp` or `URL`. `X` is the vendor's own name for it |
+| `A literal undefined or bigint cannot be represented in JSON Schema` | `z.literal(undefined)` or `z.literal(1n)`. Zod would drop the first member and write the second as a number, so either would decode to a different value than was declared |
+| `The second argument must be a Standard JSON Schema implementation (toStandardJsonSchema(schema) for Valibot) or a JSON Schema document` | a `structure` that is neither. A plain object counts as a document when it carries `$schema`, `$ref`, `type`, `anyOf`, `oneOf`, `const`, `enum`, `properties` or `x-shorn`; a validator passed twice, or a structure wrapped in `{ structure }`, carries none of those |
 | `Required property "x" has no schema` | `required` names a property absent from `properties` |
 | `A "__proto__" property does not survive a JSON Schema; rename the field` | a field named `__proto__`. No validator's JSON Schema can carry it: the key sets the prototype of the `properties` object rather than joining it, so the field would be missing from the wire shape |
 | `Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported` | a default or widening refinement makes the sides differ |
@@ -88,14 +96,18 @@ These are all `EncodeError` instances thrown when the codec is built. See [Rejec
 | `Fingerprint bytes must be 1, 2, 3 or 4, received X` | out-of-range `bytes` option. `X` is the value, or its type when the value is neither a number nor a string |
 | `unchecked() needs a codec with a validator to remove; compile() returns one, optionally wrapped by fingerprinted(), and the low-level m API is already unvalidated` | `unchecked(m.object(...))`, or `unchecked(compile(schema).nullable())` |
 
-### Rich types
+### Values with no wire form
 
 ```
-<the vendor's own message> — shorn encodes the wire shape; convert rich types
-at the edge (README: Dates, BigInt, Map and Set)
+<the vendor's own message> (shorn has no wire form for this value; convert it at
+the edge, see Rejected Shapes)
 ```
 
-shorn preserves the validator's original reason and appends guidance. This applies to `Date`, `bigint`, `Map`, `Set`, `undefined`, `NaN`, and transforms. See [Date, BigInt, Map, Set](/schemas/rich-types/).
+Appended when a **vendor's own** conversion throws, so the reason stays the vendor's and the remedy is added. In practice that is Valibot's converter (`v.undefined()`, a `v.transform`, and `v.date()`, `v.bigint()`, `v.set()` or `v.map()` without the [`valibotOverride` recipe](/validators/valibot/#rich-types)) and an ArkType constraint shorn has no hook for, such as the predicate behind `"string.date"`.
+
+A refusal that is shorn's own carries no suffix, because it already says what to do. Zod's are all in that group: `undefined cannot be represented in JSON Schema` and its siblings come from shorn's conversion hook, not from Zod.
+
+`Date`, `bigint`, `Map`, `Set` and `date-time` strings are no longer in this group at all; they are [supported](/schemas/rich-types/). What remains is `undefined`, `void`, `nan`, symbols, functions, `custom` types and transforms.
 
 ### Async
 
@@ -117,6 +129,15 @@ compile(), optionally wrapped by fingerprinted()
 | --- | --- |
 | `Unknown object property "x"` | an extra property where the vendor left `additionalProperties` absent: ArkType by default, Valibot's `object` and `looseObject` |
 | `Expected a lowercase UUID, received X` | an uppercase or malformed UUID under a `format: "uuid"` schema; 16 bytes have no case to remember |
+| `Expected a canonical ISO-8601 date-time (the toISOString() spelling), received X` | a `format: "date-time"` string in any other spelling. Epoch milliseconds remember neither a fractional-digit count nor an offset, so only the one spelling that survives the round trip is accepted |
+| `Expected an ISO-8601 date-time string, received X` | a non-string under the same schema. `X` is its type |
+| `Expected a Date, received X` | anything but a `Date` under `m.date()` or `z.date()`, a millisecond number included |
+| `Expected a valid Date, received an Invalid Date` | a `Date` whose time value is `NaN`, which no integer holds |
+| `Expected a bigint, received X` | anything but a `bigint`, a numeric string or a `number` included |
+| `BigInt is too large` | a magnitude past 64 MiB |
+| `Expected a Set` / `Expected a Map` | the wrong container. A cross-realm one is accepted through a tag check when `instanceof` fails |
+| `Set is too large` / `Map is too large` | more than 1,000,000 elements or entries |
+| `Set changed size during encode` / `Map changed size during encode` | an element getter that added or removed members while the encoder was iterating. The count is already on the wire by then, so the payload would not match it |
 | `Expected an unsigned safe integer, received X` | `m.uint()` given a negative number, a non-integer, an integer past `Number.MAX_SAFE_INTEGER`, or a value that is not a number |
 | `Expected a safe integer, received X` | the same through `m.int()` |
 | `Expected an array with N items` | a length that disagrees with `minItems === maxItems` |
@@ -151,6 +172,12 @@ All `DecodeError` with an `offset`.
 | *invalid enum index* | past the last member |
 | *element count exceeds remaining input* | a count the payload cannot satisfy |
 | `Record keys are out of canonical order` | keys not ascending, or a key repeated |
+| `Date value N is out of range` | a millisecond count outside ±8.64e15, where a `Date`'s range ends |
+| `Non-canonical bigint` | a header of `1`, which would be negative zero, or a magnitude with a zero high byte. Either would give one value two encodings |
+| `Duplicate Set element` | a payload declaring the same element twice. Folding it would let the value re-encode shorter than the payload it came from |
+| `Duplicate Map key` | the same for a Map entry |
+| `Set size N exceeds the limit` / `Map size N exceeds the limit` | a count past 1,000,000 |
+| `Set size N exceeds the remaining input` / `Map size N exceeds the remaining input` | a count the payload cannot satisfy, refused before allocation |
 | `Non-canonical dynamic number` | an integer written under the float tag |
 | `Unknown dynamic tag X` | a tag byte above 7 |
 | `Dynamic value nests deeper than 64` | a payload that nests past the limit |

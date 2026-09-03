@@ -3,13 +3,27 @@ title: Functions
 description: Signatures and behavior for encode, decode, the safe and async variants, compile, unchecked, and fingerprinted.
 ---
 
-Each function has two overloads. One accepts schemas that implement both Standard interfaces. The other accepts a Standard Schema plus its `structure` — a Standard JSON Schema for the same shape.
+Each function has two overloads. One accepts schemas that implement both Standard interfaces. The other accepts a Standard Schema plus its `structure`, which describes the same shape.
+
+`structure` is either a **Standard JSON Schema implementation** (`toStandardJsonSchema(schema)` for Valibot) or a plain **JSON Schema document**, typed as `JsonSchemaDocument`. One document describes one shape and so serves both the input and the output side, which is why a default or a transform needs the two-method form instead. A plain object counts as a document when it carries `$schema`, `$ref`, `type`, `anyOf`, `oneOf`, `const`, `enum`, `properties` or `x-shorn`; anything else is refused, so a validator passed twice does not read as an empty schema and appear to work.
+
+```ts
+const structure = {
+  type: "object",
+  properties: { when: { "x-shorn": "date" }, name: { type: "string" } },
+  required: ["when", "name"],
+};
+
+const codec = compile(schema, structure); // cached by the identity of both objects
+```
+
+`x-shorn` is shorn's own keyword for the four types JSON Schema cannot describe. See [Date, BigInt, Map, Set](/schemas/rich-types/#the-x-shorn-keyword).
 
 ## `encode`
 
 ```ts
 encode<S extends EncodableStandardSchema>(schema: S, value: InferOutput<S>): Uint8Array;
-encode<S extends StandardSchemaV1>(schema: S, value: InferOutput<S>, structure: StandardJSONSchemaV1): Uint8Array;
+encode<S extends StandardSchemaV1>(schema: S, value: InferOutput<S>, structure: StandardJSONSchemaV1 | JsonSchemaDocument): Uint8Array;
 ```
 
 Validates, then writes bytes. Throws `EncodeError` if validation fails or the schema cannot be encoded.
@@ -20,7 +34,7 @@ The returned `Uint8Array` is an **exact-size copy**, not a view into a reused bu
 
 ```ts
 decode<S extends EncodableStandardSchema>(schema: S, bytes: Uint8Array): InferOutput<S>;
-decode<S extends StandardSchemaV1>(schema: S, bytes: Uint8Array, structure: StandardJSONSchemaV1): InferOutput<S>;
+decode<S extends StandardSchemaV1>(schema: S, bytes: Uint8Array, structure: StandardJSONSchemaV1 | JsonSchemaDocument): InferOutput<S>;
 ```
 
 Reads the structure, then validates. Throws `DecodeError` for malformed bytes **and** for validation failures on the way out.
@@ -74,7 +88,7 @@ Calling `encode`/`decode` on an async schema throws, and so does passing a codec
 
 ```ts
 compile<S extends EncodableStandardSchema>(schema: S): Schema<InferOutput<S>>;
-compile<S extends StandardSchemaV1>(schema: S, structure: StandardJSONSchemaV1): Schema<InferOutput<S>>;
+compile<S extends StandardSchemaV1>(schema: S, structure: StandardJSONSchemaV1 | JsonSchemaDocument): Schema<InferOutput<S>>;
 ```
 
 Returns the cached wire plan as a codec with `.encode()` and `.decode()`. **No build step:** it works in memory and writes nothing to disk. Repeated calls with the same schema and structure object return the **same** cached instance. See [Compilation and Caching](/core-concepts/compile-and-caching/).
@@ -84,12 +98,32 @@ Returns the cached wire plan as a codec with `.encode()` and `.decode()`. **No b
 ```ts
 unchecked<T>(codec: Schema<T>): Schema<T>;
 unchecked<S extends EncodableStandardSchema>(schema: S): Schema<InferOutput<S>>;
-unchecked<S extends StandardSchemaV1>(schema: S, structure: StandardJSONSchemaV1): Schema<InferOutput<S>>;
+unchecked<S extends StandardSchemaV1>(schema: S, structure: StandardJSONSchemaV1 | JsonSchemaDocument): Schema<InferOutput<S>>;
 ```
 
 The same codec with the validator removed: same bytes on the wire, no refinements run on either side. Cached with the codec it comes from, so calling it per message is a lookup rather than a rebuild. Accepts a `fingerprinted()` codec and keeps the envelope, prefix check included.
 
 Throws `EncodeError` for a codec that has no validator to remove. [Skipping Validation](/core-concepts/validation/#skipping-validation) covers when this is safe and what it costs.
+
+## `valibotOverride`
+
+```ts
+valibotOverride<J>(
+  convert: (schema: never, config: { overrideSchema: (context: ValibotOverrideContext) => J | undefined }) => J,
+): (context: ValibotOverrideContext) => J | undefined;
+```
+
+Fills the `overrideSchema` slot of `@valibot/to-json-schema`, so `v.date()`, `v.bigint()`, `v.set()` and `v.map()` convert to shorn's `x-shorn` keyword instead of throwing. The document it produces is a valid `structure`.
+
+```ts
+import { toJsonSchema } from "@valibot/to-json-schema";
+import { compile, valibotOverride } from "@chichurita/shorn";
+
+const structure = toJsonSchema(Person, { overrideSchema: valibotOverride(toJsonSchema) });
+const codec = compile(Person, structure);
+```
+
+`toStandardJsonSchema` takes no options, which is why the raw converter is used here. The converter is an argument rather than an import: shorn depends on no validator, and a Set inside a Set has to be converted through the same hook or the inner one would throw where the outer one did not. Zod and ArkType need none of this; shorn passes their hooks itself. See [Valibot](/validators/valibot/#rich-types).
 
 ## `fingerprinted`
 

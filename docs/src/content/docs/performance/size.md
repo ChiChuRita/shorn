@@ -95,7 +95,7 @@ Compression CPU: gzip 99.27 ms, gunzip 8.75 ms, Brotli q6 170.65 ms, unbrotli 13
 - **Declare non-negative integers.** ZigZag doubles the magnitude, so an `int` crosses every varint boundary at half the value.
 - **Use enums, not free strings**, for closed sets: one varint index against length plus content.
 - **Prefer literals** where a field is constant: zero bytes.
-- **Choose a compact timestamp form.** ISO-8601 is ~25 bytes, epoch millis 6–7. shorn will not choose for you; see [rich types](/schemas/rich-types/).
+- **Declare a timestamp as a timestamp.** `z.iso.datetime()` and `z.date()` are both 6 bytes, against about 25 for a plain string that happens to hold a date; see [rich types](/schemas/rich-types/).
 - **Choose framing deliberately.** Use a 4-byte fingerprint for persistent data. Pinned RPC can stay bare, and a fingerprint carried in a header need not be repeated in the payload.
 
 ## Reproducing

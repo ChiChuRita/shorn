@@ -997,10 +997,12 @@ describe("refusals are the same from every vendor", () => {
       message: /different input and output wire shapes|bidirectional/,
     },
     {
-      name: "a Date, which JSON Schema cannot spell",
-      zod: () => compile(z.date()),
-      valibot: () => compile(val(v.date())),
-      message: /shorn encodes the wire shape/,
+      // Zod's refusal comes from shorn's own hook, in Zod's words and with no suffix;
+      // Valibot's converter throws on its own and gets the remedy appended.
+      name: "an undefined, which has no wire form",
+      zod: () => compile(z.undefined()),
+      valibot: () => compile(val(v.undefined())),
+      message: /cannot be represented in JSON Schema|convert it at the edge/,
     },
   ];
 

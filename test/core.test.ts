@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { ObjectSchema } from "../src/core.js";
 import { DecodeError, EncodeError, encodeInto, m, Writer } from "../src/index.js";
@@ -914,5 +915,144 @@ describe("shorn core", () => {
         }),
       ).toThrow(/at user\.zip$/);
     });
+  });
+});
+
+describe("Date, bigint, Set and Map", () => {
+  const when = new Date("2026-09-03T12:00:00.000Z");
+
+  it("writes a Date as its epoch milliseconds, ZigZag like an int", () => {
+    const encoded = m.date().encode(when);
+    expect([...encoded]).toEqual([...m.int().encode(when.getTime())]);
+    expect(m.date().decode(encoded)).toEqual(when);
+    // Both ends of the range the spec allows, and the millisecond either side of zero.
+    for (const ms of [0, 1, -1, 8.64e15, -8.64e15]) {
+      expect(m.date().decode(m.date().encode(new Date(ms))).getTime()).toBe(ms);
+    }
+  });
+
+  it("refuses an Invalid Date, and anything that is not a Date", () => {
+    expect(() => m.date().encode(new Date(NaN))).toThrow(/Invalid Date/);
+    // The last one wears a Date's tag and has no `getTime`: it must be refused here, not
+    // escape as the TypeError the call would throw.
+    for (const value of ["2026-09-03", 1_725_435_678_000, null, {}, undefined, { [Symbol.toStringTag]: "Date" }]) {
+      expect(() => m.date().encode(value as never)).toThrow(EncodeError);
+    }
+  });
+
+  it("refuses a decoded millisecond count no Date can hold", () => {
+    const past = m.int().encode(8.64e15 + 1);
+    expect(() => m.date().decode(past)).toThrow(DecodeError);
+    expect(() => m.date().decode(past)).toThrow(/out of range/);
+  });
+
+  it("round-trips a bigint of any width through a canonical byte string", () => {
+    for (const value of [
+      0n, 1n, -1n, 127n, 128n, 255n, 256n, -256n, 2n ** 53n, 2n ** 63n, 2n ** 64n, -(2n ** 64n),
+      2n ** 4096n + 1n, -(2n ** 4096n),
+    ]) {
+      expect(m.bigint().decode(m.bigint().encode(value))).toBe(value);
+    }
+    expect([...m.bigint().encode(0n)]).toEqual([0]);
+    expect([...m.bigint().encode(-1n)]).toEqual([3, 1]);
+    expect([...m.bigint().encode(256n)]).toEqual([4, 0, 1]);
+    // Past the ten-byte cap the varint reader enforces, which is why it was not reused.
+    expect([...m.bigint().encode(2n ** 64n)]).toEqual([18, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+  });
+
+  it("refuses the two non-canonical bigint spellings, and a number where a bigint belongs", () => {
+    // A negative zero: sign bit set over an empty magnitude.
+    expect(() => m.bigint().decode(Uint8Array.from([1]))).toThrow(/Non-canonical bigint/);
+    // A zero high byte: `1n` written as two bytes.
+    expect(() => m.bigint().decode(Uint8Array.from([4, 1, 0]))).toThrow(/Non-canonical bigint/);
+    expect(() => m.bigint().encode(1 as never)).toThrow(/Expected a bigint, received number/);
+  });
+
+  it("writes a Set in the array layout and reads it back as a Set", () => {
+    const schema = m.set(m.string());
+    const encoded = schema.encode(new Set(["a", "b"]));
+    expect([...encoded]).toEqual([...m.array(m.string()).encode(["a", "b"])]);
+    expect(schema.decode(encoded)).toEqual(new Set(["a", "b"]));
+    expect(schema.decode(encoded)).toBeInstanceOf(Set);
+    expect(() => schema.encode(["a"] as never)).toThrow(/Expected a Set/);
+  });
+
+  it("refuses a payload that spells a Set element twice", () => {
+    expect(() => m.set(m.uint()).decode(Uint8Array.from([2, 7, 7]))).toThrow(/Duplicate Set element/);
+    // SameValueZero, as the Set itself compares: two NaNs are one element.
+    const nan = m.float64().encode(NaN);
+    expect(() => m.set(m.float64()).decode(Uint8Array.from([2, ...nan, ...nan]))).toThrow(
+      /Duplicate Set element/,
+    );
+    // Two objects are two elements however alike, since each decodes to a fresh reference.
+    const pair = m.set(m.object({ n: m.uint() })).decode(Uint8Array.from([2, 1, 1]));
+    expect(pair.size).toBe(2);
+  });
+
+  it("writes a Map as key value pairs in insertion order", () => {
+    const schema = m.map(m.string(), m.uint());
+    const value = new Map([["y", 300], ["x", 1]]);
+    const encoded = schema.encode(value);
+    expect([...encoded]).toEqual([2, 1, 121, 172, 2, 1, 120, 1]);
+    expect([...schema.decode(encoded)]).toEqual([...value]);
+    expect(() => schema.encode({ x: 1 } as never)).toThrow(/Expected a Map/);
+  });
+
+  it("refuses a payload that spells a Map key twice", () => {
+    expect(() => m.map(m.uint(), m.uint()).decode(Uint8Array.from([2, 1, 5, 1, 6]))).toThrow(
+      /Duplicate Map key/,
+    );
+  });
+
+  it("keeps the array rule for zero-width elements", () => {
+    expect(() => m.set(m.literal("x"))).toThrow(/at least one byte/);
+    expect(() => m.map(m.literal("k"), m.literal("v"))).toThrow(/at least one byte/);
+    // One zero-width half is fine: the pair still costs the other half's byte.
+    expect([...m.map(m.literal("k"), m.uint()).encode(new Map([["k", 3]]))]).toEqual([1, 3]);
+  });
+
+  it("bounds a decode by the remaining input before allocating", () => {
+    expect(() => m.set(m.uint()).decode(Uint8Array.from([200, 1, 0]))).toThrow(
+      /exceeds the remaining input/,
+    );
+    expect(() => m.map(m.uint(), m.uint()).decode(Uint8Array.from([100, 0]))).toThrow(
+      /exceeds the remaining input/,
+    );
+  });
+
+  it("accepts a Date, Set or Map minted in another realm", () => {
+    const date = runInNewContext("new Date(1725435678000)") as Date;
+    const set = runInNewContext('new Set(["a"])') as Set<string>;
+    const map = runInNewContext('new Map([["k", 1]])') as Map<string, number>;
+    expect(date instanceof Date).toBe(false);
+    expect(m.date().decode(m.date().encode(date)).getTime()).toBe(1_725_435_678_000);
+    expect(m.set(m.string()).decode(m.set(m.string()).encode(set))).toEqual(new Set(["a"]));
+    expect(m.map(m.string(), m.uint()).decode(m.map(m.string(), m.uint()).encode(map))).toEqual(
+      new Map([["k", 1]]),
+    );
+  });
+
+  it("names the element or the entry that failed", () => {
+    const schema = m.object({ tags: m.set(m.uint()), scores: m.map(m.string(), m.uint()) });
+    expect(() => schema.encode({ tags: new Set([1, -2]), scores: new Map() })).toThrow(
+      /at tags\[1\]$/,
+    );
+    expect(() =>
+      schema.encode({ tags: new Set(), scores: new Map([["a", 1], ["b", "x" as never]]) }),
+    ).toThrow(/at scores\[1\]$/);
+  });
+
+  it("writes exactly the count it declared when an element getter grows the Set", () => {
+    // A Set iterates elements added during iteration, so without the bound the payload
+    // would hold more elements than its count says and decode as trailing data.
+    const schema = m.set(m.object({ n: m.uint() }));
+    const set = new Set<{ n: number }>();
+    set.add({
+      get n() {
+        set.add({ n: 9 });
+        return 1;
+      },
+    });
+    expect(schema.decode(schema.encode(set)).size).toBe(1);
   });
 });

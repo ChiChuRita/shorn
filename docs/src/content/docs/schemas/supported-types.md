@@ -18,12 +18,19 @@ shorn supports the intersection of two sets: shapes JSON Schema can describe and
 | Null | `z.null()` | `v.null()` | `"null"` | 0 |
 | Enum | `z.enum([...])` | `v.picklist([...])` | `"'M' \| 'F'"` | varint index |
 | UUID | `z.uuid()` | `v.pipe(v.string(), v.uuid())` | `"string.uuid"` | 16 |
+| `Date` | `z.date()` | `v.date()` | `"Date"` | 6 for any current date |
+| `date-time` string | `z.iso.datetime()` | `v.pipe(v.string(), v.isoTimestamp())` | — | 6 |
+| BigInt | `z.bigint()` | `v.bigint()` | `"bigint"` | 1 + one per magnitude byte |
 
 Declare non-negative integers when possible. ZigZag doubles the encoded magnitude, so a signed `int` needs an extra byte at lower values than a `uint`.
 
 Enum members do not have to be strings: `z.enum({ Ok: 200, Missing: 404 })` is a one-byte index, not the eight bytes its numbers would otherwise cost. Members are indexed in canonical order — by value for an all-string enum, by JSON text for any other, since `<` is not a total order across mixed types.
 
-A `uuid` is stored as the 16 bytes it stands for, not the 36 characters it is written as. Those bytes have no case, so shorn encodes lowercase UUIDs only and refuses an uppercase one rather than returning a different string than it was given (RFC 4122 says to generate lowercase). It is the only string format shorn packs: a `date-time` has free fractional digits and a free offset spelling, so no timestamp reproduces the string it was parsed from.
+A `uuid` is stored as the 16 bytes it stands for, not the 36 characters it is written as. Those bytes have no case, so shorn encodes lowercase UUIDs only and refuses an uppercase one rather than returning a different string than it was given (RFC 4122 says to generate lowercase).
+
+`uuid` and `date-time` are the two string formats shorn packs; every other one is stored as its text. A `date-time` becomes the 6 bytes of the Date it names, and epoch milliseconds hold neither a fractional-digit count nor an offset spelling, so only the `toISOString()` spelling encodes and every other one is refused. ArkType has no `format: "date-time"` spelling: `"string.date.iso"` converts to a pattern, so it stays an ordinary string.
+
+A `Date` is those same 6 bytes, decoded back to a `Date`. A `bigint` is a varint header holding the magnitude's byte count and sign, then the magnitude little-endian, so it has no width limit worth naming. See [Date, BigInt, Map, Set](/schemas/rich-types/) for the vendor spellings, the Valibot recipe, and the `x-shorn` keyword all four travel on.
 
 ## Collections
 
@@ -33,8 +40,12 @@ A `uuid` is stored as the 16 bytes it stands for, not the 36 characters it is wr
 | Fixed array | `z.array(T).length(n)` | `v.pipe(v.array(T), v.length(n))` | `"T[] == n"` | elements only |
 | Tuple | `z.tuple([...])` | `v.tuple([...])` | `["string", "number"]` | elements only |
 | Tuple with rest | `z.tuple([...], T)` | `v.tupleWithRest([...], T)` | `["string", "...", "T[]"]` | fixed items + varint count + rest |
+| Set | `z.set(T)` | `v.set(T)` | refused | varint count + elements |
+| Map | `z.map(K, V)` | `v.map(K, V)` | refused | varint count + key/value pairs |
 
 An array's count is on the wire; a tuple's comes from the schema. That is why a tuple may contain zero-width elements and an array may not.
+
+A **Set** writes exactly what an array of the same elements writes, and a **Map** exactly what an array of `[key, value]` tuples writes, both in iteration order. They differ from the arrays in what they decode to and in their [fingerprint](/versioning/fingerprinting/), so a payload written as one is never read back as the other. Neither has a fixed-count form, so neither may hold a zero-width element, and the decoder refuses a duplicate element or key rather than folding it. ArkType's `Set` and `Map` keywords carry no element type and are [refused](/schemas/rejected-shapes/#arktypes-set-and-map).
 
 An array whose `minItems` equals its `maxItems` is the third case: the count is fixed by the schema, so it is not written and the element may be zero-width, exactly as in a tuple. The count is still checked against the remaining input before anything is allocated, since `minItems` may have arrived from a fetched JSON Schema — and when the element is zero-width there is no input to check it against, so the total number of slots such a schema can fill from nothing is capped at 1,000,000 across nesting instead. See [Hostile Input](/hostile-input/).
 
@@ -80,6 +91,8 @@ A recursive schema adds nothing to the wire. The cycle lives in the schema, so a
 Recursion needs a way out, and that way out is what bounds the payload — a nullable back-edge, an optional field, or an array that can be empty. A cycle without one, such as `{ next: Node }` with no `null` and no `?`, has no finite value and reports a depth error the first time it is used. Nesting is capped at **256 levels** on both sides, since depth comes from the payload rather than the schema. A linked list longer than that wants an array; recursion is for trees.
 
 A definition reached twice but never through itself is not recursive: it is inlined, and encodes and fingerprints exactly as it would written out in full.
+
+The cycle has to run through an array or an object. A recursive type reached through a `Set` or `Map` element is [refused](/schemas/rejected-shapes/#recursion-through-a-set-or-map), because that element is converted as a document of its own and a reference in it would resolve against the wrong document.
 
 A nullable marker over a recursive definition that already admits `null` is dropped rather than doubled, the same rule non-recursive shapes have always followed. Whether the cycle admits `null` cannot be answered while it is still being built, so before 0.3.0 the marker was added and then refused, and `T | null` where `T` was itself a recursive `T | null` did not compile at all.
 
@@ -134,13 +147,14 @@ Objects, arrays, and tuples nest without a per-level header — a nested object 
 
 `.min()`, `.max()`, `.regex()`, `.email()`, and `.refine()` run during encode and decode but do not change the wire format. Adding `.max(300)` does not change the [fingerprint](/versioning/fingerprinting/).
 
-Three refinements are exceptions, because each removes something the payload would otherwise carry. All three change bytes and fingerprint:
+Four refinements are exceptions, because each removes something the payload would otherwise carry. All four change bytes and fingerprint:
 
 | Refinement | JSON Schema | Effect |
 | --- | --- | --- |
 | `.nonnegative()` on an integer | `minimum >= 0` | unsigned varint instead of ZigZag |
 | `.length(n)` on an array | `minItems === maxItems` | the count is dropped |
 | `.uuid()` on a string | `format: "uuid"` | 16 bytes instead of 36 characters |
+| `z.iso.datetime()` on a string | `format: "date-time"` | 6 bytes instead of about 25 characters |
 
 ## Low-level extras
 
@@ -150,3 +164,5 @@ No JSON Schema form, so no validator selects them. They are reachable only via t
 | --- | --- | --- |
 | Raw bytes | `m.bytes()` | varint length + contents |
 | 32-bit float | `m.float32()` | 4 |
+
+`m.date()`, `m.bigint()`, `m.set()` and `m.map()` are not in this list. They travel on shorn's own `x-shorn` keyword, so a validator does select them; see [Date, BigInt, Map, Set](/schemas/rich-types/). There is no `m` builder for a `date-time` string, which `compile()` reaches through the format alone.

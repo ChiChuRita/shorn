@@ -1,9 +1,12 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from "@standard-schema/spec";
 import {
   ArraySchema,
+  BigIntSchema,
   BooleanSchema,
   canonicalEnumOrder,
   canonicalKeyOrder,
+  DateSchema,
+  DateTimeSchema,
   DecodeError,
   DynamicSchema,
   EncodeError,
@@ -13,11 +16,13 @@ import {
   IntSchema,
   LazySchema,
   LiteralSchema,
+  MapSchema,
   ObjectSchema,
   OpenObjectSchema,
   Reader,
   RecordSchema,
   Schema,
+  SetSchema,
   StringSchema,
   TupleSchema,
   UintSchema,
@@ -27,9 +32,73 @@ import {
 } from "./core.js";
 
 type JsonSchema = Record<string, unknown>;
+
+/**
+ * A JSON Schema as a plain object, the form `structure` accepts beside a Standard JSON
+ * Schema implementation. One document serves both sides, so a default or a transform
+ * cannot be expressed this way, which is what Standard JSON Schema's two methods are for.
+ *
+ * Optional keywords and no index signature, deliberately. A converter's own document
+ * type is an interface, and an interface never satisfies an index signature, so
+ * `Record<string, unknown>` would refuse exactly the object the Valibot recipe hands
+ * over. Listing the keywords instead lets any document sharing one of them through,
+ * and still turns away a `{ structure }` wrapper, which shares none. The runtime gate
+ * in `getCompiled` does the real checking.
+ */
+export interface JsonSchemaDocument {
+  readonly $schema?: unknown;
+  readonly $id?: unknown;
+  readonly $ref?: unknown;
+  readonly $defs?: unknown;
+  readonly definitions?: unknown;
+  readonly type?: unknown;
+  readonly properties?: unknown;
+  readonly required?: unknown;
+  readonly additionalProperties?: unknown;
+  readonly propertyNames?: unknown;
+  readonly items?: unknown;
+  readonly prefixItems?: unknown;
+  readonly minItems?: unknown;
+  readonly maxItems?: unknown;
+  readonly anyOf?: unknown;
+  readonly oneOf?: unknown;
+  readonly allOf?: unknown;
+  readonly not?: unknown;
+  readonly const?: unknown;
+  readonly enum?: unknown;
+  readonly format?: unknown;
+  readonly pattern?: unknown;
+  readonly minLength?: unknown;
+  readonly maxLength?: unknown;
+  readonly minimum?: unknown;
+  readonly maximum?: unknown;
+  readonly exclusiveMinimum?: unknown;
+  readonly exclusiveMaximum?: unknown;
+  readonly title?: unknown;
+  readonly description?: unknown;
+  readonly default?: unknown;
+  readonly deprecated?: unknown;
+  readonly "x-shorn"?: unknown;
+  readonly "x-shorn-key"?: unknown;
+}
+
+/**
+ * shorn's extension keyword, for the four types JSON Schema has no form for. The vendor
+ * hooks in `conversionOptions` write it, `valibotOverride` writes it for Valibot, and a
+ * hand-written document may carry it. The element of a set and the value of a map sit
+ * under `items`, as an array's element does; a map's key has a keyword of its own.
+ */
+const RICH_KEYWORD = "x-shorn";
+const RICH_KEY_KEYWORD = "x-shorn-key";
+
 type WireShape =
   | "any"
+  | "bigint"
   | "boolean"
+  | "date"
+  // A `date-time` string in the Date layout: a shape of its own, since it decodes to a
+  // string and `date` to a Date, so the two must not share a signature.
+  | "datetime"
   | "float64"
   | "int"
   | "string"
@@ -40,6 +109,10 @@ type WireShape =
   | { readonly array: WireShape; readonly length?: number }
   | { readonly enum: readonly EnumValue[] }
   | { readonly literal: string | number | boolean | null }
+  // `set` is the array layout and `map` the array-of-pairs layout, under names of their
+  // own because they decode to a Set and a Map rather than to arrays.
+  | { readonly set: WireShape }
+  | { readonly map: readonly [key: WireShape, value: WireShape] }
   | { readonly nullable: WireShape }
   | {
       readonly object: readonly WireField[];
@@ -84,10 +157,9 @@ export type EncodableStandardSchema<Input = unknown, Output = Input> =
  * separately — the extra argument on the second overload of every entry point below. One
  * alias rather than the same four lines nine times.
  */
-type StructureFor<S extends StandardSchemaV1> = StandardJSONSchemaV1<
-  StandardSchemaV1.InferInput<S>,
-  StandardSchemaV1.InferOutput<S>
->;
+type StructureFor<S extends StandardSchemaV1> =
+  | StandardJSONSchemaV1<StandardSchemaV1.InferInput<S>, StandardSchemaV1.InferOutput<S>>
+  | JsonSchemaDocument;
 
 export type SafeResult<T> = { success: true; data: T } | { success: false; error: Error };
 
@@ -529,6 +601,30 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
   // is the whole of what it means here.
   if (typeof schema.$ref === "string") return refShape(schema.$ref, ctx);
 
+  // Next, because a node carrying the keyword has no `type` either: the vendor had
+  // nothing to write there, which is the whole reason the keyword exists.
+  const rich = schema[RICH_KEYWORD];
+  if (rich !== undefined) {
+    switch (rich) {
+      case "date":
+        return "date";
+      case "bigint":
+        return "bigint";
+      case "set":
+        return { set: "items" in schema ? wireShape(asSchema(schema.items), ctx) : "any" };
+      case "map":
+        return {
+          map: [
+            RICH_KEY_KEYWORD in schema ? wireShape(asSchema(schema[RICH_KEY_KEYWORD]), ctx) : "any",
+            "items" in schema ? wireShape(asSchema(schema.items), ctx) : "any",
+          ],
+        };
+    }
+    throw new EncodeError(
+      `Unsupported ${RICH_KEYWORD} kind ${typeof rich === "string" ? rich : typeof rich}`,
+    );
+  }
+
   // `anyOf` and `oneOf` differ in whether the branches may overlap, which is a
   // validation question the vendor has already answered by the time shorn runs.
   // Zod writes a plain union as `anyOf` and a discriminated one as `oneOf`; both
@@ -612,10 +708,10 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
 
   switch (schema.type) {
     case "string":
-      // The only string format whose text is fully recoverable from its value: a
-      // `date-time`'s fractional digits and offset spelling are free, so no timestamp
-      // reproduces the string it was parsed from.
-      return schema.format === "uuid" ? "uuid" : "string";
+      // The two formats with a packed form. Neither text is fully recoverable from its
+      // value, so both schemas accept only the one spelling that survives the trip and
+      // refuse the rest at encode; `UuidSchema` and `DateTimeSchema` say which.
+      return schema.format === "uuid" ? "uuid" : schema.format === "date-time" ? "datetime" : "string";
     case "boolean":
       return "boolean";
     case "null":
@@ -729,7 +825,10 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
 /** Every scalar shape to its schema. The key type is what keeps this exhaustive. */
 const SCALAR_SCHEMAS: Record<Extract<WireShape, string>, new () => Schema<unknown>> = {
   any: DynamicSchema,
+  bigint: BigIntSchema,
   boolean: BooleanSchema,
+  date: DateSchema,
+  datetime: DateTimeSchema,
   float64: Float64Schema,
   int: IntSchema,
   string: StringSchema,
@@ -757,6 +856,13 @@ function compileWireShape(shape: WireShape, lazies?: Lazies): Schema<unknown> {
     );
   }
   if ("record" in shape) return new RecordSchema(compileWireShape(shape.record, lazies));
+  if ("set" in shape) return new SetSchema(compileWireShape(shape.set, lazies));
+  if ("map" in shape) {
+    return new MapSchema(
+      compileWireShape(shape.map[0], lazies),
+      compileWireShape(shape.map[1], lazies),
+    );
+  }
   if ("union" in shape) {
     const branches = shape.union.map((branch) => compileWireShape(branch, lazies));
     // Without a discriminant the cases are JSON type names and the key is absent; the
@@ -823,6 +929,218 @@ function hasJsonSchema(value: StandardSchemaV1): value is EncodableStandardSchem
   return "jsonSchema" in value["~standard"];
 }
 
+/** Either form `structure` takes. */
+type Structure = StandardJSONSchemaV1 | JsonSchemaDocument;
+
+function isStandardJsonSchema(structure: Structure): structure is StandardJSONSchemaV1 {
+  return "~standard" in structure;
+}
+
+type Side = "input" | "output";
+
+/** Whether a document points anywhere, which a child converted on its own must not. */
+function holdsRef(node: unknown): boolean {
+  if (typeof node !== "object" || node === null) return false;
+  if (!Array.isArray(node) && typeof (node as JsonSchema).$ref === "string") return true;
+  return Object.values(node).some(holdsRef);
+}
+
+/**
+ * A Standard Schema's own JSON Schema, for the element of a set or the key or value of a
+ * map: Zod's generator writes `{}` for the container and never descends, so the child is
+ * converted as a document of its own and inlined where `items` would go. That is also
+ * why a `$ref` anywhere in it is refused: it would resolve against the root document,
+ * where its target is not.
+ *
+ * `converting` is the recursion guard. The override runs after Zod has traversed the
+ * whole document, so a set whose element is the enclosing type would convert the type,
+ * reach the set, and convert the type again without end.
+ */
+function childJsonSchema(child: unknown, io: Side, converting: Set<unknown>): JsonSchema {
+  const recursion =
+    "A recursive type inside a Set or Map is not supported; hold the recursion in an array or an object instead";
+  if (converting.has(child)) throw new EncodeError(recursion);
+  const std = (child as { readonly "~standard"?: EncodableStandardSchema["~standard"] })["~standard"];
+  if (std?.jsonSchema === undefined) {
+    throw new EncodeError("A Set or Map element has no Standard JSON Schema of its own");
+  }
+  converting.add(child);
+  try {
+    const document = asSchema(std.jsonSchema[io](conversionOptions(std.vendor, io, converting)));
+    if (holdsRef(document)) throw new EncodeError(recursion);
+    return document;
+  } finally {
+    converting.delete(child);
+  }
+}
+
+interface ZodOverrideContext {
+  readonly zodSchema: {
+    readonly _zod: {
+      readonly def: {
+        readonly type: string;
+        readonly values?: readonly unknown[];
+        readonly keyType?: unknown;
+        readonly valueType?: unknown;
+      };
+    };
+  };
+  readonly jsonSchema: JsonSchema;
+}
+
+/**
+ * Zod's hook, one per side. Zod tests `unrepresentable` before it runs any override, so
+ * the test is turned off and this does its work: the four types shorn encodes are
+ * tagged with the keyword, and everything else the test would have thrown for is thrown
+ * for here, in Zod's words, so that a `z.undefined()` field is refused exactly as it was.
+ */
+function zodOverride(io: Side, converting: Set<unknown>): (context: ZodOverrideContext) => void {
+  return (context) => {
+    const def = context.zodSchema._zod.def;
+    const json = context.jsonSchema;
+    switch (def.type) {
+      case "date":
+      case "bigint":
+        json[RICH_KEYWORD] = def.type;
+        return;
+      case "set":
+        json[RICH_KEYWORD] = "set";
+        json.items = childJsonSchema(def.valueType, io, converting);
+        return;
+      case "map":
+        json[RICH_KEYWORD] = "map";
+        json[RICH_KEY_KEYWORD] = childJsonSchema(def.keyType, io, converting);
+        json.items = childJsonSchema(def.valueType, io, converting);
+        return;
+      case "literal":
+        // With the test off, Zod drops an `undefined` member and writes a bigint one as a
+        // number; either would come back as a different value than was declared.
+        if (def.values?.some((value) => value === undefined || typeof value === "bigint")) {
+          throw new EncodeError("A literal undefined or bigint cannot be represented in JSON Schema");
+        }
+        return;
+      case "undefined":
+      case "void":
+      case "symbol":
+      case "nan":
+      case "custom":
+      case "function":
+      case "transform":
+        throw new EncodeError(`${def.type} cannot be represented in JSON Schema`);
+    }
+  };
+}
+
+/**
+ * ArkType's hook, keyed by the code it would otherwise throw for; a code not named here
+ * keeps ArkType's own throw. `Set` and `Map` are keywords there but carry no element
+ * type, so there is nothing to write under `items`, and they are refused by name rather
+ * than encoded as empty containers.
+ */
+const ARKTYPE_FALLBACK = {
+  date: (context: { readonly base: JsonSchema }) => ({ ...context.base, [RICH_KEYWORD]: "date" }),
+  domain: (context: { readonly base: JsonSchema; readonly domain: string }) => {
+    if (context.domain === "bigint") return { ...context.base, [RICH_KEYWORD]: "bigint" };
+    throw new EncodeError(`${context.domain} cannot be represented in JSON Schema`);
+  },
+  proto: (context: { readonly proto: { readonly name: string } }) => {
+    const name = context.proto.name;
+    throw new EncodeError(
+      name === "Set" || name === "Map"
+        ? `ArkType's ${name} carries no element type, so there is nothing to encode its members as; convert it at the edge`
+        : `${name} cannot be represented in JSON Schema`,
+    );
+  },
+};
+
+/**
+ * What each vendor's Standard JSON Schema method is asked for. The target is the same
+ * everywhere; the library options are how a vendor is made to describe the four types
+ * JSON Schema cannot, and only a vendor known to read them is handed any.
+ */
+function conversionOptions(
+  vendor: string,
+  io: Side,
+  converting: Set<unknown>,
+): StandardJSONSchemaV1.Options {
+  const target = "draft-2020-12";
+  if (vendor === "zod") {
+    return {
+      target,
+      libraryOptions: { unrepresentable: "any", override: zodOverride(io, converting) },
+    };
+  }
+  if (vendor === "arktype") return { target, libraryOptions: { fallback: ARKTYPE_FALLBACK } };
+  return { target };
+}
+
+export interface ValibotOverrideContext {
+  readonly valibotSchema: { readonly type: string };
+}
+
+/**
+ * For Valibot's `overrideSchema` slot. Valibot's Standard JSON Schema wrapper takes no
+ * options, so its Date, bigint, Set and Map can be tagged only through the raw converter,
+ * which also returns a plain document; pass that to `compile` as the structure:
+ *
+ *     compile(schema, toJsonSchema(schema, { overrideSchema: valibotOverride(toJsonSchema) }))
+ *
+ * The converter is an argument rather than an import: shorn depends on no validator, and
+ * the element of a set has to be converted through the same hook, or a set inside a set
+ * would throw where the outer one did not. `J` is the converter's own document type, so
+ * the returned function fits the slot without shorn having to name that type.
+ */
+export function valibotOverride<J>(
+  convert: (
+    schema: never,
+    config: { readonly overrideSchema: (context: ValibotOverrideContext) => J | undefined },
+  ) => J,
+): (context: ValibotOverrideContext) => J | undefined {
+  // The recursion guard `childJsonSchema` keeps for Zod, by depth rather than identity:
+  // a Valibot object getter builds a fresh `v.set(v.lazy(...))` on every access, so no
+  // schema object ever recurs, and the converter would be asked for the enclosing type
+  // without end and leave as a stack overflow rather than a refusal. Sixty-four nested
+  // Sets and Maps is not a schema anyone writes; a cycle reaches it at once.
+  let depth = 0;
+  const inner = (child: unknown): unknown => {
+    if (depth >= 64) {
+      throw new EncodeError(
+        "A recursive type inside a Set or Map is not supported; hold the recursion in an array or an object instead",
+      );
+    }
+    depth++;
+    try {
+      return (convert as (schema: unknown, config: unknown) => unknown)(child, {
+        overrideSchema: override,
+      });
+    } finally {
+      depth--;
+    }
+  };
+  const override = (context: ValibotOverrideContext): J | undefined => {
+    const schema = context.valibotSchema as {
+      readonly type: string;
+      readonly key?: unknown;
+      readonly value?: unknown;
+    };
+    switch (schema.type) {
+      case "date":
+      case "bigint":
+        return { [RICH_KEYWORD]: schema.type } as J;
+      case "set":
+        return { [RICH_KEYWORD]: "set", items: inner(schema.value) } as J;
+      case "map":
+        return {
+          [RICH_KEYWORD]: "map",
+          [RICH_KEY_KEYWORD]: inner(schema.key),
+          items: inner(schema.value),
+        } as J;
+    }
+    return undefined;
+  };
+  return override;
+}
+
 function buildCodec<S extends EncodableStandardSchema>(
   schema: S,
 ): StandardBackedSchema<StandardSchemaV1.InferOutput<S>>;
@@ -832,7 +1150,7 @@ function buildCodec<S extends StandardSchemaV1>(
 ): StandardBackedSchema<StandardSchemaV1.InferOutput<S>>;
 function buildCodec(
   schema: StandardSchemaV1,
-  structure?: StandardJSONSchemaV1,
+  structure?: Structure,
 ): StandardBackedSchema<unknown> {
   const structuralSchema = structure ?? (hasJsonSchema(schema) ? schema : undefined);
   if (structuralSchema === undefined) {
@@ -841,24 +1159,28 @@ function buildCodec(
     );
   }
 
-  // Every vendor throws here on Date, BigInt, Map, Set, undefined and NaN, since JSON
-  // Schema has no form for them. Unwrapped, that error never mentions shorn or says
-  // what to do instead, so the vendor's reason is kept and the remedy appended.
   let inputJsonSchema: unknown;
   let outputJsonSchema: unknown;
-  try {
-    inputJsonSchema = structuralSchema["~standard"].jsonSchema.input({
-      target: "draft-2020-12",
-    });
-    outputJsonSchema = structuralSchema["~standard"].jsonSchema.output({
-      target: "draft-2020-12",
-    });
-  } catch (error) {
-    // A pointer, not a tutorial: inlining the README recipe measured 112 gzip bytes.
-    throw new EncodeError(
-      `${error instanceof Error ? error.message : String(error)} — shorn encodes the wire shape; convert rich types at the edge (README: Dates, BigInt, Map and Set)`,
-      { cause: error },
-    );
+  if (isStandardJsonSchema(structuralSchema)) {
+    // What a vendor still throws on here — undefined, NaN, a symbol, a transform — is a
+    // value with no wire form at all. Unwrapped, that error never mentions shorn or says
+    // what to do instead, so the vendor's reason is kept and the remedy appended.
+    const std = structuralSchema["~standard"];
+    const converting = new Set<unknown>();
+    try {
+      inputJsonSchema = std.jsonSchema.input(conversionOptions(std.vendor, "input", converting));
+      outputJsonSchema = std.jsonSchema.output(conversionOptions(std.vendor, "output", converting));
+    } catch (error) {
+      // A refusal from inside one of shorn's own hooks already says what to do.
+      if (error instanceof EncodeError) throw error;
+      throw new EncodeError(
+        `${error instanceof Error ? error.message : String(error)} (shorn has no wire form for this value; convert it at the edge, see Rejected Shapes)`,
+        { cause: error },
+      );
+    }
+  } else {
+    // A plain document describes one shape, and so both sides.
+    inputJsonSchema = outputJsonSchema = structuralSchema;
   }
   const inputShape = toWireShape(asSchema(inputJsonSchema));
   const outputShape = toWireShape(asSchema(outputJsonSchema));
@@ -904,19 +1226,33 @@ function assertStandardSchema(schema: unknown): asserts schema is StandardSchema
   );
 }
 
-function getCompiled(
-  schema: StandardSchemaV1,
-  structure?: StandardJSONSchemaV1,
-): StandardBackedSchema<unknown> {
+/**
+ * What marks a plain object as a JSON Schema rather than a mistake. A `{ structure }`
+ * wrapper, or a validator passed twice, carries none of these and would otherwise read
+ * as an empty schema, compile to a dynamic value, and appear to work.
+ */
+const JSON_SCHEMA_KEYWORDS = [
+  "$schema", "$ref", "type", "anyOf", "oneOf", "const", "enum", "properties", RICH_KEYWORD,
+];
+
+function getCompiled(schema: StandardSchemaV1, structure?: Structure): StandardBackedSchema<unknown> {
   assertStandardSchema(schema);
-  // The structure argument gets the same gate as the schema, or a wrong shape here —
-  // a raw JSON Schema, or a `{ structure }` wrapper object — surfaces as a raw
-  // TypeError wrapped in the rich-types remedy, which points away from the fix.
+  // The structure argument gets the same gate as the schema, or a wrong shape here
+  // surfaces as a raw TypeError from deep in the conversion, which points away from
+  // the fix. A Standard JSON Schema implementation and a plain document both pass.
   if (structure !== undefined) {
-    const std = (structure as { "~standard"?: unknown })["~standard"];
-    if (typeof std !== "object" || std === null || !("jsonSchema" in std)) {
+    const std =
+      typeof structure === "object" && structure !== null
+        ? (structure as { readonly "~standard"?: unknown })["~standard"]
+        : null;
+    if (
+      std === null ||
+      (std === undefined
+        ? !JSON_SCHEMA_KEYWORDS.some((keyword) => keyword in structure)
+        : typeof std !== "object" || !("jsonSchema" in std))
+    ) {
       throw new EncodeError(
-        "The second argument must be a Standard JSON Schema implementation — toStandardJsonSchema(schema) for Valibot",
+        "The second argument must be a Standard JSON Schema implementation (toStandardJsonSchema(schema) for Valibot) or a JSON Schema document",
       );
     }
   }
@@ -949,7 +1285,7 @@ export function compile<S extends StandardSchemaV1>(
 ): Schema<StandardSchemaV1.InferOutput<S>>;
 export function compile(
   schema: StandardSchemaV1,
-  structure?: StandardJSONSchemaV1,
+  structure?: Structure,
 ): Schema<unknown> {
   return getCompiled(schema, structure);
 }
@@ -982,7 +1318,7 @@ export function unchecked<S extends StandardSchemaV1>(
 ): Schema<StandardSchemaV1.InferOutput<S>>;
 export function unchecked(
   schemaOrCodec: StandardSchemaV1 | Schema<unknown>,
-  structure?: StandardJSONSchemaV1,
+  structure?: Structure,
 ): Schema<unknown> {
   const codec =
     schemaOrCodec instanceof Schema ? schemaOrCodec : getCompiled(schemaOrCodec, structure);
@@ -1010,7 +1346,7 @@ export function encode<S extends StandardSchemaV1>(
 export function encode(
   schema: StandardSchemaV1,
   value: unknown,
-  structure?: StandardJSONSchemaV1,
+  structure?: Structure,
 ): Uint8Array {
   return getCompiled(schema, structure).encode(value);
 }
@@ -1027,7 +1363,7 @@ export function decode<S extends StandardSchemaV1>(
 export function decode(
   schema: StandardSchemaV1,
   value: Uint8Array,
-  structure?: StandardJSONSchemaV1,
+  structure?: Structure,
 ): unknown {
   return getCompiled(schema, structure).decode(value);
 }
@@ -1044,7 +1380,7 @@ export function safeEncode<S extends StandardSchemaV1>(
 export function safeEncode(
   schema: StandardSchemaV1,
   value: unknown,
-  structure?: StandardJSONSchemaV1,
+  structure?: Structure,
 ): SafeResult<Uint8Array> {
   return safely(() => getCompiled(schema, structure).encode(value));
 }
@@ -1061,7 +1397,7 @@ export function safeDecode<S extends StandardSchemaV1>(
 export function safeDecode(
   schema: StandardSchemaV1,
   value: Uint8Array,
-  structure?: StandardJSONSchemaV1,
+  structure?: Structure,
 ): SafeResult<unknown> {
   return safely(() => getCompiled(schema, structure).decode(value));
 }
@@ -1075,7 +1411,7 @@ export function safeDecode(
  */
 function asyncParts(
   schemaOrCodec: StandardSchemaV1 | Schema<unknown>,
-  jsonSchema: StandardJSONSchemaV1 | undefined,
+  jsonSchema: Structure | undefined,
 ): readonly [source: StandardSchemaV1<unknown, unknown>, structure: Schema<unknown>] {
   const codec =
     schemaOrCodec instanceof Schema ? schemaOrCodec : getCompiled(schemaOrCodec, jsonSchema);
@@ -1104,7 +1440,7 @@ export async function encodeAsync<S extends StandardSchemaV1>(
 export async function encodeAsync(
   schema: StandardSchemaV1 | Schema<unknown>,
   value: unknown,
-  jsonSchema?: StandardJSONSchemaV1,
+  jsonSchema?: Structure,
 ): Promise<Uint8Array> {
   const [source, structure] = asyncParts(schema, jsonSchema);
   return structure.encode(await validateAsync(source, value));
@@ -1123,7 +1459,7 @@ export async function decodeAsync<S extends StandardSchemaV1>(
 export async function decodeAsync(
   schema: StandardSchemaV1 | Schema<unknown>,
   value: Uint8Array,
-  jsonSchema?: StandardJSONSchemaV1,
+  jsonSchema?: Structure,
 ): Promise<unknown> {
   const [source, structure] = asyncParts(schema, jsonSchema);
   // The public `decode`: a private structural decode stood here and rebuilt the same

@@ -36,12 +36,15 @@ const TIMEOUT = Math.max(10_000, CASES * 30);
 const breathe = (seed: number): Promise<void> | undefined =>
   seed % 500 === 0 ? new Promise<void>((resolve) => setTimeout(resolve, 0)) : undefined;
 
-describe("property: generated schemas crossed with generated values", { timeout: TIMEOUT }, () => {
+// Twice: over the corpus every seed here was found against, and over the one that also
+// draws Date, bigint, Set and Map. Each invariant has to hold for both.
+for (const rich of [false, true])
+describe(`property: generated schemas crossed with generated values${rich ? ", rich types included" : ""}`, { timeout: TIMEOUT }, () => {
   it("round-trips, and encode after decode is a fixed point", async () => {
     for (let seed = 1; seed <= CASES; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed);
-      const gen = schemaGen(rng, 4);
+      const gen = schemaGen(rng, 4, false, rich);
       const value = gen.sample(rng);
 
       let bytes: Uint8Array;
@@ -62,7 +65,7 @@ describe("property: generated schemas crossed with generated values", { timeout:
     for (let seed = 1; seed <= CASES; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 7919);
-      const gen = schemaGen(rng, 4);
+      const gen = schemaGen(rng, 4, false, rich);
       const value = gen.sample(rng);
       const first = gen.schema.encode(value);
       const second = gen.schema.encode(value);
@@ -76,7 +79,11 @@ describe("property: generated schemas crossed with generated values", { timeout:
     // construct the same record differently would produce different bytes.
     const reinsert = (value: unknown): unknown => {
       if (Array.isArray(value)) return value.map(reinsert);
-      if (value instanceof Uint8Array) return value;
+      // A Set's and a Map's order is their own and reaches the wire by design; a Date
+      // has no keys to reinsert.
+      if (value instanceof Uint8Array || value instanceof Date || value instanceof Set || value instanceof Map) {
+        return value;
+      }
       if (value === null || typeof value !== "object") return value;
       const clone: Record<string, unknown> = {};
       const record = value as Record<string, unknown>;
@@ -96,7 +103,7 @@ describe("property: generated schemas crossed with generated values", { timeout:
     for (let seed = 1; seed <= CASES; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 31);
-      const gen = schemaGen(rng, 4);
+      const gen = schemaGen(rng, 4, false, rich);
       const value = gen.sample(rng);
       expect([...gen.schema.encode(reinsert(value))], `seed ${seed}`).toEqual([
         ...gen.schema.encode(value),
@@ -108,7 +115,7 @@ describe("property: generated schemas crossed with generated values", { timeout:
     for (let seed = 1; seed <= CASES; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 104_729);
-      const gen = schemaGen(rng, 4);
+      const gen = schemaGen(rng, 4, false, rich);
       const bytes = gen.schema.encode(gen.sample(rng));
 
       const variants: Uint8Array[] = [];
@@ -144,7 +151,7 @@ describe("property: generated schemas crossed with generated values", { timeout:
     for (let seed = 1; seed <= CASES; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 65_537);
-      const gen = schemaGen(rng, 4);
+      const gen = schemaGen(rng, 4, false, rich);
       for (let attempt = 0; attempt < 20; attempt++) {
         const length = below(rng, 64);
         const bytes = Uint8Array.from({ length }, () =>
@@ -171,7 +178,7 @@ describe("property: generated schemas crossed with generated values", { timeout:
     for (let seed = 1; seed <= CASES; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 999_983);
-      const gen = schemaGen(rng, 4, true);
+      const gen = schemaGen(rng, 4, true, rich);
       const bytes = gen.schema.encode(gen.sample(rng));
       expect(countArrayElements(gen.schema.decode(bytes)), `seed ${seed}`).toBeLessThanOrEqual(
         bytes.length,
@@ -222,7 +229,7 @@ describe("property: generated schemas crossed with generated values", { timeout:
     for (let seed = 1; seed <= CASES; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 15_485_863);
-      const gen = schemaGen(rng, 4);
+      const gen = schemaGen(rng, 4, false, rich);
       const value = gen.sample(rng);
       const found = positions(value, "");
       // A leaf schema, or an empty container: no position for a path to name.

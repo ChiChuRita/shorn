@@ -61,10 +61,16 @@ export function canonicalEnumOrder(values: readonly EnumValue[]): EnumValue[] {
  * and not written back.
  */
 function isUint8Array(value: unknown): value is Uint8Array {
-  return (
-    value instanceof Uint8Array ||
-    Object.prototype.toString.call(value) === "[object Uint8Array]"
-  );
+  return value instanceof Uint8Array || hasTag(value, "[object Uint8Array]");
+}
+
+/**
+ * The realm-tolerant half of a type test, for the reason above: a Date, Set or Map
+ * from another realm fails `instanceof` too. Callers try `instanceof` first, so a
+ * same-realm value never reaches the `toString` call.
+ */
+function hasTag(value: unknown, tag: string): boolean {
+  return Object.prototype.toString.call(value) === tag;
 }
 
 const textEncoder = new TextEncoder();
@@ -1327,6 +1333,139 @@ export class UuidSchema extends Schema<string> {
   }
 }
 
+/**
+ * The widest time value a `Date` can hold, from the spec's TimeClip: anything past it
+ * is an Invalid Date, so a decoded millisecond count beyond it names no Date at all.
+ */
+const MAX_DATE_MS = 8.64e15;
+
+/**
+ * A `Date` as its epoch milliseconds, ZigZag varint like an `int`: 6 bytes for any date
+ * this century, fewer near 1970, and exact, since a Date holds nothing finer than a
+ * millisecond. Delegated to `IntSchema` rather than to `writer.varuint` directly because
+ * the ZigZag of a date near either end of the range leaves the safe-integer range, and
+ * that class already has the BigInt tail for it.
+ *
+ * Invalid Date is refused: its time value is NaN, which no integer holds.
+ */
+export class DateSchema extends Schema<Date> {
+  private readonly ints = new IntSchema();
+
+  _encode(writer: Writer, value: Date): void {
+    // The tag can be forged with `Symbol.toStringTag`, and a forgery has no `getTime`;
+    // without the third test the call below escaped as a TypeError rather than this.
+    if (
+      !(
+        value instanceof Date ||
+        (hasTag(value, "[object Date]") && typeof (value as Date).getTime === "function")
+      )
+    ) {
+      throw new EncodeError(`Expected a Date, received ${text(value)}`);
+    }
+    const ms = value.getTime();
+    if (Number.isNaN(ms)) throw new EncodeError("Expected a valid Date, received an Invalid Date");
+    this.ints._encode(writer, ms);
+  }
+
+  _decode(reader: Reader): Date {
+    const ms = this.ints._decode(reader);
+    if (ms > MAX_DATE_MS || ms < -MAX_DATE_MS) {
+      throw new DecodeError(`Date value ${ms} is out of range`, reader.position);
+    }
+    return new Date(ms);
+  }
+}
+
+/**
+ * A `format: "date-time"` string as the Date it names, 6 bytes rather than 24 to 30
+ * characters. Reached only from `compile()`, so `m` does not carry it.
+ *
+ * Canonical spelling only, refused rather than normalized, for `UuidSchema`'s reason:
+ * epoch milliseconds cannot hold a fractional-digit count or an offset, so only the
+ * string `toISOString` would write survives the trip, and returning that one for any
+ * other spelling would make `decode(encode(x))` differ from `x`.
+ */
+export class DateTimeSchema extends Schema<string> {
+  private readonly dates = new DateSchema();
+
+  _encode(writer: Writer, value: string): void {
+    if (typeof value !== "string") {
+      throw new EncodeError(`Expected an ISO-8601 date-time string, received ${typeof value}`);
+    }
+    // `toISOString` throws on an Invalid Date, so the NaN test has to come first.
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()) || date.toISOString() !== value) {
+      throw new EncodeError(
+        `Expected a canonical ISO-8601 date-time (the toISOString() spelling), received ${value}`,
+      );
+    }
+    this.dates._encode(writer, date);
+  }
+
+  _decode(reader: Reader): string {
+    return this.dates._decode(reader).toISOString();
+  }
+}
+
+/**
+ * A `bigint` of any size: a varint header holding the magnitude's byte count doubled
+ * plus the sign bit, then the magnitude little-endian with no high zero byte. Zero is
+ * the single header byte `0`. The varint path was not reused because its reader caps
+ * at ten bytes, and that cap is a hostile-input defence worth keeping.
+ *
+ * Canonical on both sides: a header of `1` (negative zero) and a zero high byte are
+ * refused on decode, since either would give one value two encodings.
+ *
+ * Through hex text in both directions. `toString(16)` and `BigInt("0x…")` are native
+ * and linear in the width, where a shift-and-mask loop in BigInt arithmetic allocates
+ * a fresh BigInt per byte and goes quadratic; `hexNibble` and `hexPairTable` are
+ * already here for UUIDs.
+ */
+export class BigIntSchema extends Schema<bigint> {
+  _encode(writer: Writer, value: bigint): void {
+    if (typeof value !== "bigint") {
+      throw new EncodeError(`Expected a bigint, received ${typeof value}`);
+    }
+    const negative = value < 0n;
+    let hex = (negative ? -value : value).toString(16);
+    if (hex === "0") return writer.byte(0);
+    if (hex.length % 2 === 1) hex = `0${hex}`;
+    const count = hex.length / 2;
+    if (count > MAX_BYTE_LENGTH) throw new EncodeError("BigInt is too large");
+    writer.varuint(count * 2 + (negative ? 1 : 0));
+    // Little-endian, so the last hex pair is the lowest byte and goes first.
+    for (let index = hex.length - 2; index >= 0; index -= 2) {
+      writer.byte((hexNibble(hex.charCodeAt(index)) << 4) | hexNibble(hex.charCodeAt(index + 1)));
+    }
+  }
+
+  _decode(reader: Reader): bigint {
+    const header = reader.varuint();
+    // `& 1` keeps the low bit of any integer, as `IntSchema` notes; halving is exact.
+    const negative = (header & 1) === 1;
+    const count = (header - (negative ? 1 : 0)) / 2;
+    if (count === 0) {
+      if (negative) throw new DecodeError("Non-canonical bigint", reader.position);
+      return 0n;
+    }
+    // `bytes` enforces the 64 MiB ceiling and the remaining-input check, before a single
+    // hex digit is built: a header claiming 64 MiB over two bytes of input is refused here.
+    //
+    // ponytail: at the ceiling the hex text is 128M UTF-16 units, about 256 MB transient,
+    // and `BigInt("0x…")` holds a second copy while it parses. Bounded by an input that
+    // has to carry the 64 MiB itself; a 1 MiB magnitude round-trips in about 40 ms.
+    // Chunked parsing (shift-and-or over 32-bit words from the top) would cap the
+    // transient at the result's own size if a caller ever ships magnitudes that large.
+    const bytes = reader.bytes(count);
+    if (bytes[count - 1] === 0) throw new DecodeError("Non-canonical bigint", reader.position);
+    const hex = hexPairTable();
+    let digits = "";
+    for (let index = count - 1; index >= 0; index--) digits += hex[bytes[index]!];
+    const magnitude = BigInt(`0x${digits}`);
+    return negative ? -magnitude : magnitude;
+  }
+}
+
 export class ArraySchema<T> extends Schema<T[]> {
   /**
    * `length` is the element count when the schema fixes it — `minItems` equal to
@@ -1414,6 +1553,148 @@ export class ArraySchema<T> extends Schema<T[]> {
     const values = new Array<T>(length);
     for (let index = 0; index < length; index++) values[index] = item._decode(reader);
     return values;
+  }
+}
+
+/**
+ * A `Set` in the array layout: a varint count, then the elements in iteration order.
+ * Same bytes as `ArraySchema` over the same element, so a Set costs what an array
+ * costs; the two differ in what they decode to and in their signature.
+ *
+ * A duplicate element on decode is refused rather than folded: `new Set` would collapse
+ * the pair, and the value would re-encode to one element for a payload that held two,
+ * which is the injectivity every other shape keeps. Only a primitive can trip it, since
+ * every decoded object is a fresh reference.
+ */
+export class SetSchema<T> extends Schema<Set<T>> {
+  constructor(private readonly item: Schema<T>) {
+    super();
+    // The array rule, for the array's reason: a zero-width element decouples the count
+    // from the input, so three bytes could declare a million of them. A Set has no
+    // fixed-count form to exempt.
+    if (item._minWidth === 0) throw new EncodeError("Set elements must occupy at least one byte");
+  }
+
+  _encode(writer: Writer, value: Set<T>): void {
+    if (!(value instanceof Set || hasTag(value, "[object Set]"))) {
+      throw new EncodeError("Expected a Set");
+    }
+    const size = value.size;
+    if (size > MAX_COLLECTION_LENGTH) throw new EncodeError("Set is too large");
+    writer.varuint(size);
+    // Bounded by the count already written, as `ArraySchema` bounds its loop: a Set
+    // iterates elements added during iteration, so an element getter that adds one
+    // would otherwise write more elements than the count declared. Fewer is caught
+    // after the loop, since a deletion mid-way leaves the payload short.
+    const item = this.item;
+    let written = 0;
+    for (const element of value) {
+      if (written === size) break;
+      item._encode(writer, element);
+      written++;
+    }
+    if (written !== size) throw new EncodeError("Set changed size during encode");
+  }
+
+  override _failingChild(value: unknown): FailingChild | undefined {
+    if (!(value instanceof Set)) return undefined;
+    return firstFailing(
+      Array.from(value, (element, index) => ({
+        schema: this.item,
+        segment: `[${index}]`,
+        value: element,
+      })),
+    );
+  }
+
+  _decode(reader: Reader): Set<T> {
+    const item = this.item;
+    const size = reader.varuint();
+    if (size > MAX_COLLECTION_LENGTH) {
+      throw new DecodeError(`Set size ${size} exceeds the limit`, reader.position);
+    }
+    if (size * item._minWidth > reader.remaining) {
+      throw new DecodeError(`Set size ${size} exceeds the remaining input`, reader.position);
+    }
+    const result = new Set<T>();
+    for (let index = 0; index < size; index++) {
+      const element = item._decode(reader);
+      // `add` turns `-0` into `+0`, so a `-0` on the wire would re-encode as `+0` and
+      // no Set built in JS could have written it. `element === 0` leads for
+      // `EnumSchema`'s reason: it keeps the `Object.is` call off every non-zero element.
+      if (result.has(element) || (element === 0 && Object.is(element, -0))) {
+        throw new DecodeError("Duplicate Set element", reader.position);
+      }
+      result.add(element);
+    }
+    return result;
+  }
+}
+
+/**
+ * A `Map` in the layout of an array of pairs: a varint count, then each key followed by
+ * its value, in iteration order. Keys may be any schema, since a Map's may be anything.
+ * A duplicate key on decode is refused for `SetSchema`'s reason.
+ */
+export class MapSchema<K, V> extends Schema<Map<K, V>> {
+  constructor(private readonly key: Schema<K>, private readonly value: Schema<V>) {
+    super();
+    if (key._minWidth + value._minWidth === 0) {
+      throw new EncodeError("Map entries must occupy at least one byte");
+    }
+  }
+
+  _encode(writer: Writer, value: Map<K, V>): void {
+    if (!(value instanceof Map || hasTag(value, "[object Map]"))) {
+      throw new EncodeError("Expected a Map");
+    }
+    const size = value.size;
+    if (size > MAX_COLLECTION_LENGTH) throw new EncodeError("Map is too large");
+    writer.varuint(size);
+    // Bounded as `SetSchema` bounds its loop, and for the same reason.
+    const keys = this.key;
+    const values = this.value;
+    let written = 0;
+    for (const [entryKey, entryValue] of value) {
+      if (written === size) break;
+      keys._encode(writer, entryKey);
+      values._encode(writer, entryValue);
+      written++;
+    }
+    if (written !== size) throw new EncodeError("Map changed size during encode");
+  }
+
+  /** Both halves of an entry under one segment: a key is data, not a path. */
+  override _failingChild(value: unknown): FailingChild | undefined {
+    if (!(value instanceof Map)) return undefined;
+    return firstFailing(
+      Array.from(value, ([entryKey, entryValue], index) => [
+        { schema: this.key, segment: `[${index}]`, value: entryKey },
+        { schema: this.value, segment: `[${index}]`, value: entryValue },
+      ]).flat(),
+    );
+  }
+
+  _decode(reader: Reader): Map<K, V> {
+    const keys = this.key;
+    const values = this.value;
+    const size = reader.varuint();
+    if (size > MAX_COLLECTION_LENGTH) {
+      throw new DecodeError(`Map size ${size} exceeds the limit`, reader.position);
+    }
+    if (size * (keys._minWidth + values._minWidth) > reader.remaining) {
+      throw new DecodeError(`Map size ${size} exceeds the remaining input`, reader.position);
+    }
+    const result = new Map<K, V>();
+    for (let index = 0; index < size; index++) {
+      const entryKey = keys._decode(reader);
+      // A `-0` key is refused for `SetSchema`'s reason: `set` would store it as `+0`.
+      if (result.has(entryKey) || (entryKey === 0 && Object.is(entryKey, -0))) {
+        throw new DecodeError("Duplicate Map key", reader.position);
+      }
+      result.set(entryKey, values._decode(reader));
+    }
+    return result;
   }
 }
 
@@ -2365,11 +2646,15 @@ export const m = {
   int: (): Schema<number> => new IntSchema(),
   float32: (): Schema<number> => new Float32Schema(),
   float64: (): Schema<number> => new Float64Schema(),
+  date: (): Schema<Date> => new DateSchema(),
+  bigint: (): Schema<bigint> => new BigIntSchema(),
   literal: <const T extends string | number | boolean | null>(value: T): Schema<T> =>
     new LiteralSchema(value),
   enum: <const T extends readonly [EnumValue, ...EnumValue[]]>(values: T): Schema<T[number]> =>
     new EnumSchema(values),
   array: <T>(item: Schema<T>, length?: number): Schema<T[]> => new ArraySchema(item, length),
+  set: <T>(item: Schema<T>): Schema<Set<T>> => new SetSchema(item),
+  map: <K, V>(key: Schema<K>, value: Schema<V>): Schema<Map<K, V>> => new MapSchema(key, value),
   // No rest parameter, deliberately: `TupleSchema` takes one and `compile` uses it, but
   // typing it on `m` means a variadic return type and two casts to reach it.
   // `RecordSchema`, `UnionSchema` and `DynamicSchema` are absent for the same reason.

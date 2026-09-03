@@ -27,7 +27,7 @@ const body = encode(Person, person);
 const parsed = decode(Person, body);
 ```
 
-Send it as `Content-Type: application/octet-stream`, and convert `Date`, `bigint`, `Map`, and `Set` to explicit [wire-friendly forms](/schemas/rich-types/) first.
+Send it as `Content-Type: application/octet-stream`. `Date`, `bigint`, `Map` and `Set` need no conversion; they have [wire forms of their own](/schemas/rich-types/).
 
 Gzipping the JSON is not the same saving. A compressor shrinks repeated content; shorn removes structure before any compressor runs, and the two compose. In the [100,000-event benchmarks](/performance/size/#compressed-100000-events), gzipped shorn is 37% smaller than gzipped JSON on repetitive data and 22% smaller on high-entropy data, because gzipped JSON still spends bits on field names shorn never wrote. Gzip also costs 79–112 ms of CPU per batch there, while shorn's reduction is free — and it applies to payloads far too small to compress at all.
 
@@ -54,13 +54,13 @@ These are self-describing: a decoder reads values without your application schem
 | --- | --- | --- |
 | Structure | Existing validation schema | Included in each value |
 | Generic inspection | Requires the schema | Supported |
-| Rich values | Explicit conversion | Often built in |
+| Rich values | `Date`, `bigint`, `Map`, `Set` built in | Often built in |
 | Cross-language | No | Yes |
 | Streaming | No | Available |
 
 msgpackr and cbor-x can move repeated field names into a shared record table, which shrinks payloads but requires both endpoints to synchronize that table. shorn uses the validation schema as its shared structure instead. Their `bundleStrings` mode also decodes document-shaped payloads faster than shorn does; that gap is measured honestly in [Throughput](/performance/throughput/#documents-are-the-other-exception-and-it-is-not-about-unicode).
 
-Choose MessagePack or CBOR when payloads must be self-describing, other languages need to decode them, or native `Date`, `Map`, `Set`, and `bigint` support matters.
+Choose MessagePack or CBOR when payloads must be self-describing, other languages need to decode them, or a value shorn has no wire form for, `undefined` or a class instance, has to travel as itself.
 
 ## The measurements
 

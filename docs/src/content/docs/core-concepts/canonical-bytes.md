@@ -54,4 +54,4 @@ Overlong varints are rejected: `1` must be `0x01`, never `0x81 0x00`. This keeps
 
 ## Round-tripping is a fixed point
 
-`decode(encode(x))` returns `x`, not merely an equivalent value. Converting a `format: "date-time"` string to an epoch integer would cut it from about 25 bytes to 5, but `Z` could come back as `+00:00` — the instant survives, the spelling does not. shorn leaves that trade to the application. See [Date, BigInt, Map, Set](/schemas/rich-types/).
+`decode(encode(x))` returns `x`, not merely an equivalent value. A `format: "date-time"` string is stored as epoch milliseconds, about 25 bytes down to 6, and epoch milliseconds remember neither a fractional-digit count nor an offset spelling. So only the one spelling that survives the trip encodes, the `toISOString()` one, and every other spelling is refused rather than normalised. Same rule as an uppercase UUID: refuse what would come back different. See [Date, BigInt, Map, Set](/schemas/rich-types/).

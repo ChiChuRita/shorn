@@ -35,19 +35,46 @@ Use `z.int().nonnegative()` wherever the value cannot be negative: shorn then wr
 
 `z.object` and `z.strictObject` produce the same bytes and fingerprint because both emit `additionalProperties: false`. `z.looseObject` and `z.record` are open shapes whose keys go on the wire; see [Supported Types](/schemas/supported-types/#records-open-objects-and-dynamic-values).
 
-## Rich types: `z.codec()`
+## Rich types
 
-`z.date()` and `z.bigint()` fail during JSON Schema conversion, before shorn receives them. Zod is the one validator that can declare both directions of the conversion in the schema itself:
+`z.date()`, `z.bigint()`, `z.set()` and `z.map()` all encode natively. Pass the schema and nothing else:
+
+```ts
+const Event = z.object({
+  when: z.date(),        // 6 bytes, epoch milliseconds
+  id: z.bigint(),        // header byte + the magnitude
+  tags: z.set(z.string()),
+  scores: z.map(z.string(), z.int()),
+});
+
+const codec = compile(Event);
+```
+
+JSON Schema has no keyword for any of the four, so shorn asks Zod to write its own. It detects the Zod vendor and passes `unrepresentable: "any"` plus an `override` hook to Zod's Standard JSON Schema method; the hook tags these four with [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword) and re-throws for the types that still have no wire form. `z.iso.datetime()` is packed into the same 6 bytes, and accepts only the `toISOString()` spelling.
+
+`z.date().nullable()` works, and so does a Set of Sets. A recursive type reached through a Set or Map element is [refused](/schemas/rejected-shapes/#recursion-through-a-set-or-map), and a Date cannot be a branch of a type-disjoint union, because it has no JSON type to be named by.
+
+### What is still refused
+
+`z.undefined()`, `z.void()`, `z.symbol()`, `z.nan()`, `z.custom()`, `z.function()` and a transform keep failing at compile, each named by Zod's own word for it:
+
+```
+undefined cannot be represented in JSON Schema
+```
+
+`z.literal(undefined)` and a bigint literal get a line of their own, because with the representability test off Zod would drop the first and write the second as a number.
+
+For a **transform**, `z.codec()` declares both directions in the schema itself, and shorn encodes the wire side:
 
 ```ts
 const Rich = z.object({
-  when: z.codec(z.iso.datetime(), z.date(), {
-    decode: (text) => new Date(text),
-    encode: (date) => date.toISOString(),
+  slug: z.codec(z.string(), z.string(), {
+    decode: (text) => text.trim(),
+    encode: (text) => text.trim(),
   }),
 });
 
-const Wire = z.object({ when: z.iso.datetime() });
+const Wire = z.object({ slug: z.string() });
 const codec = fingerprinted(compile(Wire));
 
 const bytes = codec.encode(z.encode(Rich, value));

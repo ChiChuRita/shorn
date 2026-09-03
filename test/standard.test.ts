@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { runInNewContext } from "node:vm";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { type } from "arktype";
 import { describe, expect, it } from "vitest";
 import * as v from "valibot";
@@ -579,45 +580,131 @@ describe("Standard Schema adapter", () => {
     );
   });
 
-  // Rich types are the validator's job; shorn encodes the wire shape.
-  // What is pinned here is that the caller is told so, rather than being handed the
-  // vendor's bare "cannot be represented in JSON Schema" with no way forward.
-  it("keeps the vendor's reason and names the remedy for types JSON Schema lacks", () => {
-    for (const schema of [
-      z.object({ v: z.date() }),
-      z.object({ v: z.bigint() }),
-      z.object({ v: z.map(z.string(), z.number()) }),
-      z.object({ v: z.set(z.string()) }),
-    ]) {
-      expect(() => compile(schema)).toThrow(EncodeError);
-      expect(() => compile(schema)).toThrow(/cannot be represented in JSON Schema/);
-      expect(() => compile(schema)).toThrow(/convert rich types at the edge/);
-    }
-  });
+  describe("Date, bigint, Set and Map from a vendor schema", () => {
+    const when = new Date("2026-09-03T12:00:00.000Z");
 
-  // The pairing the error points at, proven end to end: zod owns rich <-> wire via
-  // z.codec, shorn owns wire <-> bytes. Nothing in shorn knows about Date or bigint.
-  it("round-trips rich types when the validator converts at the edge", () => {
-    const Rich = z.object({
-      when: z.codec(z.iso.datetime(), z.date(), {
-        decode: (text) => new Date(text),
-        encode: (date) => date.toISOString(),
-      }),
-      id: z.codec(z.string(), z.bigint(), {
-        decode: (text) => BigInt(text),
-        encode: (big) => big.toString(),
-      }),
+    it("compiles the four types JSON Schema has no form for, and round-trips them", () => {
+      const Rich = z.object({
+        when: z.date(),
+        id: z.bigint(),
+        tags: z.set(z.string()),
+        scores: z.map(z.string(), z.int()),
+        maybe: z.date().nullable(),
+        nested: z.set(z.set(z.int())),
+      });
+      const codec = compile(Rich);
+      const value = {
+        when,
+        id: 12345678901234567890n,
+        tags: new Set(["a", "b"]),
+        scores: new Map([["k", -2]]),
+        maybe: null,
+        nested: new Set([new Set([1, 2])]),
+      };
+      const decoded = codec.decode(codec.encode(value));
+      expect(decoded).toEqual(value);
+      expect(decoded.when).toBeInstanceOf(Date);
+      expect(decoded.tags).toBeInstanceOf(Set);
+      expect(decoded.scores).toBeInstanceOf(Map);
+      // Past Number.MAX_SAFE_INTEGER, so this fails if anything routes through a number.
+      expect(decoded.id).toBe(12345678901234567890n);
     });
-    const Wire = z.object({ when: z.iso.datetime(), id: z.string() });
-    const wire = compile(Wire);
 
-    const original = { when: new Date("2026-08-07T10:00:00.000Z"), id: 9007199254740993n };
-    const restored = z.decode(Rich, wire.decode(wire.encode(z.encode(Rich, original))));
+    it("writes the bytes the m builders write", () => {
+      const standard = compile(z.object({ when: z.date(), id: z.bigint(), tags: z.set(z.string()) }));
+      const wire = m.object({ when: m.date(), id: m.bigint(), tags: m.set(m.string()) });
+      const value = { when, id: -5n, tags: new Set(["x"]) };
+      expect([...standard.encode(value)]).toEqual([...wire.encode(value)]);
+    });
 
-    expect(restored.when).toBeInstanceOf(Date);
-    expect(restored.when.toISOString()).toBe(original.when.toISOString());
-    // Past Number.MAX_SAFE_INTEGER, so this fails if anything routes through a number.
-    expect(restored.id).toBe(9007199254740993n);
+    it("still validates, so the vendor refuses a string where a Date belongs", () => {
+      const codec = compile(z.object({ when: z.date() }));
+      expect(() => codec.encode({ when: "2026-09-03" as never })).toThrow(EncodeError);
+      // Zod refuses an Invalid Date itself, before the wire ever sees it.
+      expect(() => codec.encode({ when: new Date(NaN) })).toThrow(EncodeError);
+    });
+
+    it("packs a date-time string into the Date layout and refuses every other spelling", () => {
+      const codec = compile(z.object({ at: z.iso.datetime({ offset: true }) }));
+      const canonical = "2026-09-03T12:00:00.000Z";
+      const bytes = codec.encode({ at: canonical });
+      expect([...bytes]).toEqual([...m.object({ at: m.date() }).encode({ at: when })]);
+      expect(codec.decode(bytes)).toEqual({ at: canonical });
+      // All three are valid to the validator and name the same instant; none survives
+      // the trip through epoch milliseconds as the string it was, so none is accepted.
+      for (const spelling of [
+        "2026-09-03T12:00:00Z",
+        "2026-09-03T12:00:00.000000Z",
+        "2026-09-03T14:00:00.000+02:00",
+      ]) {
+        expect(() => codec.encode({ at: spelling })).toThrow(/canonical ISO-8601 date-time/);
+        expect(() => codec.encode({ at: spelling })).toThrow(/at at$/);
+      }
+    });
+
+    it("gives a Set and an array of one element different fingerprints over identical bytes", () => {
+      const set = compile(z.set(z.string()));
+      const array = compile(z.array(z.string()));
+      expect([...set.encode(new Set(["a"]))]).toEqual([...array.encode(["a"])]);
+      expect(fingerprinted(set).fingerprintHex).not.toBe(fingerprinted(array).fingerprintHex);
+      // A date-time is no longer a string on the wire, so its fingerprint moved with it.
+      expect(fingerprinted(compile(z.iso.datetime())).fingerprintHex).not.toBe(
+        fingerprinted(compile(z.string())).fingerprintHex,
+      );
+    });
+
+    it("keeps refusing what has no wire form at all, in the vendor's own words", () => {
+      for (const [schema, reason] of [
+        [z.object({ v: z.undefined() }), /undefined cannot be represented in JSON Schema/],
+        [z.object({ v: z.nan() }), /nan cannot be represented/],
+        [z.object({ v: z.symbol() }), /symbol cannot be represented/],
+        [z.object({ v: z.string().transform(Number) }), /transform cannot be represented/],
+        [z.object({ v: z.literal(10n) }), /literal undefined or bigint/],
+      ] as const) {
+        expect(() => compile(schema)).toThrow(EncodeError);
+        expect(() => compile(schema)).toThrow(reason);
+      }
+      // A throw the vendor makes on its own, outside any shorn hook, still gets the remedy.
+      expect(() => compile(type({ v: "undefined" }))).toThrow(/convert it at the edge/);
+    });
+
+    it("refuses a recursive type reached through a Set or Map element", () => {
+      const Node = z.object({
+        get kids() {
+          return z.set(Node);
+        },
+      });
+      expect(() => compile(Node)).toThrow(/recursive type inside a Set or Map/);
+    });
+
+    it("takes a plain JSON Schema document as the structure, x-shorn keyword included", () => {
+      const structure = {
+        type: "object",
+        properties: {
+          when: { "x-shorn": "date" },
+          scores: { "x-shorn": "map", "x-shorn-key": { type: "string" }, items: { type: "integer" } },
+        },
+        required: ["when", "scores"],
+        additionalProperties: false,
+      };
+      const validator = {
+        "~standard": { version: 1, vendor: "test", validate: (value: unknown) => ({ value }) },
+      } as unknown as StandardSchemaV1;
+      const codec = compile(validator, structure);
+      const value = { when, scores: new Map([["k", -1]]) };
+      expect(codec.decode(codec.encode(value))).toEqual(value);
+      expect([...codec.encode(value)]).toEqual([
+        ...compile(z.object({ when: z.date(), scores: z.map(z.string(), z.int()) })).encode(value),
+      ]);
+    });
+
+    it("still refuses a second argument that is neither form, and an unknown keyword value", () => {
+      expect(() => compile(z.string(), { structure: z.string() } as never)).toThrow(
+        /Standard JSON Schema implementation .* or a JSON Schema document/,
+      );
+      expect(() => compile(z.string(), 42 as never)).toThrow(EncodeError);
+      expect(() => compile(z.string(), { "x-shorn": "url" })).toThrow(/Unsupported x-shorn kind url/);
+    });
   });
 
   it("refuses an extra property only where the schema left nowhere to put it", () => {
@@ -1070,9 +1157,10 @@ describe("Standard Schema adapter", () => {
       expect(error.cause).toBeInstanceOf(EncodeError);
     });
 
-    it("keeps the vendor's own error reachable behind a rich type", () => {
-      const error = thrown(() => compile(z.object({ when: z.date() }) as never));
-      expect(error.message).toMatch(/convert rich types at the edge/);
+    it("keeps the vendor's own error reachable behind a type with no wire form", () => {
+      // ArkType throws its own error for `undefined`, outside any hook shorn installs.
+      const error = thrown(() => compile(type({ when: "undefined" }) as never));
+      expect(error.message).toMatch(/convert it at the edge/);
       expect(error.cause).toBeInstanceOf(Error);
     });
   });
@@ -1110,18 +1198,20 @@ describe("Standard Schema adapter", () => {
     });
 
     it("gates the structure argument too, naming the remedy rather than a TypeError", () => {
-      // A raw JSON Schema, or the structure wrapped in an options object — either
-      // used to surface as "Cannot read properties of undefined (reading
-      // 'jsonSchema')" wrapped in the rich-types remedy, which points away from
-      // the fix.
+      // The structure wrapped in an options object, a `~standard` with no JSON Schema
+      // half, a number: each used to surface as "Cannot read properties of undefined
+      // (reading 'jsonSchema')" wrapped in a remedy that pointed away from the fix. A
+      // plain JSON Schema is no longer among them, since it is now a form the argument
+      // takes.
       const valibotSchema = v.object({ n: v.pipe(v.number(), v.integer()) });
       const structure = toStandardJsonSchema(valibotSchema);
-      for (const wrong of [{ structure }, { type: "object" }, 42]) {
+      for (const wrong of [{ structure }, { "~standard": {} }, 42, null]) {
         expect(() => compile(valibotSchema, wrong as never)).toThrow(
           /second argument must be a Standard JSON Schema implementation/,
         );
       }
       expect(() => compile(valibotSchema, structure)).not.toThrow();
+      expect(() => compile(valibotSchema, { type: "object" })).not.toThrow();
     });
   });
 

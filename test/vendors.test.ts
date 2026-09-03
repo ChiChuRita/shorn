@@ -1,9 +1,9 @@
 import { type } from "arktype";
 import { describe, expect, it } from "vitest";
 import * as v from "valibot";
-import { toStandardJsonSchema } from "@valibot/to-json-schema";
+import { toJsonSchema, toStandardJsonSchema } from "@valibot/to-json-schema";
 import { z } from "zod";
-import { compile, type EncodableStandardSchema } from "../src/index.js";
+import { compile, type EncodableStandardSchema, valibotOverride } from "../src/index.js";
 
 // The zod-facing tests in standard.test.ts prove each wire shape once; this file
 // proves the *vendors* agree. Each vendor spells the same JSON Schema differently
@@ -180,4 +180,70 @@ describe("every wire shape works from every vendor's JSON Schema", () => {
       });
     });
   }
+});
+
+// The rich types cannot join `cases` above: Valibot reaches them only through the raw
+// converter and a plain structure, not through `toStandardJsonSchema`, and ArkType has
+// element types for none of its Set or Map. So each vendor gets the pairing it supports,
+// and the bytes are still held equal across all of them.
+describe("Date, bigint, Set and Map agree across vendors", () => {
+  const when = new Date("2026-09-03T12:00:00.000Z");
+  const valibotRich = (schema: v.GenericSchema) =>
+    toJsonSchema(schema, { overrideSchema: valibotOverride(toJsonSchema) });
+
+  it("Zod and ArkType write the same bytes for a Date and a bigint", () => {
+    const value = { when, id: 5n };
+    const zod = compile(z.object({ when: z.date(), id: z.bigint() }));
+    const ark = compile(type({ when: "Date", id: "bigint" }));
+    expect([...ark.encode(value)]).toEqual([...zod.encode(value)]);
+    expect(ark.decode(ark.encode(value))).toEqual(value);
+  });
+
+  it("Valibot reaches all four through valibotOverride and a plain structure", () => {
+    const schema = v.object({
+      when: v.date(),
+      id: v.bigint(),
+      tags: v.set(v.string()),
+      scores: v.map(v.string(), v.number()),
+      nested: v.set(v.set(v.string())),
+    });
+    const codec = compile(schema, valibotRich(schema));
+    const value = {
+      when,
+      id: -7n,
+      tags: new Set(["a"]),
+      scores: new Map([["k", 1.5]]),
+      nested: new Set([new Set(["x"])]),
+    };
+    expect(codec.decode(codec.encode(value))).toEqual(value);
+    const zod = compile(
+      z.object({
+        when: z.date(),
+        id: z.bigint(),
+        tags: z.set(z.string()),
+        scores: z.map(z.string(), z.number()),
+        nested: z.set(z.set(z.string())),
+      }),
+    );
+    expect([...codec.encode(value)]).toEqual([...zod.encode(value)]);
+  });
+
+  it("refuses a Valibot lazy type reached through a Set as a refusal, not a stack overflow", () => {
+    const Node: v.GenericSchema = v.object({
+      get kids() {
+        return v.set(v.lazy(() => Node));
+      },
+    });
+    expect(() => valibotRich(Node)).toThrow(/recursive type inside a Set or Map/);
+  });
+
+  it("refuses ArkType's untyped Set and Map by name", () => {
+    expect(() => compile(type({ s: "Set" }))).toThrow(/ArkType's Set carries no element type/);
+    expect(() => compile(type({ m: "Map" }))).toThrow(/ArkType's Map carries no element type/);
+  });
+
+  it("keeps Valibot's rich types refused without the override, with the remedy appended", () => {
+    const schema = v.object({ d: v.date() });
+    expect(() => compile(schema, toStandardJsonSchema(schema))).toThrow(/convert it at the edge/);
+  });
 });

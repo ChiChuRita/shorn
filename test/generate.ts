@@ -83,8 +83,17 @@ export const KEY_POOL = [
   "valueOf", "hasOwnProperty", "über", "kind", "0x", "_", "zzz", "Ω",
 ] as const;
 
-export function leafGen(rng: Rng): Gen {
-  switch (below(rng, 9)) {
+/** The spec's TimeClip bound: a Date holds no time value past it. */
+const MAX_DATE_MS = 8.64e15;
+
+/**
+ * `rich` adds Date and bigint leaves, and Set and Map containers in `schemaGen`. Off by
+ * default so the corpus every existing digest and seed was recorded against is still
+ * the corpus those seeds produce; `regression.test.ts` pins a second digest over the
+ * rich corpus.
+ */
+export function leafGen(rng: Rng, rich = false): Gen {
+  switch (below(rng, rich ? 11 : 9)) {
     case 0:
       return { schema: m.uint(), zeroWidth: false, sample: (r) => Math.abs(randomSafeInteger(r)) };
     case 1:
@@ -122,6 +131,40 @@ export function leafGen(rng: Rng): Gen {
         sample: (r) => values[below(r, values.length)]!,
       };
     }
+    case 9:
+      return {
+        schema: m.date(),
+        zeroWidth: false,
+        sample: (r) =>
+          new Date(
+            pick(r, [
+              0,
+              1,
+              -1,
+              1_725_435_678_000,
+              MAX_DATE_MS,
+              -MAX_DATE_MS,
+              Math.floor((r() - 0.5) * 2 * MAX_DATE_MS),
+            ]),
+          ),
+      };
+    case 10:
+      return {
+        schema: m.bigint(),
+        zeroWidth: false,
+        sample: (r) =>
+          pick(r, [
+            0n,
+            1n,
+            -1n,
+            255n,
+            256n,
+            -256n,
+            2n ** 63n,
+            -(2n ** 64n),
+            BigInt(randomSafeInteger(r)) * BigInt(randomSafeInteger(r)),
+          ]),
+      };
     default: {
       const value = pick(rng, ["fixed", 7, true, null] as const);
       // The one zero-width leaf: a literal writes no bytes at all.
@@ -144,9 +187,10 @@ export function wrappable(
   depth: number,
   inputBounded: boolean,
   rejected: (schema: Schema<unknown>) => boolean,
+  rich = false,
 ): Gen {
   for (let attempt = 0; attempt < 8; attempt++) {
-    const candidate = schemaGen(rng, depth - 1, inputBounded);
+    const candidate = schemaGen(rng, depth - 1, inputBounded, rich);
     if (!rejected(candidate.schema)) return candidate;
   }
   return UINT_GEN;
@@ -157,20 +201,20 @@ export function wrappable(
  * so a zero-byte payload can legitimately yield four elements — schema-bounded, not
  * input-bounded. Only the element-count budget test needs the restriction.
  */
-export function schemaGen(rng: Rng, depth: number, inputBounded = false): Gen {
+export function schemaGen(rng: Rng, depth: number, inputBounded = false, rich = false): Gen {
   if (depth <= 0 || rng() < 0.45) {
-    let leaf = leafGen(rng);
+    let leaf = leafGen(rng, rich);
     if (inputBounded) {
-      for (let attempt = 0; attempt < 8 && leaf.zeroWidth; attempt++) leaf = leafGen(rng);
+      for (let attempt = 0; attempt < 8 && leaf.zeroWidth; attempt++) leaf = leafGen(rng, rich);
       if (leaf.zeroWidth) leaf = UINT_GEN;
     }
     return leaf;
   }
 
-  const choice = below(rng, 5);
+  const choice = below(rng, rich ? 7 : 5);
   switch (inputBounded && choice === 3 ? 4 : choice) {
     case 0: {
-      const inner = wrappable(rng, depth, inputBounded, (s) => s._yieldsUndefined);
+      const inner = wrappable(rng, depth, inputBounded, (s) => s._yieldsUndefined, rich);
       return {
         schema: inner.schema.optional(),
         zeroWidth: false, // the presence marker is always a byte
@@ -178,7 +222,7 @@ export function schemaGen(rng: Rng, depth: number, inputBounded = false): Gen {
       };
     }
     case 1: {
-      const inner = wrappable(rng, depth, inputBounded, (s) => s._yieldsNull);
+      const inner = wrappable(rng, depth, inputBounded, (s) => s._yieldsNull, rich);
       return {
         schema: inner.schema.nullable(),
         zeroWidth: false,
@@ -188,7 +232,7 @@ export function schemaGen(rng: Rng, depth: number, inputBounded = false): Gen {
     case 2: {
       // An array of zero-width elements is refused at construction, because no
       // input length could bound its element count.
-      const item = wrappable(rng, depth, inputBounded, (schema) => schema._minWidth === 0);
+      const item = wrappable(rng, depth, inputBounded, (schema) => schema._minWidth === 0, rich);
       return {
         schema: m.array(item.schema),
         zeroWidth: false,
@@ -197,7 +241,7 @@ export function schemaGen(rng: Rng, depth: number, inputBounded = false): Gen {
     }
     case 3: {
       const items = Array.from({ length: below(rng, 5) }, () =>
-        schemaGen(rng, depth - 1, inputBounded),
+        schemaGen(rng, depth - 1, inputBounded, rich),
       );
       return {
         schema: m.tuple(items.map((item) => item.schema)),
@@ -205,9 +249,33 @@ export function schemaGen(rng: Rng, depth: number, inputBounded = false): Gen {
         sample: (r) => items.map((item) => item.sample(r)),
       };
     }
+    case 5: {
+      // The array rule again: a Set's count is on the wire, so its element must cost a
+      // byte. `new Set` folds duplicates, which is also what the decoder demands.
+      const item = wrappable(rng, depth, inputBounded, (schema) => schema._minWidth === 0, rich);
+      return {
+        schema: m.set(item.schema),
+        zeroWidth: false,
+        sample: (r) => new Set(Array.from({ length: below(r, 6) }, () => item.sample(r))),
+      };
+    }
+    case 6: {
+      // Only the pair has to cost a byte, so one zero-width half is legal.
+      const key = schemaGen(rng, depth - 1, inputBounded, rich);
+      let value = schemaGen(rng, depth - 1, inputBounded, rich);
+      if (key.zeroWidth && value.zeroWidth) value = UINT_GEN;
+      return {
+        schema: m.map(key.schema, value.schema),
+        zeroWidth: false,
+        sample: (r) =>
+          new Map(
+            Array.from({ length: below(r, 6) }, () => [key.sample(r), value.sample(r)] as const),
+          ),
+      };
+    }
     default: {
       const keys = [...new Set(Array.from({ length: below(rng, 8) }, () => pick(rng, KEY_POOL)))];
-      const fields = keys.map((key) => ({ key, gen: schemaGen(rng, depth - 1, inputBounded) }));
+      const fields = keys.map((key) => ({ key, gen: schemaGen(rng, depth - 1, inputBounded, rich) }));
       const shape: Record<string, Schema<unknown>> = Object.create(null);
       let optionals = 0;
       for (const field of fields) {
@@ -240,16 +308,28 @@ export function schemaGen(rng: Rng, depth: number, inputBounded = false): Gen {
 export function containsNaN(value: unknown): boolean {
   if (typeof value === "number") return Number.isNaN(value);
   if (Array.isArray(value)) return value.some(containsNaN);
-  if (value instanceof Uint8Array) return false;
+  if (value instanceof Uint8Array || value instanceof Date) return false;
+  if (value instanceof Set) return [...value].some(containsNaN);
+  if (value instanceof Map) return [...value].some(([k, v]) => containsNaN(k) || containsNaN(v));
   if (value !== null && typeof value === "object") return Object.values(value).some(containsNaN);
   return false;
 }
 
+/** Counts a Set's elements and a Map's entries too: each costs a byte, like an array's. */
 export function countArrayElements(value: unknown): number {
   if (Array.isArray(value)) {
     return value.length + value.reduce<number>((sum, item) => sum + countArrayElements(item), 0);
   }
-  if (value instanceof Uint8Array) return 0;
+  if (value instanceof Set) {
+    return value.size + [...value].reduce<number>((sum, item) => sum + countArrayElements(item), 0);
+  }
+  if (value instanceof Map) {
+    return (
+      value.size +
+      [...value].reduce<number>((sum, [k, v]) => sum + countArrayElements(k) + countArrayElements(v), 0)
+    );
+  }
+  if (value instanceof Uint8Array || value instanceof Date) return 0;
   if (value !== null && typeof value === "object") {
     return Object.values(value).reduce<number>((sum, item) => sum + countArrayElements(item), 0);
   }

@@ -14,7 +14,7 @@ No IDL, no codegen, no second source of truth.</p>
 <p align="center">
   <a href="https://www.npmjs.com/package/@chichurita/shorn"><img src="https://img.shields.io/npm/v/%40chichurita%2Fshorn" alt="npm version"></a>
   <a href="https://github.com/ChiChuRita/shorn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ChiChuRita/shorn/ci.yml?branch=main" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/gzip-5.58_kB-blue" alt="bundle size, 5.58 kB gzip">
+  <img src="https://img.shields.io/badge/gzip-6.44_kB-blue" alt="bundle size, 6.44 kB gzip">
   <a href="https://github.com/ChiChuRita/shorn/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/%40chichurita%2Fshorn" alt="MIT license"></a>
 </p>
 
@@ -78,6 +78,11 @@ pass `toStandardJsonSchema(schema)` as the trailing argument. shorn reads
 validation through [Standard Schema](https://standardschema.dev/schema) and
 structure through [Standard JSON Schema](https://standardschema.dev/json-schema).
 
+Valibot's wrapper takes no options, so `Date`, `bigint`, `Map` and `Set` go
+through `valibotOverride`: pass
+`toJsonSchema(schema, { overrideSchema: valibotOverride(toJsonSchema) })` as the
+structure instead.
+
 ## Scope
 
 shorn covers strings, booleans, integers, numbers, literals, enums, nullable
@@ -85,11 +90,12 @@ values, arrays, tuples, records, unions — discriminated, or with no two branch
 sharing a JSON type — recursive schemas, dynamic values (`z.any()`), and
 objects — closed or open, with optional fields. It does not support unions whose
 branches overlap, streaming, or automatic schema evolution. `Date`, `bigint`,
-`Map`, and `Set` need an explicit wire representation.
+`Map`, and `Set` each have a wire form of their own; `undefined`, symbols,
+`RegExp`, and class instances still need converting at the edge.
 
 The saving comes from the schema, not a compressor, so it costs no CPU: up to
 6.2× faster to encode and 13.7× faster to decode than JSON bytes. The low-level
-`m` API bundles to 5.58 KB gzip; `compile` with validation is 9.88 KB
+`m` API bundles to 6.44 KB gzip; `compile` with validation is 11.55 KB
 (esbuild-minified browser bundles, schema declarations excluded).
 
 ## Documentation

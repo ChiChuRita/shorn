@@ -38,9 +38,27 @@ The [fingerprint](/versioning/fingerprinting/) excludes `rejectUnknown`, so equi
 
 ## Rich types
 
-`Date` and `bigint` fail during JSON Schema conversion, before shorn receives them: ArkType reports `{ code: "date" }` and `{ code: "domain", domain: "bigint" }`. Standard Schema has no reverse operation, so shorn cannot run an ArkType morph backwards. Convert at the application boundary and encode a wire-friendly shape; see [Date, BigInt, Map, Set](/schemas/rich-types/).
+`Date` and `bigint` encode natively:
 
-A morph is also refused when its input and output produce different wire shapes, because shorn requires both sides to agree on the encoded bytes.
+```ts
+const Event = type({ when: "Date", id: "bigint" });
+const codec = compile(Event); // 6 bytes for the Date
+```
+
+JSON Schema has no keyword for either, so shorn hands ArkType a `fallback` for the two codes it would otherwise throw on, `{ code: "date" }` and `{ code: "domain", domain: "bigint" }`, and tags them with [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword). An equivalent Zod schema produces the same bytes and the same fingerprint.
+
+`Set` and `Map` are **refused**:
+
+```
+ArkType's Set carries no element type, so there is nothing to encode its
+members as; convert it at the edge
+```
+
+Both are keywords in ArkType, and neither carries the type of its members. A tagless format writes members and nothing else, so there is nothing to write them as, and encoding them as empty containers would silently drop data. Zod's `z.set(T)` and Valibot's `v.set(T)` name the element and are supported. Any other prototype is refused too, as `RegExp cannot be represented in JSON Schema`.
+
+ArkType has no `format: "date-time"` spelling either. `"string.date.iso"` converts to a pattern, so an ISO timestamp stays an ordinary string rather than becoming the 6 bytes `z.iso.datetime()` gets.
+
+A morph is refused when its input and output produce different wire shapes, because shorn requires both sides to agree on the encoded bytes. Standard Schema has no reverse operation, so shorn cannot run a morph backwards; see [Date, BigInt, Map, Set](/schemas/rich-types/).
 
 ## Version note
 

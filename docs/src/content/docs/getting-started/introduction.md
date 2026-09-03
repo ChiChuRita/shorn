@@ -35,7 +35,7 @@ Some of these limits are permanent rather than unfinished:
 - **No streaming**, random access, or zero-copy views.
 - **No cross-language decoder.** TypeScript and JavaScript only.
 - **No universal performance guarantee.** Results depend on schema, data, runtime, and compression. See [Throughput](/performance/throughput/) and benchmark your workload.
-- **Rich values need an explicit wire form.** `Date`, `bigint`, `Map`, and `Set` are [converted at the edge](/schemas/rich-types/).
+- **Some values have no wire form.** `Date`, `bigint`, `Map`, `Set` and `date-time` strings are [native](/schemas/rich-types/); `undefined`, symbols, `RegExp`, class instances and one-way transforms still have to be converted at the edge.
 - **Not confidential.** Encrypt the bytes when secrecy matters.
 
 Next: [Installation](/getting-started/installation/), then [Quick Start](/getting-started/quick-start/).

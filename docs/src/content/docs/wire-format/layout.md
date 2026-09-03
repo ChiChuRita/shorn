@@ -39,6 +39,65 @@ ZigZag doubles the magnitude, so a signed integer crosses every size boundary at
 
 `m.float32()` (4 bytes) is available only through the low-level API. Little-endian order is part of the format and does not depend on the host.
 
+## Dates
+
+A `Date` is its epoch milliseconds, ZigZag varint, exactly what an `int` writes. Six bytes for any date this century, fewer near 1970, and exact, since a `Date` holds nothing finer than a millisecond.
+
+```
+new Date("2026-09-03T12:00:00.000Z") -> [128, 136, 159, 242, 140, 104]
+```
+
+An **Invalid Date** is refused at encode: its time value is `NaN`, which no integer holds. On the way back, a millisecond count outside ±8.64e15 names no `Date` at all, since that is where the spec's TimeClip puts the end of the range, so the decoder refuses it rather than returning an Invalid Date.
+
+A **`format: "date-time"` string** takes the same six bytes and decodes back to text, the `toISOString()` spelling of that instant. Only that spelling encodes: epoch milliseconds cannot remember a fractional-digit count or an offset, so anything else is refused rather than normalised, exactly as an uppercase UUID is. See [Rejected Shapes](/schemas/rejected-shapes/#non-canonical-date-time-strings).
+
+## BigInts
+
+A varint header, then the magnitude little-endian with no high zero byte. The header is the magnitude's **byte count doubled, plus 1 when the value is negative**, so the low bit is the sign and the rest is the width. Zero is the single header byte `[0]`.
+
+| Value | Bytes |
+| --- | --- |
+| `0n` | `[0]` |
+| `1n` | `[2, 1]` |
+| `-1n` | `[3, 1]` |
+| `255n` | `[2, 255]` |
+| `256n` | `[4, 0, 1]` |
+| `-256n` | `[5, 0, 1]` |
+| `2n ** 64n` | `[18, 0, 0, 0, 0, 0, 0, 0, 0, 1]` |
+
+The header is one byte up to a 63-byte magnitude, and the magnitude itself may reach 64 MiB, the same ceiling a string or a byte array has. This is not the varint path: that reader caps at ten bytes, and the cap is a hostile-input defence worth keeping.
+
+Canonical on both sides. A header of `1` would be negative zero and a zero high byte would be a padded magnitude, and either would give one value two encodings, so both are refused on decode as `Non-canonical bigint`.
+
+## Sets
+
+A varint element count, then the elements in **iteration order**. Byte-identical to an array of the same elements.
+
+```
+m.set(m.string()) with new Set(["a", "b"]) -> [2, 1, 97, 1, 98]
+```
+
+A Set and an array therefore cost the same and write the same payload. What separates them is what they decode to, and their [fingerprint](/versioning/fingerprinting/): the signature token is `{ set: T }` rather than `{ array: T }`, deliberately, so a payload written as one is never read back as the other.
+
+A **duplicate element** is refused on decode. `new Set` would fold the pair, and the value would re-encode to one element for a payload that declared two, which is the injectivity every other shape keeps. Only a primitive can trip it, since every decoded object is a fresh reference.
+
+There is no fixed-count form, so the element must occupy at least one byte, and the count is checked against the remaining input before anything is allocated, exactly as an array's is.
+
+## Maps
+
+A varint entry count, then each key followed by its value, in iteration order. Byte-identical to an array of `[key, value]` tuples. Keys may be any schema, since a Map's key may be anything.
+
+```ts
+m.map(m.string(), m.uint())
+
+new Map([["x", 1], ["y", 300]]) -> [2, 1, 120, 1, 1, 121, 172, 2]
+                                    │  └───────┘  └────────────┘
+                                    │  "x" -> 1   "y" -> 300
+                                    └─ two entries
+```
+
+Unlike a record, a Map does not sort or refuse an order: its keys are not restricted to strings, so there is no one order to canonicalise to. A **duplicate key** is refused on decode for the Set's reason. An entry must occupy at least one byte, counting key and value together.
+
 ## Booleans
 
 One byte, `[1]` or `[0]`. Anything else is a `DecodeError`.
@@ -86,7 +145,7 @@ null -> [0]
 5    -> [1, 5]
 ```
 
-A marker over a shape that already holds `null` — `z.any()`, `z.null()`, an enum with a `null` member, or a second `.nullable()` — is dropped when the codec is built, so no payload carries two ways to spell one `null`. The dropped marker is not in the [fingerprint](/versioning/schema-evolution/) either: two schemas that write the same bytes derive the same fingerprint.
+A marker over a shape that already holds `null` — `z.any()`, `z.null()`, an enum with a `null` member, or a second `.nullable()` — is dropped when the codec is built, so no payload carries two ways to spell one `null`. The dropped marker is not in the [fingerprint](/versioning/schema-evolution/) either, so a redundant wrapper changes neither the bytes nor the identifier.
 
 ## Arrays
 
@@ -266,12 +325,16 @@ A schema with no dynamic value in it writes no tag and pays nothing for this.
 | Limit | Value |
 | --- | --- |
 | Collection elements | 1,000,000 |
-| String / byte-array length | 64 MiB |
+| String / byte-array / BigInt magnitude length | 64 MiB |
 | Dynamic value nesting | 64 levels |
+| `Date` milliseconds | ±8.64e15 |
 | Trailing bytes | rejected |
 | Non-canonical varint | rejected |
+| Non-canonical BigInt | rejected |
 | Non-canonical dynamic number | rejected |
 | Record keys out of order | rejected |
+| Duplicate `Set` element | rejected |
+| Duplicate `Map` key | rejected |
 | Unsafe numeric varint | rejected |
 
 ## What is not in the payload

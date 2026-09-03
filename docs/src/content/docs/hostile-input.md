@@ -26,7 +26,7 @@ A tagless decoder relies on the schema to interpret every byte. Bounds and lengt
 | Union branch index past the last branch | `DecodeError` |
 | Open-object extra repeating a declared field | `DecodeError` |
 
-Hard limits are **1,000,000** collection elements and **64 MiB** for strings or byte arrays. These are backstops; the input-length check below is the main allocation defense.
+Hard limits are **1,000,000** collection elements, a Set's or Map's included, and **64 MiB** for a string, a byte array or a BigInt magnitude. These are backstops; the input-length check below is the main allocation defense.
 
 ## Allocation is bounded by input length, not schema shape
 
@@ -36,7 +36,7 @@ Every schema carries a **`_minWidth`**, the fewest bytes one value can occupy. B
 
 A recursive schema's back-edge reports one byte rather than a measured width: a cycle a value can escape must pass through an optional field, a nullable marker, an array count, a record count, or a union index, and each of those costs a byte. The check holds at the same strength it has for a string.
 
-This is why **arrays of zero-width elements are rejected during codec construction**. Literals, empty tuples, and empty objects use no bytes, so the decoder could not verify the declared count against the payload length. A tuple may still contain them because its length comes from the schema.
+This is why **arrays of zero-width elements are rejected during codec construction**. Literals, empty tuples, and empty objects use no bytes, so the decoder could not verify the declared count against the payload length. A tuple may still contain them because its length comes from the schema. A Set and a Map follow the array's rule with no exception at all, since neither has a fixed-count form.
 
 ### The one exception, and its own ceiling
 

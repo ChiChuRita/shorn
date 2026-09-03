@@ -47,7 +47,7 @@ value ──▶ validate ──▶ wire plan ──▶ bytes
 
 A payload that decodes structurally but fails a refinement is a `DecodeError`, never an accepted value.
 
-Both interfaces are vendor-neutral — Standard Schema supplies `validate(value)`, Standard JSON Schema supplies `jsonSchema.input()` and `.output()` — so shorn needs no validator-specific code. This also creates its main limitation: **shorn cannot encode anything JSON Schema cannot describe.** See [Date, BigInt, Map, Set](/schemas/rich-types/).
+Both interfaces are vendor-neutral: Standard Schema supplies `validate(value)` and Standard JSON Schema supplies `jsonSchema.input()` and `.output()`, so shorn needs no validator-specific code. What JSON Schema cannot describe, shorn describes with one extension keyword of its own, `x-shorn`, which is how `Date`, `bigint`, `Map` and `Set` reach the wire. What is left over is a value with no wire form at all: `undefined`, `NaN`, a symbol, a class instance. See [Date, BigInt, Map, Set](/schemas/rich-types/).
 
 ## The wire plan
 

@@ -56,4 +56,33 @@ The [fingerprint](/versioning/fingerprinting/) excludes `rejectUnknown`, so `v.o
 
 ## Rich types
 
-`v.date()` throws *"The 'date' schema cannot be converted to JSON Schema"* before shorn receives it, and `v.pipe` transforms have no reverse operation through Standard Schema. Convert at the application boundary; see [Date, BigInt, Map, Set](/schemas/rich-types/).
+`v.date()`, `v.bigint()`, `v.set()` and `v.map()` encode natively, but not through `toStandardJsonSchema`. That wrapper takes no options, so there is no slot to tag them in. Use the raw converter with `valibotOverride`, and pass the plain document it returns as `structure`:
+
+```ts
+import * as v from "valibot";
+import { toJsonSchema } from "@valibot/to-json-schema";
+import { compile, valibotOverride } from "@chichurita/shorn";
+
+const Person = v.object({
+  when: v.date(),
+  id: v.bigint(),
+  tags: v.set(v.string()),
+  scores: v.map(v.string(), v.number()),
+});
+
+const structure = toJsonSchema(Person, { overrideSchema: valibotOverride(toJsonSchema) });
+const codec = compile(Person, structure);
+```
+
+`compile` accepts a plain JSON Schema document as well as a Standard JSON Schema implementation, which is what makes the raw converter usable here. The override writes shorn's [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword) keyword, so the codec is the same one a Zod schema of the same shape produces.
+
+The converter is an argument rather than an import: shorn depends on no validator, and a Set inside a Set has to be converted through the same hook or the inner one would throw where the outer one did not. Hoist `structure` to a module constant as with any Valibot structure, or the codec is rebuilt per call.
+
+Without the override, Valibot's converter refuses all four before shorn sees anything, and shorn keeps the reason and appends the remedy:
+
+```
+The "date" schema cannot be converted to JSON Schema. (shorn has no wire form
+for this value; convert it at the edge, see Rejected Shapes)
+```
+
+`v.pipe(v.string(), v.isoTimestamp())` needs none of this: it converts to `format: "date-time"`, which shorn packs into 6 bytes, and it accepts only the `toISOString()` spelling. A `v.transform` has no reverse operation through Standard Schema and stays refused. See [Date, BigInt, Map, Set](/schemas/rich-types/).

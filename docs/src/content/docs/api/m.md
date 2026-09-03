@@ -25,12 +25,32 @@ It is an escape hatch, not a replacement for your validator: `m` checks only wha
 | `m.int()` | `Schema<number>` | ZigZag varint |
 | `m.float32()` | `Schema<number>` | 4 bytes, little-endian |
 | `m.float64()` | `Schema<number>` | 8 bytes, little-endian |
+| `m.date()` | `Schema<Date>` | epoch milliseconds as a ZigZag varint; 6 bytes for any current date |
+| `m.bigint()` | `Schema<bigint>` | varint header (byte count doubled, plus the sign bit), then the magnitude little-endian |
 
-`m.bytes()` and `m.float32()` have no JSON Schema form, so validator-backed codecs do not select them automatically.
+`m.bytes()` and `m.float32()` have no JSON Schema form, so validator-backed codecs do not select them automatically. `m.date()` and `m.bigint()` do have one, through shorn's [`x-shorn` keyword](/schemas/rich-types/#the-x-shorn-keyword), so `compile()` reaches the same two classes.
 
 :::caution[`m` does not tree-shake per builder]
-`m` is a single object, so `import { m }` retains all twelve builders whether you call two or twelve, about 3.9 KB gzip. Bundlers cannot remove individual properties from a live object.
+`m` is a single object, so `import { m }` retains all sixteen builders whether you call two or sixteen, about 6.4 KB gzip. Bundlers cannot remove individual properties from a live object.
 :::
+
+## `m.date()`
+
+```ts
+m.date(): Schema<Date>;
+```
+
+The `Date`'s epoch milliseconds, ZigZag varint, exactly what `m.int()` writes. An **Invalid Date** is an `EncodeError`, since its time value is `NaN`; so is any other value, including a millisecond number. On decode a count outside ±8.64e15 is a `DecodeError`, because that is where a `Date`'s range ends and no `Date` names it.
+
+A cross-realm `Date` from `node:vm`, an iframe or a worker is accepted through a tag check when `instanceof` fails.
+
+## `m.bigint()`
+
+```ts
+m.bigint(): Schema<bigint>;
+```
+
+Any width up to a 64 MiB magnitude, the same ceiling `m.bytes()` has. Zero is one byte. The encoding is canonical on both sides: a header of `1`, which would be negative zero, and a magnitude with a zero high byte are both refused on decode as `Non-canonical bigint`. See [Byte Layout](/wire-format/layout/#bigints) for the table.
 
 ## `m.literal(value)`
 
@@ -59,6 +79,32 @@ m.array<T>(item: Schema<T>, length?: number): Schema<T[]>;
 Writes a varint count followed by the elements in order. Codec construction fails if `item` can use zero bytes. Arrays are limited to 1,000,000 elements, and impossible counts are rejected before allocation.
 
 Pass `length` for a fixed-size array: the count comes from the schema and is not written, and the element may be zero-width, exactly as in a tuple. `compile` selects this when `minItems` equals `maxItems`. An encoded value whose length disagrees is an `EncodeError`. A zero-width element makes the count answerable to the schema alone, so construction fails when the slots one would fill from no input — multiplied through nesting, summed through zero-width objects and tuples — pass 1,000,000.
+
+## `m.set(item)`
+
+```ts
+m.set<T>(item: Schema<T>): Schema<Set<T>>;
+```
+
+A varint count, then the elements in iteration order. Byte-identical to `m.array(item)` over the same elements; the two differ in what they decode to and in their signature.
+
+Construction fails if `item` can use zero bytes, exactly as `m.array` fails, and there is no fixed-count form to exempt it:
+
+```
+Set elements must occupy at least one byte
+```
+
+Sets are limited to 1,000,000 elements, and an impossible count is rejected before allocation. A **duplicate element** in the payload is a `DecodeError`: folding it would let one value re-encode to a shorter payload than the one it was read from.
+
+## `m.map(key, value)`
+
+```ts
+m.map<K, V>(key: Schema<K>, value: Schema<V>): Schema<Map<K, V>>;
+```
+
+A varint count, then each key followed by its value, in iteration order. Byte-identical to `m.array(m.tuple([key, value]))`. The key may be any schema.
+
+An entry must occupy at least one byte, counting **key and value together**, so `m.map(m.literal("x"), m.string())` builds and `m.map(m.literal("x"), m.literal("y"))` throws `Map entries must occupy at least one byte`. Same 1,000,000 ceiling as a Set, and a **duplicate key** is a `DecodeError` for the same reason.
 
 ## `m.tuple(items)`
 

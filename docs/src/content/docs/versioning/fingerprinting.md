@@ -18,6 +18,8 @@ Use a fingerprint for stored, queued, or version-crossing payloads. Bare payload
 
 The fingerprint hashes the canonical **wire structure**. It changes when bytes can move: adding, removing, or renaming a field; changing a type; required ↔ optional; changing enum members; signed ↔ unsigned integer; or reordering a tuple.
 
+A `Set` and an array of the same element write byte-identical payloads and still fingerprint differently, deliberately: they decode to different values, so a payload written as one must not be read back as the other. A `Map` and an array of `[key, value]` tuples are the same case.
+
 It does **not** change for refinements, property declaration order, strictness, validator choice, or conversion functions. So a stricter `.max()` can reject old data without changing the fingerprint. If validation behavior is part of your data version, carry an application version separately in a header, column, or envelope — a wire fingerprint is not a complete schema version.
 
 Validator choice holds for recursive schemas too, even though vendors spell them differently (Zod points the cycle at the root; Valibot inlines the root and repeats it under `$defs`), because a root that merely duplicates a definition is folded back onto it. **One known exception:** two *mutually* recursive definitions are not deduplicated, so a mutually recursive type may fingerprint differently across vendors. Keep both codecs, or write the type in one validator.

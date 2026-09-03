@@ -63,6 +63,33 @@ describe("wire format digest over generated shapes", () => {
       );
     }
   });
+
+  /**
+   * The same corpus with Date, bigint, Set and Map drawn too. A second digest rather
+   * than a wider first one, so `WIRE_DIGEST` still stands for the bytes it was recorded
+   * against: adding a leaf kind to the generator shifts every later draw, which would
+   * have moved the first digest without a byte on the wire moving.
+   */
+  const RICH_WIRE_DIGEST = "1a10b804ac2078d6";
+
+  it("hashes to a pinned value with rich types included", () => {
+    const lines: string[] = [];
+    for (let seed = 1; seed <= 2000; seed++) {
+      const rng = mulberry32(seed * 2_654_435_761);
+      const gen = schemaGen(rng, 4, false, true);
+      const value = gen.sample(rng);
+      lines.push(`${seed}:${[...gen.schema.encode(value)].join(",")}`);
+    }
+    const actual = digest(lines.join("\n"));
+    if (actual !== RICH_WIRE_DIGEST) {
+      const sample = lines.slice(0, 5).join("\n  ");
+      throw new Error(
+        `Rich wire format digest changed: expected ${RICH_WIRE_DIGEST}, got ${actual}.\n` +
+          `If this is intentional, update RICH_WIRE_DIGEST in this file in the same commit.\n` +
+          `First encodings for reference:\n  ${sample}`,
+      );
+    }
+  });
 });
 
 describe("payload size is pinned per documented schema", () => {
@@ -115,6 +142,10 @@ describe("payload size is pinned per documented schema", () => {
     ["9 absent optionals", m.object(
       Object.fromEntries("abcdefghi".split("").map((key) => [key, m.uint().optional()])),
     ), {}, 2],
+    ["date this century", m.date(), new Date("2026-09-03T12:00:00.000Z"), 6],
+    ["bigint 2^64", m.bigint(), 2n ** 64n, 10],
+    ["set of 2 strings", m.set(m.string()), new Set(["a", "b"]), 5],
+    ["map of 2 entries", m.map(m.string(), m.uint()), new Map([["x", 1], ["y", 300]]), 8],
   ];
 
   for (const [name, schema, value, bytes] of CASES) {
@@ -203,20 +234,25 @@ describe("public API surface is pinned", () => {
       "safeDecode",
       "safeEncode",
       "unchecked",
+      "valibotOverride",
     ]);
   });
 
   it("exposes exactly these schema constructors on m", () => {
     expect(Object.keys(m).sort()).toEqual([
       "array",
+      "bigint",
       "boolean",
       "bytes",
+      "date",
       "enum",
       "float32",
       "float64",
       "int",
       "literal",
+      "map",
       "object",
+      "set",
       "string",
       "tuple",
       "uint",
@@ -249,6 +285,15 @@ describe("type inference is pinned", () => {
     expectTypeOf<Infer<typeof arrayOfString>>().toEqualTypeOf<string[]>();
   });
   const arrayOfString = m.array(m.string());
+
+  it("infers the four rich types as the runtime classes they decode to", () => {
+    expectTypeOf<Infer<ReturnType<typeof m.date>>>().toEqualTypeOf<Date>();
+    expectTypeOf<Infer<ReturnType<typeof m.bigint>>>().toEqualTypeOf<bigint>();
+    expectTypeOf<Infer<typeof setOfString>>().toEqualTypeOf<Set<string>>();
+    expectTypeOf<Infer<typeof mapOfUint>>().toEqualTypeOf<Map<string, number>>();
+  });
+  const setOfString = m.set(m.string());
+  const mapOfUint = m.map(m.string(), m.uint());
 
   it("makes optional fields optional keys, not `| undefined` required keys", () => {
     const schema = m.object({ id: m.uint(), nickname: m.string().optional() });
