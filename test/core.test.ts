@@ -461,6 +461,45 @@ describe("shorn core", () => {
       ]);
     });
 
+    it("keeps encoding correctly after a getter throws mid-encode", () => {
+      // A long payload first, so a dirty offset left behind by the throw would surface
+      // as stale bytes in front of the next payload rather than as zeros. `age` sorts
+      // before `name`, so it is already in the buffer when the getter throws.
+      m.bytes().encode(new Uint8Array(200).fill(0xab));
+      expect(() =>
+        Person.encode({
+          age: 25,
+          get name(): string {
+            throw new Error("boom");
+          },
+          sex: "M",
+        }),
+      ).toThrow("boom");
+      expect([...Person.encode({ name: "Rahul", age: 25, sex: "M" })]).toEqual([
+        25, 5, 82, 97, 104, 117, 108, 1,
+      ]);
+    });
+
+    it("leaves the outer encode's Writer alone when a nested encode throws", () => {
+      // `head` sorts before `inner`, so the outer encode has written into the shared
+      // Writer by the time the getter runs. A nested encode that threw and then released
+      // the pool would hand that Writer to the second nested encode, which would clobber
+      // `head` and carry its bytes into `inner`.
+      const Wrapper = m.object({ head: m.string(), inner: m.bytes() });
+      const value = {
+        head: "outer",
+        get inner() {
+          expect(() => Person.encode({ name: 1 as never, age: 25, sex: "M" })).toThrow();
+          return Person.encode({ name: "Ada", age: 36, sex: "F" });
+        },
+      };
+
+      expect(Wrapper.decode(Wrapper.encode(value))).toEqual({
+        head: "outer",
+        inner: Person.encode({ name: "Ada", age: 36, sex: "F" }),
+      });
+    });
+
     it("releases a buffer grown by one oversized payload", () => {
       m.bytes().encode(new Uint8Array(1_100_000));
       // The next small encode must not still be sitting on the megabyte buffer.
