@@ -27,6 +27,25 @@ Reads the structure, then validates. Throws `DecodeError` for malformed bytes **
 
 Trailing bytes cause an error. An input that is not a `Uint8Array` produces a `DecodeError` rather than a raw `TypeError`. Cross-realm arrays from `node:vm`, an iframe, or jsdom are accepted through a tag check when `instanceof` fails.
 
+## `encodeInto`
+
+```ts
+encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, offset?: number): number;
+```
+
+Encodes into a buffer you own and returns the offset just past the last byte written, so consecutive calls pack a frame:
+
+```ts
+const frame = new Uint8Array(65_536);
+let end = 0;
+for (const event of events) end = encodeInto(codec, event, frame, end);
+socket.send(frame.subarray(0, end));
+```
+
+The bytes are exactly what `codec.encode(value)` returns. What is saved is the output array and the copy into the frame that would follow it, which together are about half the cost of a small encode: on the Person fixture 48 ns to 23 ns, and a 100-message frame in 40% of the time. For a message you hand straight to `send()`, `encode()` is simpler and no slower.
+
+Takes any codec: from `compile()`, `fingerprinted()`, `unchecked()`, or `m`. Throws `EncodeError` when the value does not fit, when `offset` lies outside `target`, or when `target` is not a `Uint8Array`, and names the failing field as `encode()` does. After a too-small target the bytes from `offset` on are unspecified. Decoding needs no counterpart: `decode()` takes any `Uint8Array` view, so hand it `frame.subarray(start, end)`.
+
 ## `safeEncode` / `safeDecode`
 
 ```ts

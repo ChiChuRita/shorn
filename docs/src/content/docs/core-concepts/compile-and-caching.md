@@ -48,7 +48,7 @@ A Content Security Policy without `unsafe-eval` blocks `new Function`. shorn aut
 
 ## The `Writer` is pooled
 
-`encode` reuses an internal `Writer` and resets it after every call, including when encoding throws. It returns an **exact-size copy**, not a view into an oversized buffer, and buffers grown past 64 KiB are released so one large encode does not permanently inflate the process.
+`encode` reuses an internal `Writer` and resets it after every call, including when encoding throws. It returns an **exact-size copy**, not a view into an oversized buffer, and buffers grown past 64 KiB are released so one large encode does not permanently inflate the process. `encodeInto` keeps a second pooled `Writer` pointed at your buffer, and lets go of any target larger than 64 KiB once the call returns, so a one-off frame is not pinned either.
 
 ## When cold setup matters
 

@@ -267,7 +267,7 @@ export class DecodeError extends Error {
 }
 
 export class Writer {
-  private buffer = new Uint8Array(64);
+  private buffer: Uint8Array = new Uint8Array(64);
   private offset = 0;
 
   /**
@@ -280,7 +280,8 @@ export class Writer {
     const required = this.offset + size;
     if (required <= this.buffer.length) return;
 
-    let capacity = this.buffer.length;
+    // `|| 64`: an `encodeInto` target may be empty, and doubling zero never arrives.
+    let capacity = this.buffer.length || 64;
     while (capacity < required) capacity *= 2;
     const next = new Uint8Array(capacity);
     next.set(this.buffer);
@@ -289,7 +290,13 @@ export class Writer {
   }
 
   private floats(): DataView {
-    return (this.view ??= new DataView(this.buffer.buffer));
+    // Over the view's own window, not the whole ArrayBuffer: an `encodeInto` target is
+    // usually a subarray of a frame, and `setFloat64(this.offset)` is relative to it.
+    return (this.view ??= new DataView(
+      this.buffer.buffer,
+      this.buffer.byteOffset,
+      this.buffer.byteLength,
+    ));
   }
 
   byte(value: number): void {
@@ -497,6 +504,81 @@ export class Writer {
  */
 const pooledWriter = new Writer();
 let pooledWriterBusy = false;
+
+/**
+ * The Writer `encodeInto` reuses, created by the first call so a bundle that never
+ * imports the function never holds one. Pooled and guarded as `pooledWriter` is, for
+ * the same re-entrancy: an `encodeInto` reached from a getter inside another gets a
+ * fresh Writer rather than the one already pointed at the outer frame.
+ */
+let targetWriter: Writer | undefined;
+let targetWriterBusy = false;
+
+/**
+ * `Writer`'s private fields, reached from `encodeInto` by cast. Two small methods on
+ * the class would be the tidy way, and a class method is never tree-shaken: measured at
+ * +348 minified and +91 gzip on every `m`-only bundle, past the 1% gate, for a function
+ * none of them import. The test suite reaches the same fields the same way.
+ */
+interface OpenWriter {
+  buffer: Uint8Array;
+  offset: number;
+  view: DataView | undefined;
+}
+
+/**
+ * Encodes into a buffer the caller owns and returns the offset just past the last byte
+ * written, so consecutive calls pack a frame: `end = encodeInto(codec, next, frame, end)`.
+ * The bytes are exactly `codec.encode(value)`'s. What is saved is the output array and
+ * the copy into the frame that follows it, which together were about half of a small
+ * encode: 48 ns to 23 ns on the Person fixture, and a 100-message frame in 40% of the
+ * time. A free function rather than a method on `Schema`, for `encodeAsync`'s reason:
+ * a method is never tree-shaken, and most callers hand `encode()`'s array straight to
+ * a send.
+ *
+ * Throws `EncodeError` when the value does not fit, and `target` may then hold a
+ * partial write from `offset` on. Decoding needs no counterpart: `decode` takes any
+ * `Uint8Array` view, so a reader hands it `frame.subarray(start, end)`.
+ */
+export function encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, offset = 0): number {
+  if (!isUint8Array(target)) {
+    throw new EncodeError(`Expected a Uint8Array target, received ${typeof target}`);
+  }
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > target.length) {
+    throw new EncodeError(`Target offset ${text(offset)} is outside the target`);
+  }
+  const pooled = !targetWriterBusy;
+  const writer = pooled ? (targetWriter ??= new Writer()) : new Writer();
+  if (pooled) targetWriterBusy = true;
+  const open = writer as unknown as OpenWriter;
+  // The DataView survives while the same frame keeps coming back, which is what a
+  // reused frame buffer does; a new target drops it.
+  if (open.buffer !== target) {
+    open.buffer = target;
+    open.view = undefined;
+  }
+  open.offset = offset;
+  try {
+    codec._encode(writer, value);
+    // A value that did not fit made `ensure` grow into a buffer of its own: the target
+    // holds a partial write and the grown copy is garbage. Detected here rather than
+    // refused inside `ensure`, where a flag and a message would sit in every bundle.
+    if (open.buffer !== target) {
+      throw new EncodeError("Target buffer is too small for this value");
+    }
+    return open.offset;
+  } catch (error) {
+    throw withPath(error, codec, value);
+  } finally {
+    // A target larger than the pool keeps, or a buffer grown past one, is let go for
+    // `reset`'s reason: a one-off frame must not stay pinned to a module-level Writer.
+    if (open.buffer !== target || target.length > MAX_RETAINED_BUFFER_BYTES) {
+      open.buffer = new Uint8Array(0);
+      open.view = undefined;
+    }
+    if (pooled) targetWriterBusy = false;
+  }
+}
 
 export class Reader {
   private offset = 0;

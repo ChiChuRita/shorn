@@ -20,7 +20,7 @@ import process from "node:process";
 import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
 import { z } from "zod";
-import { compile, DecodeError, fingerprinted, m, unchecked } from "../dist/index.js";
+import { compile, DecodeError, encodeInto, fingerprinted, m, unchecked } from "../dist/index.js";
 import { documentValue } from "./document-value.mjs";
 import * as fixtures from "./fixtures.mjs";
 import { nanosPerOp, median, readSink } from "./measure.mjs";
@@ -112,6 +112,10 @@ if (!skip("throughput")) {
     record("throughput", `${name} encode`, () => 1e9 / nanosPerOp(() => schema.encode(value).length), "ops/s", "higher", 0.25);
     record("throughput", `${name} decode`, () => 1e9 / nanosPerOp(() => (schema.decode(bytes), 1)), "ops/s", "higher", 0.25);
   }
+  // The same bytes as `person encode`, into a frame the caller owns: what the row above
+  // pays for the output array and the copy that follows it.
+  const frame = new Uint8Array(64);
+  record("throughput", "person encodeInto", () => 1e9 / nanosPerOp(() => encodeInto(person, personValue, frame, 0)), "ops/s", "higher", 0.25);
 }
 
 // ---------------------------------------------------------------------------

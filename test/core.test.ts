@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ObjectSchema } from "../src/core.js";
-import { DecodeError, EncodeError, m, Writer } from "../src/index.js";
+import { DecodeError, EncodeError, encodeInto, m, Writer } from "../src/index.js";
 
 /**
  * `Writer`'s buffer and offset, which are `private` to callers and erased at runtime.
@@ -491,6 +491,94 @@ describe("shorn core", () => {
   // buffer that reuse shares: aliasing between payloads, a nested encode taking
   // the slot, a dirty offset left by a throw, and a grown buffer never released.
   // All four are free with a fresh Writer per call and have to be paid for here.
+  describe("encodeInto", () => {
+    const value = { name: "Rahul", age: 25, sex: "M" } as const;
+    const bytes = [25, 5, 82, 97, 104, 117, 108, 1];
+
+    it("writes the bytes encode() would, at the offset given, and returns the end", () => {
+      const target = new Uint8Array(16).fill(0xee);
+      expect(encodeInto(Person, value, target, 3)).toBe(11);
+      expect([...target.subarray(0, 3)]).toEqual([0xee, 0xee, 0xee]);
+      expect([...target.subarray(3, 11)]).toEqual(bytes);
+      expect([...target.subarray(11)]).toEqual(Array(5).fill(0xee));
+      expect(encodeInto(Person, value, target)).toBe(8);
+      expect([...target.subarray(0, 8)]).toEqual(bytes);
+    });
+
+    it("packs a frame by chaining offsets", () => {
+      const ada = { name: "Ada", age: 36, sex: "F" } as const;
+      const frame = new Uint8Array(64);
+      let end = 0;
+      for (const person of [value, ada]) end = encodeInto(Person, person, frame, end);
+      expect([...frame.subarray(0, end)]).toEqual([...Person.encode(value), ...Person.encode(ada)]);
+    });
+
+    it("writes floats into a target that starts inside its ArrayBuffer", () => {
+      // The DataView has to be over the target's own window: a frame slice rarely
+      // starts at byte offset zero, and a view over the whole buffer would land the
+      // float eight bytes early.
+      const Metrics = m.object({ cpu: m.float64(), memory: m.uint() });
+      const metrics = { cpu: 0.625, memory: 786_432 };
+      const backing = new Uint8Array(32).fill(0xee);
+      const target = backing.subarray(5);
+      const end = encodeInto(Metrics, metrics, target, 2);
+      expect([...target.subarray(2, end)]).toEqual([...Metrics.encode(metrics)]);
+      expect([...backing.subarray(0, 7)]).toEqual(Array(7).fill(0xee));
+    });
+
+    it("refuses a target the value does not fit, and recovers", () => {
+      expect(() => encodeInto(Person, value, new Uint8Array(6))).toThrow(
+        "Target buffer is too small for this value",
+      );
+      expect(encodeInto(Person, value, new Uint8Array(8))).toBe(8);
+      expect([...Person.encode(value)]).toEqual(bytes);
+      // An empty target used to send the Writer's doubling loop nowhere.
+      expect(() => encodeInto(Person, value, new Uint8Array(0))).toThrow(
+        "Target buffer is too small for this value",
+      );
+    });
+
+    it("refuses an offset outside the target and a target that is not a Uint8Array", () => {
+      const target = new Uint8Array(8);
+      for (const offset of [-1, 9, 1.5, Number.NaN]) {
+        expect(() => encodeInto(Person, value, target, offset)).toThrow(EncodeError);
+      }
+      expect(() => encodeInto(Person, value, [] as never)).toThrow(EncodeError);
+    });
+
+    it("names the failing field, as encode() does", () => {
+      expect(() => encodeInto(Person, { name: 1 as never, age: 25, sex: "M" }, new Uint8Array(64))).toThrow(
+        "Expected a string at name",
+      );
+    });
+
+    it("survives an encodeInto reached from inside another", () => {
+      const Wrapper = m.object({ head: m.string(), inner: m.bytes() });
+      const scratch = new Uint8Array(16);
+      const wrapped = {
+        head: "outer",
+        get inner() {
+          return scratch.slice(0, encodeInto(Person, value, scratch));
+        },
+      };
+      const frame = new Uint8Array(64);
+      const end = encodeInto(Wrapper, wrapped, frame);
+      expect(Wrapper.decode(frame.subarray(0, end))).toEqual({
+        head: "outer",
+        inner: Uint8Array.from(bytes),
+      });
+    });
+
+    it("lets a large target go and keeps working on a small one", () => {
+      const big = new Uint8Array(128 * 1024);
+      expect(encodeInto(Person, value, big, 100_000)).toBe(100_008);
+      expect([...big.subarray(100_000, 100_008)]).toEqual(bytes);
+      const small = new Uint8Array(8);
+      expect(encodeInto(Person, value, small)).toBe(8);
+      expect([...small]).toEqual(bytes);
+    });
+  });
+
   describe("the shared encode buffer", () => {
     it("does not let one encoded payload alias the next", () => {
       const first = Person.encode({ name: "Rahul", age: 25, sex: "M" });

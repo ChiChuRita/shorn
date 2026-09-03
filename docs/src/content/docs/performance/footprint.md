@@ -1,6 +1,6 @@
 ---
 title: Footprint
-description: Bundle size, cold setup, and memory. The wire codec is 5.56 KB gzip, 6% under the smallest measured alternative.
+description: Bundle size, cold setup, and memory. The wire codec is 5.58 KB gzip, 6% under the smallest measured alternative.
 ---
 
 ## Bundle size
@@ -9,11 +9,11 @@ An esbuild-minified browser bundle for each imported codec API. Validation libra
 
 | Codec | Minified | Gzip |
 | --- | ---: | ---: |
-| **shorn `m`** (wire codec) | **17.81 KB** | **5.56 KB** |
+| **shorn `m`** (wire codec) | **17.86 KB** | **5.58 KB** |
 | @msgpack/msgpack | 21.20 KB | 5.93 KB |
 | msgpackr | 27.59 KB | 10.39 KB |
 | cbor-x | 29.10 KB | 10.82 KB |
-| shorn `compile` (validating) | 31.66 KB | 9.86 KB |
+| shorn `compile` (validating) | 31.71 KB | 9.88 KB |
 | protobufjs/light | 88.35 KB | 25.93 KB |
 
 **shorn's wire codec is the smallest measured, 6% under `@msgpack/msgpack` gzipped.** `compile` is 77% larger gzipped because it validates on encode and decode, which no other row does. It is still under both msgpackr and cbor-x, which validate nothing. Compare the row that matches what you ship.
@@ -26,12 +26,13 @@ Recent throughput work narrowed that margin from 26%; at 6% it remains a lead to
 
 | import set | minified | gzip | this row adds |
 | --- | ---: | ---: | ---: |
-| `compile` | 31,661 | 9,865 | |
-| + `m` | 32,253 | 10,016 | 151 gzip |
-| + `safeEncode` / `safeDecode` | 32,486 | 10,098 | 82 gzip |
-| + `encodeAsync` / `decodeAsync` | 33,057 | 10,267 | 169 gzip |
-| + `fingerprinted` | 34,468 | 10,700 | 433 gzip |
-| everything | 35,217 | 10,926 | 226 gzip |
+| `compile` | 31,715 | 9,878 | |
+| + `m` | 32,307 | 10,028 | 150 gzip |
+| + `safeEncode` / `safeDecode` | 32,540 | 10,110 | 82 gzip |
+| + `encodeAsync` / `decodeAsync` | 33,111 | 10,279 | 169 gzip |
+| + `fingerprinted` | 34,522 | 10,712 | 433 gzip |
+| + `encodeInto` | 35,065 | 10,897 | 185 gzip |
+| everything | 35,829 | 11,108 | 211 gzip |
 
 **Only users who import a feature pay for it.** Fingerprinting is the most expensive single import at 433 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it.
 
@@ -40,6 +41,8 @@ These numbers have grown across releases, spent on schema coverage — discrimin
 0.3.0 spent 96 gzip bytes on the wire codec (`m`) as the regression gate measures it, the first release to spend them on correctness rather than coverage: a bound on what a fixed-count array of zero-width elements can allocate from an empty payload, which without it was an unrecoverable out-of-memory abort, and refusals that report a hostile value's type instead of running its `toString`. It was 175 bytes before trimming — the message that names the three zero-width shapes moved to [the error reference](/api/errors/) at 28 bytes, one shared message replaced two at 56, and a `try`/`catch` gave way to a `typeof` gate at 28. Throughput and the bytes on the wire did not move.
 
 0.4.1 spent 22 gzip bytes on `m`, 21 of them on a varint reader that keeps multi-byte integers on the integer unit and one on letting objects that reject unknown properties use the generated encoder. Both bought throughput rather than coverage, and `compile` came out 2 bytes smaller.
+
+0.6.0 added `encodeInto`: 185 gzip bytes for a bundle that imports it, and 12 on `m` for the writer's float view now covering the target's own window, since a frame slice rarely starts at byte zero. The two helper methods that would have made it tidier measured at 91 gzip bytes on every `m` bundle and were not shipped.
 
 The functional helpers and fingerprinting tree-shake by export. `m` is one object, so importing it retains all of its builders. Add the size of your validator if it is not already part of the application.
 

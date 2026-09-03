@@ -14,7 +14,7 @@ No IDL, no codegen, no second source of truth.</p>
 <p align="center">
   <a href="https://www.npmjs.com/package/@chichurita/shorn"><img src="https://img.shields.io/npm/v/%40chichurita%2Fshorn" alt="npm version"></a>
   <a href="https://github.com/ChiChuRita/shorn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ChiChuRita/shorn/ci.yml?branch=main" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/gzip-5.56_kB-blue" alt="bundle size, 5.56 kB gzip">
+  <img src="https://img.shields.io/badge/gzip-5.58_kB-blue" alt="bundle size, 5.58 kB gzip">
   <a href="https://github.com/ChiChuRita/shorn/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/%40chichurita%2Fshorn" alt="MIT license"></a>
 </p>
 
@@ -89,7 +89,7 @@ branches overlap, streaming, or automatic schema evolution. `Date`, `bigint`,
 
 The saving comes from the schema, not a compressor, so it costs no CPU: up to
 6.2× faster to encode and 13.7× faster to decode than JSON bytes. The low-level
-`m` API bundles to 5.56 KB gzip; `compile` with validation is 9.86 KB
+`m` API bundles to 5.58 KB gzip; `compile` with validation is 9.88 KB
 (esbuild-minified browser bundles, schema declarations excluded).
 
 ## Documentation

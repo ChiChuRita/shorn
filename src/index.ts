@@ -6,6 +6,7 @@ export {
   Reader,
   Schema,
   Writer,
+  encodeInto,
   m,
 } from "./core.js";
 export type { EnumValue, Infer, ObjectOutput, Shape } from "./core.js";

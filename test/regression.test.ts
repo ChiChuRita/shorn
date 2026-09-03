@@ -197,6 +197,7 @@ describe("public API surface is pinned", () => {
       "decodeAsync",
       "encode",
       "encodeAsync",
+      "encodeInto",
       "fingerprinted",
       "m",
       "safeDecode",

@@ -71,6 +71,10 @@ const importSets = [
     "+ fingerprinted",
     "compile, m, safeEncode, safeDecode, encodeAsync, decodeAsync, fingerprinted",
   ],
+  [
+    "+ encodeInto",
+    "compile, m, safeEncode, safeDecode, encodeAsync, decodeAsync, fingerprinted, encodeInto",
+  ],
   ["everything", null],
 ];
 

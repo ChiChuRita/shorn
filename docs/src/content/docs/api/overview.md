@@ -7,6 +7,7 @@ description: The whole public surface on one page.
 // Encode and decode
 encode(schema, value, structure?): Uint8Array;
 decode(schema, bytes, structure?): Output;
+encodeInto(codec, value, target, offset?): number; // into a buffer you own
 
 safeEncode(schema, value, structure?): SafeResult<Uint8Array>;
 safeDecode(schema, bytes, structure?): SafeResult<Output>;
@@ -39,6 +40,7 @@ DecodeError; // .offset
 | A codec object to pass around | `compile` |
 | **Stored, queued, version-crossing** | **`fingerprinted(compile(schema), { bytes: 4 })`** |
 | Trusted producer you own, both ends | `unchecked(compile(schema))` |
+| You own the output buffer: frames, batches | `encodeInto(codec, value, target, offset)` |
 | No validator, or you need `bytes`/`float32` | `m` |
 
 All entry points use the same structural decode path through `Schema.decode`, so they report the same errors.
