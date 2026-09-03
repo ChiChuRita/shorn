@@ -84,6 +84,24 @@ describe("shorn core", () => {
     }
   });
 
+  it("round-trips integers at every varint width boundary through both readers", () => {
+    // The decoder changes gear at 2^28, into its second integer register, and at 2^53,
+    // into BigInt, which a signed value past 2^52 reaches through its zigzag. Both sides
+    // of every seven-bit width boundary, so each gear reads its own edges.
+    const boundaries = [
+      0, 1, 127, 128, 16_383, 16_384, 2 ** 21 - 1, 2 ** 21, 2 ** 28 - 1, 2 ** 28, 2 ** 35,
+      2 ** 42, 2 ** 49, 2 ** 52, 2 ** 52 + 1, Number.MAX_SAFE_INTEGER,
+    ];
+    const uint = m.uint();
+    for (const value of boundaries) {
+      expect(uint.decode(uint.encode(value)), String(value)).toBe(value);
+    }
+    const int = m.int();
+    for (const value of [...boundaries, ...boundaries.slice(1).map((value) => -value)]) {
+      expect(int.decode(int.encode(value)), String(value)).toBe(value);
+    }
+  });
+
   it("supports unsigned safe integers and Unicode strings", () => {
     const Value = m.object({ count: m.uint(), text: m.string() });
     const value = { count: Number.MAX_SAFE_INTEGER, text: "Grüße 👋 राहुल" };
@@ -251,6 +269,20 @@ describe("shorn core", () => {
     expect(() => m.string().decode(Uint8Array.of(2, 0xc3, 0x28))).toThrow(DecodeError);
     expect(() => m.uint().decode(Uint8Array.of(0x80, 0))).toThrow(/Non-canonical/);
     expect(() => m.int().decode(Uint8Array.of(0x80, 0))).toThrow(/Non-canonical/);
+    // 2^56 in nine bytes: unsafe for the unsigned reader, and still unsafe once halved.
+    const large = Uint8Array.from([...Array(8).fill(0x80), 0x01]);
+    expect(() => m.uint().decode(large)).toThrow(/safe range/);
+    expect(() => m.int().decode(large)).toThrow(/safe range/);
+    // 2^53 in eight bytes: the first value the unsigned reader refuses is the zigzag of
+    // 2^52, which the signed one still accepts.
+    const edge = Uint8Array.from([...Array(7).fill(0x80), 0x10]);
+    expect(() => m.uint().decode(edge)).toThrow(/safe range/);
+    expect(m.int().decode(edge)).toBe(2 ** 52);
+    for (const schema of [m.uint(), m.int()]) {
+      expect(() => schema.decode(Uint8Array.from(Array(11).fill(0x80)))).toThrow(
+        /Invalid variable-length integer/,
+      );
+    }
   });
 
   it("bounds the slots a fixed-count array of zero-width elements can allocate", () => {

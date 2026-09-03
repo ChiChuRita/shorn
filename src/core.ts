@@ -649,68 +649,102 @@ export class Reader {
     return this.varuintSlow();
   }
 
+  /**
+   * The unsigned reader past one byte: the multi-byte body `varuintWide` shares,
+   * refusing a result that body had to widen. Both readers have the same shape, an
+   * inline one-byte path in front of one small slow body, and two shapes that look
+   * equivalent are cliffs, measured on 500-element arrays:
+   *
+   *   - delegating this to a `varuintWide` that still held its BigInt tail inline
+   *     measured 3x slower on 2- and 3-byte uints;
+   *   - rewriting `varuintWide` on the integer unit without the inline one-byte path
+   *     measured 2x slower on one- and two-byte ints.
+   *
+   * Both are the inlining-budget behaviour `float64`/`float64Slow` documents: the hot
+   * body has to stay small and BigInt-free, so the tail lives in `varuintBig`.
+   */
   private varuintSlow(): number {
-    let result = 0;
-    let factor = 1;
-
-    for (let index = 0; index < 8; index++) {
-      const byte = this.byte();
-      result += (byte & 0x7f) * factor;
-      if (!Number.isSafeInteger(result)) {
-        throw new DecodeError("Integer exceeds JavaScript's safe range", this.offset);
-      }
-      if ((byte & 0x80) === 0) {
-        if (index > 0 && byte === 0) {
-          throw new DecodeError("Non-canonical variable-length integer", this.offset);
-        }
-        return result;
-      }
-      factor *= 0x80;
+    const value = this.varuintWideSlow();
+    if (typeof value !== "number") {
+      throw new DecodeError("Integer exceeds JavaScript's safe range", this.offset);
     }
-
-    throw new DecodeError("Invalid or unsafe variable-length integer", this.offset);
+    return value;
   }
 
   /**
    * Stays a `number` while the value is representable as one, widening to `bigint`
    * only when it is not. The unconditional `bigint` reader this replaced cost the
    * signed-integer decoder three BigInt allocations per value in the range where none
-   * were needed.
+   * were needed. The same inline one-byte path as `varuint`, then the same slow body;
+   * `varuintSlow` names the two shapes that measured as cliffs.
    */
   varuintWide(): number | bigint {
-    let result = 0;
-    let factor = 1;
+    const first = this.buffer[this.offset];
+    if (first !== undefined && first < 0x80) {
+      this.offset++;
+      return first;
+    }
+    return this.varuintWideSlow();
+  }
 
-    for (let index = 0; index < 10; index++) {
-      const byte = this.byte();
-      const digit = byte & 0x7f;
-      const next = result + digit * factor;
-      if (!Number.isSafeInteger(next)) {
-        let large = BigInt(result) + (BigInt(digit) << BigInt(index * 7));
-        if ((byte & 0x80) === 0) return large;
-
-        for (let largeIndex = index + 1; largeIndex < 10; largeIndex++) {
-          const largeByte = this.byte();
-          large |= BigInt(largeByte & 0x7f) << BigInt(largeIndex * 7);
-          if ((largeByte & 0x80) === 0) {
-            if (largeByte === 0) {
-              throw new DecodeError("Non-canonical variable-length integer", this.offset);
-            }
-            return large;
-          }
-        }
-        throw new DecodeError("Invalid variable-length integer", this.offset);
+  /**
+   * Two registers so every byte stays on the integer unit, as `Writer.varuint` does on
+   * the way out: bytes one to four fill `low`, five to eight fill `high`, and 28 bits of
+   * payload cannot overflow int32 in either. The float loop this replaced, a multiply,
+   * an add and a `Number.isSafeInteger` per byte from the fifth, measured 4% slower on
+   * 500 millisecond timestamps, head to head over five processes. A value past 2^53 is
+   * read again in `varuintBig`, from the start `offset` still marks since it is only
+   * committed on success; so is anything that reaches a ninth byte. Entered only past
+   * the one-byte path, so the first byte here is never terminal and a terminal zero is
+   * non-canonical at any position.
+   */
+  private varuintWideSlow(): number | bigint {
+    const buffer = this.buffer;
+    let at = this.offset;
+    let low = 0;
+    for (let shift = 0; shift < 28; shift += 7) {
+      if (at >= buffer.length) throw new DecodeError("Unexpected end of input", at);
+      const byte = buffer[at++]!;
+      low |= (byte & 0x7f) << shift;
+      if (byte < 0x80) {
+        if (byte === 0) throw new DecodeError("Non-canonical variable-length integer", at);
+        this.offset = at;
+        return low;
       }
-      result = next;
-      if ((byte & 0x80) === 0) {
-        if (index > 0 && byte === 0) {
+    }
+    let high = 0;
+    for (let shift = 0; shift < 28; shift += 7) {
+      if (at >= buffer.length) throw new DecodeError("Unexpected end of input", at);
+      const byte = buffer[at++]!;
+      high |= (byte & 0x7f) << shift;
+      if (byte < 0x80) {
+        if (byte === 0) throw new DecodeError("Non-canonical variable-length integer", at);
+        // 2^25 in the high register is 2^53 in the value.
+        if (high >= 0x2000000) return this.varuintBig();
+        this.offset = at;
+        return low + high * 0x10000000;
+      }
+    }
+    // A ninth byte means a value past 2^56 or a malformed encoding; the tail tells which.
+    return this.varuintBig();
+  }
+
+  /**
+   * A value past 2^53, or an encoding past eight bytes, read again from its first byte
+   * in BigInt: rare, so cold, and the one place the ten-byte cap is enforced.
+   */
+  private varuintBig(): bigint {
+    let large = 0n;
+    for (let shift = 0n; shift < 70n; shift += 7n) {
+      const byte = this.byte();
+      large |= BigInt(byte & 0x7f) << shift;
+      if (byte < 0x80) {
+        if (byte === 0) {
           throw new DecodeError("Non-canonical variable-length integer", this.offset);
         }
-        return result;
+        return large;
       }
-      factor *= 0x80;
     }
-
     throw new DecodeError("Invalid variable-length integer", this.offset);
   }
 

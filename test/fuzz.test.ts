@@ -294,8 +294,13 @@ describe("fuzz: the decoder never escapes its contract", () => {
 });
 
 describe("fuzz: length, count and index gates", () => {
-  it("rejects every non-minimal varint encoding", () => {
-    for (const value of [0, 1, 127, 128, 300, 16384, 2097152]) {
+  /** One value at every varint width, one to eight bytes. */
+  const varintWidths = [1, 128, 16384, 2097152, 2 ** 28, 2 ** 35, 2 ** 42, 2 ** 49];
+
+  it("rejects every non-minimal varint encoding through both readers", () => {
+    // The signed reader takes the same bytes as a zigzag, so it must refuse the same
+    // padding. Past eight bytes the padding runs into the ten-byte cap as well.
+    for (const value of [0, 300, ...varintWidths]) {
       const minimal = m.uint().encode(value);
       for (let extra = 1; extra <= 3; extra++) {
         const padded = Uint8Array.from([
@@ -304,8 +309,25 @@ describe("fuzz: length, count and index gates", () => {
           ...Array.from({ length: extra - 1 }, () => 0x80),
           0x00,
         ]);
-        expectDecodeError(() => m.uint().decode(padded), padded.length);
+        for (const schema of [m.uint(), m.int()]) {
+          expectDecodeError(() => schema.decode(padded), padded.length);
+        }
       }
+    }
+  });
+
+  it("rejects a truncated varint at every width through both readers", () => {
+    for (const value of varintWidths) {
+      const bytes = m.uint().encode(value);
+      for (let length = 0; length < bytes.length; length++) {
+        for (const schema of [m.uint(), m.int()]) {
+          expectDecodeError(() => schema.decode(bytes.slice(0, length)), length);
+        }
+      }
+    }
+    // Cut inside the BigInt tail, which the eighth byte of all-ones reaches.
+    for (const schema of [m.uint(), m.int()]) {
+      expectDecodeError(() => schema.decode(Uint8Array.from(Array(8).fill(0xff))), 8);
     }
   });
 
@@ -313,6 +335,12 @@ describe("fuzz: length, count and index gates", () => {
     expectDecodeError(() => m.uint().decode(Uint8Array.from(Array(8).fill(0x80))), 8);
     expectDecodeError(() => m.uint().decode(Uint8Array.from([...Array(8).fill(0xff), 0x01])), 9);
     expectDecodeError(() => m.int().decode(Uint8Array.from(Array(10).fill(0x80))), 10);
+    // 2^56 in nine bytes is past 2^53 for the unsigned reader, and its zigzag halves to
+    // a value that still is; eleven continuation bytes are past both readers' cap.
+    for (const schema of [m.uint(), m.int()]) {
+      expectDecodeError(() => schema.decode(Uint8Array.from([...Array(8).fill(0x80), 0x01])), 9);
+      expectDecodeError(() => schema.decode(Uint8Array.from(Array(11).fill(0x80))), 11);
+    }
   });
 
   it("rejects declared byte lengths that are invalid or exceed the input", () => {
