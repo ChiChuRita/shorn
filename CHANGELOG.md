@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.4.1
+
+**Same bytes, faster in three places.** Every payload written by 0.4.0 decodes unchanged, every fingerprint is the one it was, and no export changed shape. The patch is in how the codec runs, not in what it writes: every input that encoded or decoded before still does, to the same bytes and the same value, and every input that was refused is refused with the same message, except one retired varint message named below. Figures are medians over five separate processes against the 0.4.0 build on the same machine; the regression gate read no row outside its tolerance.
+
+### ArkType and Valibot objects take the generated encoder
+
+Every ArkType object and Valibot's `v.object()` produce a JSON Schema with no `additionalProperties`, so shorn checks for unknown keys when it encodes. That check used to keep the whole object on the interpreted field loop, and the same eight bytes cost 94 ns from an ArkType schema against 48 ns from a Zod one, whose schema says `additionalProperties: false`. The scan for unknown keys now runs first and the generated function writes the fields. An ArkType person encodes 32% faster through `unchecked()`, an array of a hundred of them 42% faster, and a validated encode 23% faster. Zod objects were already generated and do not move. The refusal is the same: an unknown key throws `Unknown object property "x"` before a field is written.
+
+### UUIDs decode seven times faster
+
+A `format: "uuid"` field decoded through `toString(16)` on four-byte words. Those words are heap numbers, V8's radix conversion for them is slow, and it was the whole cost: about 600 ns per UUID. A 256-entry byte-to-hex table brings that to about 80 ns for the same lowercase, dashed string. The table is built by the first UUID decoded, so a bundle that imports only `m`, which cannot build a UUID schema, does not carry it. Encode was already fast and is untouched.
+
+### Multi-byte integers decode on the integer unit
+
+`Reader` had two varint loops, one for unsigned values and one for the ZigZag path signed integers take, both in float arithmetic with a `Number.isSafeInteger` per byte, and only the unsigned one had an inline one-byte fast path. They now share one slow body behind the same fast path. Bytes one to four land in one 32-bit register and five to eight in a second, combined once; a value past 2^53 or an encoding past eight bytes goes to a separate BigInt tail. Two-byte signed integers decode 12% faster, two-byte unsigned 11%, three-byte 8%, six-byte millisecond timestamps 19%, and the nested-event fixture 4%. The regression gate, a different harness, read the 500-timestamp row 22% up and nested decode 8% up.
+
+Two shapes that look the same are cliffs, and the source now says so: a shared body that keeps its BigInt code inline runs 3x slower on two- and three-byte values, and an integer-unit signed reader without the inline one-byte path runs 2x slower on small ones. Both are the inlining-budget behaviour the float reader already documents.
+
+One message is retired: `Invalid or unsafe variable-length integer`. An unsigned varint past its cap now reports `Unexpected end of input` or `Invalid variable-length integer`, at an offset inside the input. The set of accepted and refused inputs is identical.
+
+### What it costs, and what was measured and not shipped
+
+The `m` bundle row grows by 22 gzip bytes as the regression gate measures it, 5,539 to 5,561, 21 of them the varint reader. `compile` is 2 bytes smaller. The wire codec is 6% under `@msgpack/msgpack` gzipped; the footprint page had said 8% since before 0.3.0 and is corrected, with every other published number, from one run of this build.
+
+Removing the `finally` that releases the pooled `Writer` in `Schema.encode` measured 10% on a person encode as a prototype and 0% once `finish()` was kept inside the `try`, where it has to be so that an allocation failure still releases the pool. It stays as it was, and two tests now pin the release after a throwing encode so the next attempt starts from the constraint. A CPU profile of a person encode puts the output allocation in `finish()` at a third of the time, more than every `Writer` leaf call together.
+
+The throughput tables read lower on person encode than the 0.4.0 tables, 21.0M against 25.1M. The gate puts this build within noise of the recorded baseline on that row, and a control run of the unchanged 0.4.0 tree on the same day read 15% under its own recording; each table is one run of one build, and no row is carried over.
+
 ## 0.4.0
 
 **Same bytes, and a second way to reach them.** Every payload written by 0.3.x decodes unchanged, every fingerprint is the one it was, and no export changed shape. The minor bump is for a surface added beside the library rather than anything altered inside it: installing the package now also installs a command.
