@@ -957,7 +957,8 @@ describe("cross-vendor fuzz", () => {
 describe("refusals are the same from every vendor", () => {
   const refusals: ReadonlyArray<{
     readonly name: string;
-    readonly zod: () => unknown;
+    /** Absent when zod's JSON Schema does not describe the same thing. */
+    readonly zod?: () => unknown;
     /** Absent when valibot's JSON Schema does not describe the same thing. */
     readonly valibot?: () => unknown;
     readonly message: RegExp;
@@ -975,16 +976,18 @@ describe("refusals are the same from every vendor", () => {
       message: /nullable, discriminated and type-disjoint/,
     },
     {
-      // The field does not survive either vendor's JSON Schema: valibot's key sets the
-      // prototype of `properties`, zod's is dropped from `properties` and left in
-      // `required`. Both used to compile to an object missing the field, and an
-      // unvalidated codec then dropped its value on the wire without a word.
+      // valibot's key sets the prototype of the `properties` object instead of joining
+      // it, so the field is invisible below and would compile to an object missing it,
+      // with an unvalidated codec then dropping its value on the wire without a word.
+      // That is the refusal this case pins, and it is valibot's alone.
       //
-      // Only the *required* spelling is refusable. Optional under zod, the field leaves
-      // no trace at all in the document — nothing shorn can see — so it is still
-      // silently absent from the bytes. That one has to be fixed in zod.
-      name: "a field named __proto__, which no vendor's JSON Schema can carry",
-      zod: () => compile(z.object({ ["__proto__"]: z.string(), safe: z.int() })),
+      // No zod entry, because what zod does here is a zod version rather than a shorn
+      // rule. Up to 4.4 it dropped the field from `properties` and left it in
+      // `required`, which shorn refuses through the `required` path. From 4.5 (#6346)
+      // it writes the key as an own property, which compiles to an honest wire shape,
+      // while its parser (#6386) strips the field from every value it accepts, so a
+      // validated codec never sees one.
+      name: "a field named __proto__ that sets the prototype of properties",
       valibot: () => compile(val(v.object({ ["__proto__"]: v.string(), safe: vint }))),
       message: /"__proto__" property does not survive/,
     },
@@ -1008,8 +1011,10 @@ describe("refusals are the same from every vendor", () => {
 
   for (const refusal of refusals) {
     it(refusal.name, () => {
-      expect(refusal.zod).toThrow(EncodeError);
-      expect(refusal.zod).toThrow(refusal.message);
+      if (refusal.zod !== undefined) {
+        expect(refusal.zod).toThrow(EncodeError);
+        expect(refusal.zod).toThrow(refusal.message);
+      }
       if (refusal.valibot === undefined) return;
       expect(refusal.valibot).toThrow(EncodeError);
       expect(refusal.valibot).toThrow(refusal.message);

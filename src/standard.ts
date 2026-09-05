@@ -629,7 +629,17 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
   // validation question the vendor has already answered by the time shorn runs.
   // Zod writes a plain union as `anyOf` and a discriminated one as `oneOf`; both
   // arrive here as the same list of branches.
-  const union = schema.anyOf ?? schema.oneOf;
+  //
+  // A `type` array is the same union written short. Zod 4.5 compacts an `anyOf` over
+  // bare types to one, so `z.union([z.string(), z.number()])` and `z.string().nullable()`
+  // arrive this way from 4.5 and as `anyOf` from 4.4 and from every other vendor. It is
+  // expanded back into the branches it abbreviates and read by the same rules, so both
+  // spellings give one wire shape and one fingerprint. Every other keyword stays on
+  // every branch, and each branch reads only the ones that belong to its own type.
+  const union =
+    schema.anyOf ??
+    schema.oneOf ??
+    (Array.isArray(schema.type) ? schema.type.map((type) => ({ ...schema, type })) : undefined);
   if (Array.isArray(union)) {
     const branches = union.map(asSchema);
     const nonNull = branches.filter((branch) => branchType(branch) !== "null");
@@ -682,17 +692,6 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
     throw new EncodeError(
       "Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported; give the branches one property that is a distinct const in each, or make no two branches share a JSON type",
     );
-  }
-
-  if (Array.isArray(schema.type)) {
-    const nonNull = schema.type.filter((type) => type !== "null");
-    // `["null"]` and `["null","null"]` name one type, for the reason the all-null union
-    // above does.
-    if (nonNull.length === 0 && schema.type.length > 0) return { literal: null };
-    if (schema.type.length === 2 && nonNull.length === 1) {
-      return nullableOf(wireShape({ ...schema, type: nonNull[0] }, ctx));
-    }
-    throw new EncodeError("Only nullable JSON Schema type arrays are currently supported");
   }
 
   if ("const" in schema) {

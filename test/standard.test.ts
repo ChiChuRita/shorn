@@ -467,7 +467,10 @@ describe("Standard Schema adapter", () => {
     it("names the combinator when one carries the refusal", () => {
       // "Unsupported Standard JSON Schema type undefined" named neither the schema
       // nor the reason; the keyword is the one thing the caller can act on.
-      expect(() => compile(z.intersection(z.object({ a: z.string() }), z.object({ b: z.int() }))))
+      // Two strings rather than two objects, because Zod 4.5 (#6461) folds an
+      // intersection of two objects into a single object and writes no `allOf` at all;
+      // an intersection of non-objects still writes one on both 4.4 and 4.5.
+      expect(() => compile(z.intersection(z.string(), z.string().min(2))))
         .toThrow(/Unsupported JSON Schema combinator allOf/);
       expect(() => compile(z.never())).toThrow(/Unsupported JSON Schema combinator not/);
     });
@@ -800,6 +803,37 @@ describe("Standard Schema adapter", () => {
       expect([...Value.encode("hi")]).toEqual([1, 2, 104, 105]);
       expect(Value.decode(Value.encode("hi"))).toBe("hi");
       expect(Value.decode(Value.encode(42))).toBe(42);
+    });
+
+    it("reads a type array as the union it abbreviates, with the same bytes and fingerprint", () => {
+      // Zod 4.5 writes a union of bare types as `type: [...]` where 4.4 wrote `anyOf`,
+      // so the two spellings have to be one shape or a `pnpm update zod` moves every
+      // fingerprint that holds such a union. Both are handed in as plain documents, so
+      // the test says the same thing whichever version is installed.
+      const validator = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+      const long = fingerprinted(
+        compile(validator, {
+          anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }, { type: "null" }],
+        }),
+      );
+      const short = fingerprinted(
+        compile(validator, { type: ["string", "number", "boolean", "null"] }),
+      );
+      expect(short.fingerprintHex).toBe(long.fingerprintHex);
+      // Ordered by type name, so `string` is index 3 of ["boolean","null","number","string"].
+      const bare = compile(validator, { type: ["string", "number", "boolean", "null"] });
+      expect([...bare.encode("x")]).toEqual([3, 1, 120]);
+      for (const value of ["x", 1.5, true, null]) {
+        expect([...short.encode(value)]).toEqual([...long.encode(value)]);
+        expect(short.decode(short.encode(value))).toEqual(value);
+      }
+      // Two members with one null is a nullable, as it always was for a type array.
+      const nullable = compile(z.string().nullable(), { type: ["string", "null"] });
+      expect([...nullable.encode(null)]).toEqual([...compile(z.string().nullable()).encode(null)]);
+      // A pair no value tells apart is refused with the union message, not a type-array one.
+      expect(() =>
+        compile(z.union([z.int(), z.number()]), { type: ["integer", "number"] }),
+      ).toThrow(/type-disjoint JSON Schema unions/);
     });
 
     it("costs the one index byte a discriminated union costs", () => {
