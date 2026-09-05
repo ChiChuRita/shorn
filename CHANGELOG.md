@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.1
+
+**Same bytes, one shape that compiles again.** Every payload written by 0.7.0 decodes unchanged and every fingerprint is the one it was. The patch is in what shorn reads, not in what it writes.
+
+### A JSON Schema `type` array is read as the union it abbreviates
+
+Zod 4.5.0 changed how `toJSONSchema()` spells a union of bare types (colinhacks/zod#6339). `z.union([z.string(), z.number()])` and `z.string().nullable()` used to come out as `anyOf`, and from 4.5 come out as `type: ["string", "number"]` and `type: ["string", "null"]`. Valibot and ArkType still write `anyOf`, and so does Zod when any branch carries a constraint. shorn read the two-member nullable form and refused every other `type` array with `Only nullable JSON Schema type arrays are currently supported`, so a plain type-disjoint union from Zod 4.5 did not compile at all.
+
+A `type` array is now expanded into one branch per member and read by the same rules as `anyOf` and `oneOf`. Both spellings give one wire shape and one fingerprint, so a codec built from Zod 4.4 and one built from Zod 4.5 read each other's bytes, and a `pnpm update zod` moves nothing. A union that no value can tell apart, such as `type: ["integer", "number"]`, is refused with the union message: `Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported`. The type-array message is retired.
+
+### What it costs
+
+Nothing. The `compile` bundle row is 31 gzip bytes smaller, since one branch and one message are gone; `m` is unchanged. Zod 4.4 remains the version shorn is developed against; the test suite was run against 4.5.4 as well and is green on both.
+
 ## 0.7.0
 
 **Wire-breaking for one shape: a `format: "date-time"` string.** A schema holding `z.iso.datetime()`, or any JSON Schema string with that format, now writes different bytes and derives a different fingerprint, so payloads it wrote under 0.6.0 cannot be read by 0.7.0 and the reverse. Every other shape writes the bytes it wrote before and keeps its fingerprint. The minor bump is the pre-1.0 rule for a wire change; the bold line is the warning the number cannot carry.
