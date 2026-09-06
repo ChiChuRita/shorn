@@ -7,7 +7,7 @@ import "../styles/strips.css";
 
 <section data-playground aria-labelledby="toy">
   <h2 id="toy">Try it</h2>
-  <p>Edit a Zod schema and payload. This runs the real encoder in your tab.</p>
+  <p>Edit the Zod schema and the payload. The real encoder runs in your browser tab, and nothing you type leaves it.</p>
 
   <div class="io">
     <label>
@@ -209,9 +209,9 @@ import "../styles/strips.css";
         jsonCount.textContent = ` · ${jsonSize} bytes`;
         wireCount.textContent = ` · ${bytes.length} bytes`;
         packed.textContent =
-          `No field names in there; they stay in your schema, ` +
-          `which is where the saving comes from. Whole numbers are varints, enum members ` +
-          `an index, strings UTF-8 behind a length.`;
+          `There are no field names in those bytes. They stay in your schema, and that ` +
+          `is where the saving comes from. Whole numbers take as few bytes as they need, ` +
+          `an enum member is a small index, and a string is its UTF-8 bytes behind a length.`;
         const saved = jsonSize - bytes.length;
         deltaEl.textContent = saved === 0 ? "same size" : `${saved > 0 ? "−" : "+"}${Math.abs(saved)} bytes`;
         diagram.hidden = false;

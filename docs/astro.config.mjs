@@ -18,7 +18,7 @@ export default defineConfig({
         starlightThemeNext(),
         starlightLlmsTxt({
           // llms-small.txt only strips note/tip asides and whitespace by default, and
-          // these docs have almost none of either — it came out within 10% of the full
+          // these docs have almost none of either, so it came out within 10% of the full
           // file, which is no choice at all. Abridged here means "how to use shorn",
           // dropping the pages that argue for it or measure it.
           exclude: ["comparisons", "performance/**"],
@@ -99,7 +99,7 @@ export default defineConfig({
         ThemeSelect: "./src/components/Empty.astro",
         // Dropping the picker only removed the *control*. ThemeProvider's inline
         // script still read `prefers-color-scheme` and set `data-theme="light"`,
-        // which matches Starlight's light block — equal specificity to the `:root`
+        // which matches Starlight's light block, with equal specificity to the `:root`
         // mapping in custom.css and later in the bundle, so it won. That block
         // repoints the ink ramp (`--sl-color-white: #181818`) but not
         // `--sl-color-bg`, which custom.css pins to #0a0a0a: near-black text on a

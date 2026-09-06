@@ -32,15 +32,16 @@ const payloads = [
 
 <Landing
   title="shorn: compact binary serialization for Zod, Valibot, and ArkType"
-  description="One-line drop-in binary serialization for the Zod, Valibot, or ArkType schema you already use. No wire schema, schema file, codegen, or second source of truth."
+  description="Binary serialization for the Zod, Valibot, or ArkType schema you already have. Install it and pass your schema to encode and decode. No schema file, no code generation, no second copy of your types."
   headline="Your validator is the wire format."
   size="md"
   cta="Read the docs"
   code={demo}
 >
-  Already have a Zod, Valibot, or ArkType schema? shorn is a one-line drop-in:
-  install it and pass your schema directly to <code>encode</code> and
-  <code>decode</code>. No wire schema, schema file, codegen, or migration.
+  Already have a Zod, Valibot, or ArkType schema? Then you already have a binary
+  format. Install shorn and pass that schema to <code>encode</code> and
+  <code>decode</code>. There is no schema file to write, no code to generate, and
+  nothing to migrate.
 
   {/* The argument itself, not a table about it: the same record as text and as bytes,
       and the shearing of one into the other. */}
@@ -49,33 +50,34 @@ const payloads = [
   <section slot="after" class="plain drop-in" aria-labelledby="drop-in">
     <h2 id="drop-in">Install it. Keep your schema.</h2>
     <p>
-      shorn derives the wire shape from your schema; Zod, Valibot, or ArkType still
-      owns validation behavior, transformations, and errors.
+      shorn reads the wire layout from your schema. Zod, Valibot, or ArkType still
+      owns validation, transformations, and error messages, exactly as before.
     </p>
     <dl class="setup">
       <div class="self">
         <dt>shorn</dt>
         <dd>
-          <strong>Use your existing validator directly.</strong> Call
-          <code>encode(schema, value)</code> and <code>decode(schema, bytes)</code>.
+          <strong>Nothing to set up.</strong> Call
+          <code>encode(schema, value)</code> and <code>decode(schema, bytes)</code>
+          with the validator you already have.
         </dd>
       </div>
       <div>
         <dt>Avro</dt>
         <dd>
-          Define and maintain an Avro schema, inline or in its own file, then create an
-          Avro codec.
+          Write and maintain a second schema in Avro's own format, then build an Avro
+          codec from it.
         </dd>
       </div>
       <div>
         <dt>SchemaPack</dt>
-        <dd>Repeat the shape with SchemaPack's builder before encoding.</dd>
+        <dd>Describe the same shape a second time with SchemaPack's builder.</dd>
       </div>
       <div>
         <dt>Protobuf</dt>
         <dd>
-          Create a <code>.proto</code> file, then run code generation or configure runtime
-          reflection.
+          Write a <code>.proto</code> file, then either generate code from it or set up
+          runtime reflection.
         </dd>
       </div>
     </dl>
@@ -106,7 +108,7 @@ const payloads = [
         </tbody>
       </table>
       <figcaption>
-        shorn matches Avro's eight bytes without adding an Avro schema.
+        shorn matches Avro's eight bytes without asking you to write an Avro schema.
       </figcaption>
     </figure>
   </section>
@@ -117,13 +119,14 @@ const payloads = [
     <h2 id="fit">Built for shared TypeScript schemas</h2>
     <div class="fit">
       <p class="in">
-        Reach for it in caches, RPC, worker messages, and compact application storage.
+        Use it where both ends are TypeScript and share the schema: caches, RPC, worker
+        messages, job queues, and compact application storage.
       </p>
       <p class="out">
-        Reach for something else for cross-language readers, self-describing payloads,
-        or automatic schema evolution. <code>fingerprinted()</code> stamps the wire shape
-        into the bytes, so a payload an older shape wrote is rejected rather than decoded
-        wrong.
+        Use something else when a reader is in another language, when a payload has to
+        describe itself, or when the two ends need to change schemas independently.
+        <code>fingerprinted()</code> stamps the wire shape into the bytes, so a payload
+        written by an older shape is rejected instead of decoded into the wrong value.
       </p>
     </div>
   </section>
@@ -134,15 +137,16 @@ const payloads = [
       <article>
         <h3>Canonical bytes</h3>
         <p>
-          The same value always encodes to the same bytes, so a payload can be a cache
-          key or a content hash.
+          The same value always encodes to exactly the same bytes, so a payload can serve
+          as a cache key or a content hash.
         </p>
       </article>
       <article>
         <h3>Defensive decoding</h3>
         <p>
-          Decoding bytes you did not write is where binary formats get exploited. Bad
-          lengths, invalid UTF-8, and trailing data are rejected, with bounded reads.
+          Decoding bytes you did not write is where binary formats get exploited. The
+          decoder checks every length against the input before it allocates, and rejects
+          invalid UTF-8 and leftover bytes.
         </p>
       </article>
     </div>
@@ -151,8 +155,8 @@ const payloads = [
   <section slot="after" class="plain" aria-labelledby="size">
     <h2 id="size">Smallest or tied in every raw fixture</h2>
     <p>
-      Small payloads normally cost CPU, because you buy them from a compressor. These
-      come from the schema, in the same pass that encodes the value.
+      Small payloads normally cost CPU, because a compressor has to produce them. These
+      come from the schema instead, in the same pass that encodes the value.
     </p>
 
     {/* "100-event payload" meant nothing without the shape behind it. This is the
@@ -167,15 +171,16 @@ Event   { active, actor: Person, id,
 
     <dl class="setup">
       <div class="self">
-        <dt>25 ms</dt>
+        <dt>4.2 MB</dt>
         <dd>
-          <strong>to encode 100,000 events</strong>, 4.2 MB. Gzipping that afterwards
-          costs a further 79 ms, three times the encode itself.
+          <strong>for 100,000 events</strong> that take 16 MB as JSON, before any
+          compressor runs. Gzipping those shorn bytes afterwards costs a further 48 ms
+          of CPU.
         </dd>
       </div>
       <div>
         <dt>up to 6.2×</dt>
-        <dd>faster than JSON to encode, and up to 14.5× faster to decode.</dd>
+        <dd>faster than JSON to encode, and up to 13.7× faster to decode.</dd>
       </div>
       <div>
         <dt>up to 77%</dt>

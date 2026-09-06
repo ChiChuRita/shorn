@@ -34,11 +34,10 @@ const href = (to: string) => (to.startsWith("http") ? to : `${root}${to}`);
   </ul>
 
   <p>
-    Reading this as a program? Every documentation page has a markdown twin at its own
-    path plus <code>.md</code>, so <code>/getting-started/quick-start/</code> is also
-    <code>/getting-started/quick-start.md</code>. shorn is a library you import rather
-    than a service you call, so there is no API endpoint, OpenAPI document, or API key to
-    look for. <code>npm install @chichurita/shorn</code> is the whole setup, and it also
-    puts a <code>shorn</code> command on the path if you would rather script a shell.
+    Reading this as a program? Every documentation page also exists as markdown at the
+    same path plus <code>.md</code>, so <code>/getting-started/quick-start/</code> is also
+    available as <code>/getting-started/quick-start.md</code>. shorn is a library you
+    import, not a service you call, so there is no API endpoint, OpenAPI document, or API
+    key to look for. <code>npm install @chichurita/shorn</code> is the whole setup.
   </p>
 </StarlightPage>

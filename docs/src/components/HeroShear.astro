@@ -72,9 +72,9 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
   </div>
 
   <figcaption>
-    The field names live in your schema, so only the values go on
-    the wire; position is what identifies a field. <span class="gag">The field names grew
-    back in your schema, where they were the whole time.</span>
+    The field names stay in your schema, so only the values go on the wire. A field is
+    identified by its position, not by its name. <span class="gag">Nothing was lost: the
+    names are still in your schema, where they were the whole time.</span>
     <button type="button" class="again" data-again>↻ shear it again</button>
   </figcaption>
 </figure>
