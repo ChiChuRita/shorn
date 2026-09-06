@@ -1,13 +1,13 @@
 ---
 title: Canonical Bytes
-description: Supported values have a deterministic encoding, with one documented exception for low-level NaN values.
+description: Every supported value has exactly one encoding, with one documented exception for low-level NaN values.
 ---
 
-For supported validator-backed values, a value and wire shape have one valid encoding. Key order, enum order, integer spelling, and byte order are derived rather than configurable.
+For any value a validator-backed schema accepts, there is exactly one valid encoding. Field order, enum order, integer spelling, and byte order are all derived from the schema. None of them is configurable.
 
-## Key order is derived
+## Field order is derived
 
-Field order is the rank of the field's name in **UTF-16 code-unit ascending order**, JavaScript's default string comparison.
+Fields are written in the order of their names, compared as **UTF-16 code units, ascending**. That is JavaScript's default string comparison.
 
 ```ts
 const Person = z.object({
@@ -17,9 +17,9 @@ const Person = z.object({
 });
 ```
 
-`age` is written first even though it was declared second, as [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) shows byte by byte. The order is derived from field names, so validators and the high- and low-level APIs all produce the same result.
+`age` is written first even though it was declared second. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) shows this byte by byte. Because the order comes from the names alone, every validator and both the high-level and low-level APIs agree on it.
 
-The **encoder** applies the sort. The [`m` API](/api/m/) cannot override it because canonical field order is a wire-format rule, not a schema option.
+The **encoder** applies the sort. The [`m` API](/api/m/) cannot override it, because field order is a rule of the wire format, not a schema option.
 
 ## Enum members are sorted too
 
@@ -27,9 +27,9 @@ The **encoder** applies the sort. The [`m` API](/api/m/) cannot override it beca
 z.enum(["M", "F", "X"]); // sorted: ["F", "M", "X"] → 0, 1, 2
 ```
 
-Declaring `["X", "F", "M"]` produces identical bytes. Adding a member shifts every index at or after it, so versioned payloads need a [wire fingerprint](/versioning/fingerprinting/).
+Declaring `["X", "F", "M"]` gives identical bytes. Adding a member shifts the index of every member that sorts after it, which is why versioned payloads need a [wire fingerprint](/versioning/fingerprinting/).
 
-## Cross-vendor identity
+## The same bytes from every validator
 
 ```ts
 z.object({ name: z.string(), age: z.int().nonnegative() });
@@ -38,20 +38,20 @@ type({ name: "string", age: "number.integer >= 0" });
 // all three: the same bytes, the same fingerprint
 ```
 
-This works because the wire shape comes from JSON Schema. The signature excludes `rejectUnknown`, which validators handle differently but which does not change the encoded bytes.
+This works because the wire shape comes from JSON Schema, which all three validators produce. The signature leaves out `rejectUnknown`, the one thing validators handle differently, because it does not change the encoded bytes.
 
-Recursive types hold too, though validators spell them differently: one points a `$ref` at its definition, another inlines a copy and refers back from inside it. A copy of a definition is folded onto the definition, so both spellings derive one signature.
+Recursive types agree too, even though validators spell them differently: one points a `$ref` at its definition, another inlines a copy and refers back from inside it. shorn folds a copy of a definition back onto the definition, so both spellings produce one signature.
 
 ## Integers have one spelling
 
-Overlong varints are rejected: `1` must be `0x01`, never `0x81 0x00`. This keeps the encoding unique, which is required for content addressing, deduplication, and byte-level equality.
+Overlong varints are rejected. `1` must be `0x01`, never `0x81 0x00`. This keeps every encoding unique, which is what content addressing, deduplication, and byte-level equality all depend on.
 
-## What canonicality does not cover
+## What canonical does not cover
 
-- **Floats.** `-0` and `0` are distinct byte strings. Validator-backed schemas refuse `NaN`; low-level `m.float32()` and `m.float64()` accept it, and multiple NaN bit patterns decode successfully. Do not use low-level NaN values for content addressing.
-- **String normalization.** `"é"` as one code point and as `e` plus a combining accent are different strings, both encoded faithfully. Normalize first if you need them equal.
-- **Decoded key order.** The decoded object's key order is shorn's, not your original object's. It is the same *value*, so `toEqual` and `isDeepStrictEqual` pass — but `JSON.stringify(decoded) === JSON.stringify(original)` does not, since `JSON.stringify` is key-order sensitive. Compare values, not serialized strings. (Restoring declaration order was measured and rejected: it cost 6–15% of decode.)
+- **Floats.** `-0` and `0` are different byte strings. Validator-backed schemas refuse `NaN`. The low-level `m.float32()` and `m.float64()` accept it, and several NaN bit patterns decode without error. Do not use low-level NaN values for content addressing.
+- **String normalization.** `"é"` as one code point and as `e` plus a combining accent are two different strings, and both encode faithfully. Normalize first if you need them to be equal.
+- **Decoded key order.** A decoded object has shorn's key order, not the order of your original object. It is the same *value*, so `toEqual` and `isDeepStrictEqual` pass. But `JSON.stringify(decoded) === JSON.stringify(original)` fails, because `JSON.stringify` is sensitive to key order. Compare values, not serialized strings. (Restoring declaration order was measured and rejected: it cost 6 to 15% of decode speed.)
 
-## Round-tripping is a fixed point
+## A round trip returns the same value
 
-`decode(encode(x))` returns `x`, not merely an equivalent value. A `format: "date-time"` string is stored as epoch milliseconds, about 25 bytes down to 6, and epoch milliseconds remember neither a fractional-digit count nor an offset spelling. So only the one spelling that survives the trip encodes, the `toISOString()` one, and every other spelling is refused rather than normalised. Same rule as an uppercase UUID: refuse what would come back different. See [Date, BigInt, Map, Set](/schemas/rich-types/).
+`decode(encode(x))` gives back `x` itself, not merely something equivalent. A `format: "date-time"` string is stored as epoch milliseconds, which shrinks about 25 bytes to 6. But epoch milliseconds cannot remember how many fractional digits the string had or how its offset was spelled. So only the one spelling that survives the trip is accepted, the `toISOString()` one, and every other spelling is refused rather than silently normalized. Uppercase UUIDs follow the same rule: refuse anything that would come back different. See [Date, BigInt, Map, Set](/schemas/rich-types/).

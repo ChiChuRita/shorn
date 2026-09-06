@@ -3,11 +3,11 @@ title: Throughput
 description: Encode and decode benchmarks against JSON and schema-based binary codecs.
 ---
 
-shorn is faster than byte-producing JSON in every measured fixture. Against the binary codecs it leads on record-shaped data. It does **not** lead on document-shaped data: a payload made of many separate strings is decoded faster by msgpackr's `bundleStrings` mode, whatever alphabet those strings are in.
+shorn is faster than byte-producing JSON in every fixture measured. Against the binary codecs it leads on record-shaped data. It does **not** lead on document-shaped data: a payload made of many separate strings is decoded faster by msgpackr's `bundleStrings` mode, whatever alphabet those strings use.
 
 ## Against JSON
 
-`JSON bytes` converts to and from a `Uint8Array`, making it the direct comparison for binary transports.
+`JSON bytes` converts to and from a `Uint8Array`, which makes it the direct comparison for a binary transport.
 
 | Fixture | shorn enc | JSON enc | shorn dec | JSON dec |
 | --- | ---: | ---: | ---: | ---: |
@@ -17,13 +17,13 @@ shorn is faster than byte-producing JSON in every measured fixture. Against the 
 | 100-event batch | **94.9k** | 35.4k | **123.2k** | 20.2k |
 | Person, validated | **8.35M** | 3.58M | **11.56M** | 3.55M |
 
-Across these fixtures shorn is up to 6.2× faster to encode and up to 13.7× faster to decode. The ASCII payloads also use as little as 23% of JSON's bytes; the Unicode payload uses 53%.
+Across these fixtures shorn is up to 6.2× faster to encode and up to 13.7× faster to decode. The ASCII payloads also use as little as 23% of JSON's bytes. The Unicode payload uses 53%.
 
 `JSON.stringify` to a string reaches 10.17M encodes/s for Person. That baseline does less work, because it stops at a JavaScript string rather than producing bytes.
 
 ## Against binary codecs
 
-Three msgpackr modes exist; this table compares against one. `bundleStrings` is measured in the document section below, where it wins decode outright.
+msgpackr has three modes. This table compares against one of them. `bundleStrings` is measured in the document section below, where it wins decode outright.
 
 | Fixture | Op | shorn | Avro | SchemaPack | msgpackr records |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -36,11 +36,11 @@ Three msgpackr modes exist; this table compares against one. `bundleStrings` is 
 | 100 events | enc | **94.9K** | 41.8K | 53.7K | 26.0K |
 | 100 events | dec | **123.2K** | 51.6K | 57.5K | 87.3K |
 
-Two margins here are ties, not leads. **Person encode** shows 27% over Avro in this shared-process table, but measured alone in its own process the gap is 2%: quote that figure. **Unicode decode** shows Avro 3% ahead, which is the same width. The decode columns on the nested and batch fixtures are the margins with room in them.
+Two of these margins are ties, not leads. **Person encode** shows 27% over Avro in this shared-process table, but measured alone in its own process the gap is 2%. Quote that figure. **Unicode decode** shows Avro 3% ahead, which is the same width. The decode columns on the nested and batch fixtures are the margins with real room in them.
 
-### Documents are the other exception, and it is not about Unicode
+### Documents: where msgpackr decodes faster
 
-The fixtures above are records: few keys, short strings, no optional fields. A document — many keys, mostly string content, arrays whose elements have different key sets — measures differently:
+The fixtures above are records: few keys, short strings, no optional fields. A document, meaning many keys, mostly string content, and arrays whose elements have different key sets, measures differently:
 
 | Codec | Bytes | Encode | Decode |
 | --- | ---: | ---: | ---: |
@@ -51,9 +51,9 @@ The fixtures above are records: few keys, short strings, no optional fields. A d
 | @msgpack/msgpack | 2,872 | 85.9K | 96.6K |
 | JSON bytes | 3,334 | 140.6K | 141.1K |
 
-shorn is smallest and fastest to encode, by 68% over the next codec, and fourth to decode. The cause is one string-decode call per string: `bundleStrings` writes all string content contiguously and decodes it in a single call, which is the cost shorn pays once per string. 87% of this payload is string bytes.
+shorn is smallest and fastest to encode, by 68% over the next codec, and fourth to decode. The cause is one string-decode call per string. `bundleStrings` writes all string content into one contiguous region and decodes it in a single call. shorn pays that call once per string, and 87% of this payload is string bytes.
 
-**The alphabet is irrelevant to this.** The fixture is pure ASCII and shorn still decodes it at 59% of `bundleStrings`. What costs is the *number* of strings, not what is in them.
+**The alphabet has nothing to do with it.** The fixture is pure ASCII and shorn still decodes it at 59% of `bundleStrings`. What costs is the *number* of strings, not what is in them.
 
 The remaining gap is a wire-format question rather than a tuning one: bundling strings would change the bytes.
 
@@ -71,19 +71,19 @@ The codecs share one benchmark process, so small margins can move between runs. 
 | Zod + JSON string | 35 | 6.27M | 4.06M |
 | Zod + JSON bytes | 35 | 3.58M | 3.55M |
 
-Validation is most of the end-to-end cost, and it flattens the encode column: once Zod runs on every value, shorn and Avro encode at the same speed within noise, because the validator is the work. Decode still separates them, at 17% over Avro.
+Validation is most of the end-to-end cost, and it flattens the encode column. Once Zod runs on every value, shorn and Avro encode at the same speed within noise, because the validator is the work. Decode still separates them, at 17% over Avro.
 
-On the Person fixture the raw codec runs at 20.98M encodes/s and 62.57M decodes/s; adding Zod reduces those to 8.35M and 11.56M.
+On the Person fixture the raw codec runs at 20.98M encodes/s and 62.57M decodes/s. Adding Zod brings those down to 8.35M and 11.56M.
 
-Between services you own, `unchecked(compile(schema))` writes the same bytes at the raw-codec figures, giving up every refinement on both sides in exchange — see [Skipping Validation](/core-concepts/validation/#skipping-validation).
+Between services you own, `unchecked(compile(schema))` writes the same bytes at the raw-codec speed, giving up every refinement on both sides in exchange. See [Skipping Validation](/core-concepts/validation/#skipping-validation).
 
 ## Methodology
 
-Tests ran on Node v22.23.1, an Apple M4 Pro, and macOS arm64. Small-fixture results are the median of seven samples of about 180 ms after warm-up. The [100,000-event](/performance/size/#fixtures) results use three single-operation samples, because one operation already processes the whole value. Every codec must round-trip to the same logical value.
+Tests ran on Node v22.23.1, an Apple M4 Pro, and macOS arm64. Small-fixture results are the median of seven samples of about 180 ms each, after warm-up. The [100,000-event](/performance/size/#fixtures) results use three single-operation samples, because one operation already processes the whole value. Every codec has to round-trip to the same logical value.
 
-Schema construction is excluded and measured separately as [cold setup](/performance/footprint/). Raw tests use each codec's normal API with SchemaPack validation disabled. Protobuf.js includes `fromObject` and `toObject` so it exposes the same string-enum API.
+Schema construction is excluded here and measured separately as [cold setup](/performance/footprint/). Raw tests use each codec's normal API with SchemaPack validation disabled. Protobuf.js includes `fromObject` and `toObject` so that it exposes the same string-enum API as the others.
 
-Eligible object schemas use specialized runtime-generated encode and decode functions; a strict Content Security Policy falls back to the interpreted path with identical bytes and results. See [Compilation and Caching](/core-concepts/compile-and-caching/#runtime-specialization) for which schemas take which path.
+Object schemas that qualify use generated encode and decode functions. A strict Content Security Policy falls back to the interpreted path with identical bytes and results. See [Compilation and Caching](/core-concepts/compile-and-caching/#generated-encoders) for which schemas take which path.
 
 ```sh
 pnpm bench

@@ -3,7 +3,7 @@ title: Zod
 description: Zod 4.2+ implements both Standard interfaces directly, so shorn needs no adapter and no second argument.
 ---
 
-Zod 4.2 and newer implements both Standard Schema and Standard JSON Schema directly. Pass the schema and nothing else.
+Zod 4.2 and newer implements both Standard Schema and Standard JSON Schema on the schema object itself. Pass the schema and nothing else.
 
 ```ts
 import { z } from "zod";
@@ -23,7 +23,7 @@ const PersonWire = compile(Person);                 // reusable codec
 const PersonStored = fingerprinted(compile(Person), { bytes: 4 });
 ```
 
-Use `z.int().nonnegative()` wherever the value cannot be negative: shorn then writes an unsigned varint, and `127` takes one byte instead of the two a ZigZag `int` spends. [Supported Types](/schemas/supported-types/) maps every Zod shape to its bytes.
+Use `z.int().nonnegative()` wherever a value cannot be negative. shorn then writes an unsigned varint, and `127` takes one byte instead of the two a signed `int` spends. [Supported Types](/schemas/supported-types/) maps every Zod shape to its bytes.
 
 ## Extra properties
 
@@ -33,7 +33,7 @@ Use `z.int().nonnegative()` wherever the value cannot be negative: shorn then wr
 | `z.strictObject` | Zod throws `Unrecognized key: "extra"` |
 | `z.looseObject` | encodes; extras follow the declared fields as a record |
 
-`z.object` and `z.strictObject` produce the same bytes and fingerprint because both emit `additionalProperties: false`. `z.looseObject` and `z.record` are open shapes whose keys go on the wire; see [Supported Types](/schemas/supported-types/#records-open-objects-and-dynamic-values).
+`z.object` and `z.strictObject` produce the same bytes and fingerprint, because both emit `additionalProperties: false`. `z.looseObject` and `z.record` are open shapes whose keys go on the wire; see [Supported Types](/schemas/supported-types/#records-open-objects-and-dynamic-values).
 
 ## Rich types
 
@@ -50,19 +50,19 @@ const Event = z.object({
 const codec = compile(Event);
 ```
 
-JSON Schema has no keyword for any of the four, so shorn asks Zod to write its own. It detects the Zod vendor and passes `unrepresentable: "any"` plus an `override` hook to Zod's Standard JSON Schema method; the hook tags these four with [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword) and re-throws for the types that still have no wire form. `z.iso.datetime()` is packed into the same 6 bytes, and accepts only the `toISOString()` spelling.
+JSON Schema has no keyword for any of the four, so shorn asks Zod to write shorn's own. It detects the Zod vendor and passes `unrepresentable: "any"` plus an `override` hook to Zod's Standard JSON Schema method. The hook tags these four with [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword) and re-throws for the types that still have no wire form. `z.iso.datetime()` is packed into the same 6 bytes, and accepts only the `toISOString()` spelling.
 
-`z.date().nullable()` works, and so does a Set of Sets. A recursive type reached through a Set or Map element is [refused](/schemas/rejected-shapes/#recursion-through-a-set-or-map), and a Date cannot be a branch of a type-disjoint union, because it has no JSON type to be named by.
+`z.date().nullable()` works, and so does a Set of Sets. A recursive type reached through a Set or Map element is [refused](/schemas/rejected-shapes/#recursion-through-a-set-or-map). A Date cannot be a branch of a type-disjoint union, because it has no JSON type to identify it by.
 
 ### What is still refused
 
-`z.undefined()`, `z.void()`, `z.symbol()`, `z.nan()`, `z.custom()`, `z.function()` and a transform keep failing at compile, each named by Zod's own word for it:
+`z.undefined()`, `z.void()`, `z.symbol()`, `z.nan()`, `z.custom()`, `z.function()` and a transform still fail at compile, each named by Zod's own word for it:
 
 ```
 undefined cannot be represented in JSON Schema
 ```
 
-`z.literal(undefined)` and a bigint literal get a line of their own, because with the representability test off Zod would drop the first and write the second as a number.
+`z.literal(undefined)` and a bigint literal get a line of their own, because with the representability check off Zod would drop the first and write the second as a number.
 
 For a **transform**, `z.codec()` declares both directions in the schema itself, and shorn encodes the wire side:
 
@@ -81,8 +81,8 @@ const bytes = codec.encode(z.encode(Rich, value));
 const back = z.decode(Rich, codec.decode(bytes));
 ```
 
-Two calls are needed because Standard Schema has no reverse operation, so shorn cannot run `z.encode` for you without validator-specific code. See [Date, BigInt, Map, Set](/schemas/rich-types/).
+It takes two calls because Standard Schema has no reverse operation, so shorn cannot call `z.encode` for you without validator-specific code. See [Date, BigInt, Map, Set](/schemas/rich-types/).
 
 ## Version note
 
-Zod 4.2 is the floor. Earlier Zod 4 releases lack Standard JSON Schema, so `encode` throws *"provides validation but not structure"*. Pass the `structure` argument from `z.toJSONSchema`.
+Zod 4.2 is the minimum. Earlier Zod 4 releases lack Standard JSON Schema, so `encode` throws *"provides validation but not structure"*. On those versions, pass the `structure` argument from `z.toJSONSchema`.

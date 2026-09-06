@@ -1,13 +1,13 @@
 ---
 title: Schema Changes
-description: shorn does not resolve schema changes. Keep old codecs and select them by wire fingerprint or an application version.
+description: shorn does not resolve schema changes. Keep old codecs and pick one by wire fingerprint or by an application version.
 ---
 
-shorn does not perform schema evolution. A positional payload must be decoded with the wire shape that wrote it.
+shorn does not do schema evolution. A positional payload has to be decoded with the exact wire shape that wrote it.
 
 ## Changes that alter the wire shape
 
-Keep each historical codec and dispatch by fingerprint. Four bytes are recommended for persistent data.
+Keep every historical codec and dispatch on the fingerprint. Four bytes are recommended for persistent data.
 
 ```ts
 const PREFIX_BYTES = 4;
@@ -33,19 +33,19 @@ function read(payload: Uint8Array) {
 }
 ```
 
-Write with the newest codec. Remove an old codec only after no payloads use it.
+Write with the newest codec. Remove an old one only after no payloads use it anymore.
 
 ## Changes that keep the same wire shape
 
-Refinements, object strictness, validator choice, and conversion functions do not change the fingerprint. If these semantics need independent versions, carry an application version in a header or database column and dispatch on that value instead.
+Refinements, object strictness, validator choice, and conversion functions do not change the fingerprint. If those need their own versions, carry an application version in a header or a database column and dispatch on that instead.
 
-A fingerprint registry alone cannot hold two validation versions with the same wire shape: they have the same key.
+A fingerprint registry on its own cannot hold two validation versions of the same wire shape. They have the same key.
 
 ## Migrating stored data
 
 1. Keep the old schema unchanged.
-2. Add the new schema and codec.
-3. Register both versions and reject duplicate keys.
+2. Add the new schema and its codec.
+3. Register both and reject duplicate keys.
 4. Write new data with the new codec.
 5. Re-encode old data, then remove the old codec.
 
@@ -57,8 +57,8 @@ function migrate(payload: Uint8Array) {
 }
 ```
 
-Use Avro or Protobuf when you need automatic cross-language schema evolution rather than explicit migration.
+If you need automatic, cross-language schema evolution rather than an explicit migration, use Avro or Protobuf.
 
 ## Format stability
 
-Compatible shorn releases do not change the encoding of existing wire shapes. New wire types may be added without changing existing fingerprints. Any incompatible format change requires a major release and data migration.
+Compatible shorn releases do not change the encoding of existing wire shapes. New wire types can be added without changing existing fingerprints. Any change to the bytes an existing schema produces is treated as wire-breaking however small it is, and is called out in the changelog. While the version is below 1.0 such a change can ship in a minor release, so read the changelog before upgrading if you have payloads in storage or in a queue.

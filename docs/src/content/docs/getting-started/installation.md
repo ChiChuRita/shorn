@@ -11,11 +11,11 @@ npm install @chichurita/shorn arktype
 npm install @chichurita/shorn valibot @valibot/to-json-schema
 ```
 
-shorn has one dependency, `@standard-schema/spec`, which is types-only. It is ESM-only and imports no Node built-in, so its `neutral` platform target runs unchanged in browsers, workers, Bun, and Deno.
+shorn has a single dependency, `@standard-schema/spec`, and it contains only types. The package is ESM only and imports nothing from Node's built-in modules, so the same build runs in browsers, workers, Bun, and Deno.
 
 ## Which validator needs what
 
-shorn uses Standard Schema for validation and Standard JSON Schema for structure. Some validators provide both interfaces on one object; others need an extra converter.
+shorn needs two things from a validator: Standard Schema for validation and Standard JSON Schema for structure. Zod and ArkType provide both on the schema object itself. Valibot keeps its JSON Schema conversion in a separate package, so you pass the converted structure as an extra argument.
 
 | Validator | Version | Extra package | Call style |
 | --- | --- | --- | --- |
@@ -23,13 +23,13 @@ shorn uses Standard Schema for validation and Standard JSON Schema for structure
 | [ArkType](/validators/arktype/) | 2.1.28+ | none | `encode(Person, value)` |
 | [Valibot](/validators/valibot/) | 1.x | `@valibot/to-json-schema` | `encode(Person, value, structure)` |
 
-Any other validator that implements both interfaces works without an adapter.
+Any other validator that implements both interfaces works with no adapter.
 
 ## Requirements
 
-**Node 20+**, or any runtime with `DataView`, `Uint8Array`, `TextDecoder` (with `fatal`) and `TextEncoder`, including `encodeInto`, which some React Native polyfills omit. **TypeScript 5.x** for typed results, so `decode` returns your schema's type instead of `unknown`.
+**Node 20 or newer**, or any runtime that has `DataView`, `Uint8Array`, `TextDecoder` with the `fatal` option, and `TextEncoder` with `encodeInto`. Some React Native polyfills leave out `encodeInto`. **TypeScript 5.x** gives you typed results, so `decode` returns your schema's type instead of `unknown`.
 
-There is no CommonJS build, but `require("@chichurita/shorn")` still works from Node 20.19 and 22.12 on, where `require` loads an ES module directly. Below those versions, a CommonJS caller needs `await import("@chichurita/shorn")`.
+There is no CommonJS build. From Node 20.19 and 22.12 on, `require("@chichurita/shorn")` still works, because those versions can `require` an ES module directly. On older versions, a CommonJS caller needs `await import("@chichurita/shorn")`.
 
 ## Verify
 
@@ -44,4 +44,4 @@ bytes.length;          // 5
 decode(Person, bytes); // { name: "Ada", age: 36 }
 ```
 
-An `EncodeError` here means the schema uses an unsupported shape. [Rejected Shapes](/schemas/rejected-shapes/) lists each one and what to use instead.
+If this throws an `EncodeError`, the schema uses a shape shorn cannot encode. [Rejected Shapes](/schemas/rejected-shapes/) lists every one of them and what to use instead.

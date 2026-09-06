@@ -1,9 +1,9 @@
 ---
 title: Valibot
-description: Valibot keeps JSON Schema conversion in a separate package, so shorn takes the converted structure as an option.
+description: Valibot keeps JSON Schema conversion in a separate package, so shorn takes the converted structure as an extra argument.
 ---
 
-Valibot implements Standard Schema but provides JSON Schema conversion in a separate, tree-shakeable package. Pass the output of its official converter to shorn.
+Valibot implements Standard Schema, but its JSON Schema conversion lives in a separate, tree-shakeable package. Pass the output of that converter to shorn as a third argument.
 
 ```ts
 import * as v from "valibot";
@@ -23,11 +23,11 @@ const bytes = encode(Person, person, structure); // 8 bytes
 const decoded = decode(Person, bytes, structure);
 ```
 
-That extra `structure` argument is the only difference from Zod and ArkType. All three produce the same eight bytes and fingerprint. Add `v.minValue(0)` wherever the value cannot be negative: signed integers use ZigZag encoding and need an extra byte at lower values. [Supported Types](/schemas/supported-types/) maps every Valibot shape to its bytes.
+That extra `structure` argument is the only difference from Zod and ArkType. All three produce the same eight bytes and the same fingerprint. Add `v.minValue(0)` wherever a value cannot be negative: a signed integer uses ZigZag encoding and needs an extra byte at half the value an unsigned one would. [Supported Types](/schemas/supported-types/) maps every Valibot shape to its bytes.
 
 ## Convert once
 
-The plan is cached by the identity of **both** the schema and structure objects. Creating a new structure on every call rebuilds the plan, and `toStandardJsonSchema` also has its own cost, so an inline call pays twice.
+The plan is cached by the identity of **both** the schema object and the structure object. A new structure on every call rebuilds the plan, and `toStandardJsonSchema` does real work of its own, so an inline call pays twice.
 
 ```ts
 // Cached.
@@ -50,13 +50,13 @@ All four variants compile.
 | `v.looseObject` | shorn throws `Unknown object property "b"` |
 | `v.record` | encodes as a record: keys on the wire |
 
-Only `v.strictObject` emits `additionalProperties: false`. The converter omits it for `v.object` and `v.looseObject`, so shorn checks extras itself — which is why `looseObject` produces shorn's error rather than passing the property through. Zod's `z.looseObject` emits `additionalProperties: true` and is an open shape instead; the similar names diverge because the two converters emit different structures.
+Only `v.strictObject` emits `additionalProperties: false`. The converter leaves it out for `v.object` and `v.looseObject`, so shorn checks for extras itself. That is why `looseObject` produces shorn's error instead of passing the property through. Zod's `z.looseObject` emits `additionalProperties: true` and is an open shape. The names look alike, but the two converters emit different structures.
 
-The [fingerprint](/versioning/fingerprinting/) excludes `rejectUnknown`, so `v.object`, `v.strictObject`, and equivalent Zod schemas share the same bytes and fingerprint.
+The [fingerprint](/versioning/fingerprinting/) leaves out `rejectUnknown`, so `v.object`, `v.strictObject`, and equivalent Zod schemas share the same bytes and fingerprint.
 
 ## Rich types
 
-`v.date()`, `v.bigint()`, `v.set()` and `v.map()` encode natively, but not through `toStandardJsonSchema`. That wrapper takes no options, so there is no slot to tag them in. Use the raw converter with `valibotOverride`, and pass the plain document it returns as `structure`:
+`v.date()`, `v.bigint()`, `v.set()` and `v.map()` encode natively, but not through `toStandardJsonSchema`. That wrapper takes no options, so there is nowhere to tag them. Use the raw converter with `valibotOverride`, and pass the plain document it returns as `structure`:
 
 ```ts
 import * as v from "valibot";
@@ -76,13 +76,13 @@ const codec = compile(Person, structure);
 
 `compile` accepts a plain JSON Schema document as well as a Standard JSON Schema implementation, which is what makes the raw converter usable here. The override writes shorn's [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword) keyword, so the codec is the same one a Zod schema of the same shape produces.
 
-The converter is an argument rather than an import: shorn depends on no validator, and a Set inside a Set has to be converted through the same hook or the inner one would throw where the outer one did not. Hoist `structure` to a module constant as with any Valibot structure, or the codec is rebuilt per call.
+You pass the converter in rather than shorn importing it, for two reasons. shorn depends on no validator. And a Set inside a Set has to be converted through the same hook, or the inner one would throw where the outer one did not. Hoist `structure` to a module constant as with any Valibot structure, or the codec is rebuilt on every call.
 
-Without the override, Valibot's converter refuses all four before shorn sees anything, and shorn keeps the reason and appends the remedy:
+Without the override, Valibot's converter refuses all four before shorn sees anything. shorn keeps the reason and appends what to do:
 
 ```
 The "date" schema cannot be converted to JSON Schema. (shorn has no wire form
 for this value; convert it at the edge, see Rejected Shapes)
 ```
 
-`v.pipe(v.string(), v.isoTimestamp())` needs none of this: it converts to `format: "date-time"`, which shorn packs into 6 bytes, and it accepts only the `toISOString()` spelling. A `v.transform` has no reverse operation through Standard Schema and stays refused. See [Date, BigInt, Map, Set](/schemas/rich-types/).
+`v.pipe(v.string(), v.isoTimestamp())` needs none of this. It converts to `format: "date-time"`, which shorn packs into 6 bytes, and it accepts only the `toISOString()` spelling. A `v.transform` has no reverse operation through Standard Schema and stays refused. See [Date, BigInt, Map, Set](/schemas/rich-types/).

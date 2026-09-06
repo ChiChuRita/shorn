@@ -3,7 +3,7 @@ title: Payload Size
 description: Smallest raw payload in every measured fixture, smallest gzip in both large profiles, second under Brotli in both.
 ---
 
-Size is the axis shorn leads. Every number is from Node v22.23.1, Apple M4 Pro, macOS arm64. Each table comes from a single run — raw bytes from `pnpm bench`, the compressed tables from `pnpm bench:large` and `pnpm bench:entropy` — since sizes from different runs are not comparable.
+Size is where shorn leads. Every number here is from Node v22.23.1, Apple M4 Pro, macOS arm64. Each table comes from a single run: raw bytes from `pnpm bench`, the compressed tables from `pnpm bench:large` and `pnpm bench:entropy`. Sizes from different runs are not comparable, so they are never mixed in one table.
 
 ## Fixtures
 
@@ -31,7 +31,7 @@ const event = m.object({
 | 100,000 events, repetitive | the same array at 100,000 entries: three recurring names, two recurring tag sets | 42 |
 | 100,000 events, high-entropy | the same 100,000 entries with a mostly unique name and two unique tags each | 70 |
 
-An event is one small application record: a few numbers, a flag, a nested actor, a metrics pair, and a short tag array. The two large profiles differ only in string content, which is the part shorn does not shrink, so they bracket the realistic range: repeated strings favor every compressor, unique strings defeat them.
+An event is one small application record: a few numbers, a flag, a nested actor, a metrics pair, and a short tag array. The two large profiles differ only in their string content, which is the one part shorn does not shrink. Together they bracket the realistic range: repeated strings help every compressor, unique strings defeat them.
 
 ## Raw bytes
 
@@ -48,13 +48,13 @@ An event is one small application record: a few numbers, a flag, a nested actor,
 | cbor-x plain | 26 | 50 | 122 | 11,972 |
 | JSON | 35 | 58 | 163 | 16,148 |
 
-shorn is smallest or tied on every fixture, with two caveats: bare shorn, Avro, and Protobuf payloads require the correct schema outside the payload, and shared-record sizes exclude their record table.
+shorn is smallest or tied on every fixture, with two caveats. Bare shorn, Avro, and Protobuf payloads all need the correct schema outside the payload. And the shared-record sizes leave out their record table.
 
-The Unicode row shows where the savings come from. shorn removes field names, tags, and syntax, but does not shrink string content. Payloads dominated by structure and numbers can be about 75% smaller than JSON; payloads dominated by free text see smaller gains.
+The Unicode row shows where the savings come from. shorn removes field names, tags, and syntax, but does not shrink string content. Payloads dominated by structure and numbers can be about 75% smaller than JSON. Payloads dominated by free text gain less.
 
 ## Compressed, 100,000 events
 
-Roughly 4.2 MB of shorn bytes against 16 MB of JSON — a batch large enough that compression is a real decision rather than a rounding error.
+Roughly 4.2 MB of shorn bytes against 16 MB of JSON, a batch large enough that compression is a real decision rather than a rounding error.
 
 ### Repetitive data
 
@@ -68,7 +68,7 @@ Roughly 4.2 MB of shorn bytes against 16 MB of JSON — a batch large enough tha
 | Protobuf.js | 5,826,966 | 1,402,471 | 1,054,692 |
 | JSON | 16,498,152 | 1,769,924 | 1,731,672 |
 
-shorn is smallest raw and under gzip, and second under Brotli. **SchemaPack is 12% smaller under Brotli** while being 100,000 bytes larger raw, for a reason specific to this fixture: `id`, `timestamp` and `memory` are counters, and SchemaPack's fixed-width big-endian integers leave their high bytes unchanged across thousands of records, which LZ77 matches as long runs. shorn's LEB128 spends 40% fewer bytes on the same counter but leads with the byte that changes every record. Density and LZ-friendliness are in tension, and shorn is on the density side by design.
+shorn is smallest raw and under gzip, and second under Brotli. **SchemaPack is 12% smaller under Brotli** while being 100,000 bytes larger raw, for a reason specific to this fixture. `id`, `timestamp` and `memory` are counters. SchemaPack's fixed-width big-endian integers leave their high bytes unchanged across thousands of records, and the compressor's LZ77 stage matches those as long runs. shorn's varints spend 40% fewer bytes on the same counter, but lead with the byte that changes on every record. Density and compressor-friendliness pull in opposite directions, and shorn is on the density side by design.
 
 Compression CPU for the shorn payload: gzip 48.22 ms, gunzip 4.46 ms, Brotli q6 62.87 ms, unbrotli 5.79 ms.
 
@@ -84,7 +84,7 @@ Compression CPU for the shorn payload: gzip 48.22 ms, gunzip 4.46 ms, Brotli q6 
 | Protobuf.js | 8,532,522 | 2,992,114 | 2,471,879 |
 | JSON | 19,153,708 | 3,288,544 | 3,213,618 |
 
-shorn is smallest raw and under gzip, and second under Brotli. Against JSON it is 63% smaller raw, 14% smaller under gzip, and 25% smaller under Brotli. msgpackr's bundled-strings mode is 7% smaller under Brotli despite being 15% larger raw: it writes every string's content contiguously, and on data that is mostly unique strings that is the layout Brotli exploits best.
+shorn is smallest raw and under gzip, and second under Brotli. Against JSON it is 63% smaller raw, 14% smaller under gzip, and 25% smaller under Brotli. msgpackr's bundled-strings mode is 7% smaller under Brotli despite being 15% larger raw. It writes every string's content into one contiguous region, and on data that is mostly unique strings, that is the layout Brotli exploits best.
 
 Compression CPU: gzip 99.27 ms, gunzip 8.75 ms, Brotli q6 170.65 ms, unbrotli 13.44 ms.
 
@@ -92,11 +92,11 @@ Compression CPU: gzip 99.27 ms, gunzip 8.75 ms, Brotli q6 170.65 ms, unbrotli 13
 
 ## Cutting bytes further
 
-- **Declare non-negative integers.** ZigZag doubles the magnitude, so an `int` crosses every varint boundary at half the value.
-- **Use enums, not free strings**, for closed sets: one varint index against length plus content.
+- **Declare non-negative integers.** ZigZag doubles the magnitude, so a signed `int` crosses every varint boundary at half the value.
+- **Use enums, not free strings**, for closed sets: one varint index instead of a length plus the text.
 - **Prefer literals** where a field is constant: zero bytes.
 - **Declare a timestamp as a timestamp.** `z.iso.datetime()` and `z.date()` are both 6 bytes, against about 25 for a plain string that happens to hold a date; see [rich types](/schemas/rich-types/).
-- **Choose framing deliberately.** Use a 4-byte fingerprint for persistent data. Pinned RPC can stay bare, and a fingerprint carried in a header need not be repeated in the payload.
+- **Choose framing deliberately.** Use a 4-byte fingerprint for persistent data. Pinned RPC can stay bare, and a fingerprint carried in a header does not need to be repeated in the payload.
 
 ## Reproducing
 
@@ -107,4 +107,4 @@ pnpm bench:entropy  # 100,000 high-entropy events
 pnpm bench:all      # everything, plus correctness checks
 ```
 
-Run the complete benchmark on one machine when comparing results; do not combine rows from different runs or environments.
+Run the whole benchmark on one machine when comparing results. Do not combine rows from different runs or environments.

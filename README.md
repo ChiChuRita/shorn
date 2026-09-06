@@ -9,7 +9,7 @@
 </p>
 
 <p align="center"><b>Your Zod, Valibot, or ArkType schema is already a binary codec.</b><br>
-No IDL, no codegen, no second source of truth.</p>
+No schema file, no code generation, no second copy of your types to keep in sync.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@chichurita/shorn"><img src="https://img.shields.io/npm/v/%40chichurita%2Fshorn" alt="npm version"></a>
@@ -24,7 +24,7 @@ No IDL, no codegen, no second source of truth.</p>
 npm install @chichurita/shorn zod
 ```
 
-Runs in Node, Bun, Deno, browsers, and workers.
+Works in Node, Bun, Deno, browsers, and workers.
 
 ## Encode a value
 
@@ -44,20 +44,24 @@ const bytes = encode(Person, person); // Uint8Array(8)
 const back = decode(Person, bytes);   // typed and validated
 ```
 
-Validation runs on encode and again on decode, and equivalent schemas across
-validators produce the same bytes.
+shorn runs your validator before it writes the bytes, and again after it reads
+them back. The same schema written in Zod, Valibot, or ArkType produces the
+same bytes.
 
 ## Where the bytes go
 
-The picture above is the whole story: field names, brackets, and quotes never
-reach the wire because the schema already carries them, and enum members travel
-as an index. The byte-by-byte walk lives in
-[how it works](https://shorn.dev/core-concepts/how-it-works/#where-the-bytes-go).
+JSON spends most of its bytes on things both sides already know: field names,
+quotes, brackets, and commas. Your schema carries all of that, so shorn leaves
+it out and writes only the values. An enum member becomes a small index instead
+of a string. The picture above shows the result, and
+[how it works](https://shorn.dev/core-concepts/how-it-works/#where-the-bytes-go)
+walks through the eight bytes one at a time.
 
 ## Store and queue safely
 
-Bare payloads carry no wire identifier. Add a fingerprint to anything stored,
-queued, or read across deployments:
+A bare payload does not say which schema wrote it. If the bytes will sit in a
+database, a queue, or a file, or cross a deployment boundary, add a fingerprint
+so that a mismatch is caught instead of decoded into a wrong value:
 
 ```ts
 import { compile, fingerprinted } from "@chichurita/shorn";
@@ -68,41 +72,54 @@ const bytes = PersonWire.encode(person); // 4-byte fingerprint + payload
 PersonWire.decode(bytes);                // rejects a different wire shape
 ```
 
-A fingerprint identifies wire structure, not refinements. Keep old codecs while
-old payloads exist.
+The fingerprint identifies the wire shape only. Validation rules such as
+`.min()` or `.email()` are not part of it. When a schema changes, keep the old
+codec around for as long as old payloads exist.
 
 ## Use another validator
 
-Pass a Zod 4.2+ schema or an ArkType 2.1.28+ type directly. For Valibot 1.x,
-pass `toStandardJsonSchema(schema)` as the trailing argument. shorn reads
-validation through [Standard Schema](https://standardschema.dev/schema) and
-structure through [Standard JSON Schema](https://standardschema.dev/json-schema).
+Zod 4.2 or newer and ArkType 2.1.28 or newer work as they are: pass the schema.
+Valibot 1.x keeps its JSON Schema conversion in a separate package, so pass
+`toStandardJsonSchema(schema)` as the last argument. Under the hood, shorn
+reads validation through [Standard Schema](https://standardschema.dev/schema)
+and structure through
+[Standard JSON Schema](https://standardschema.dev/json-schema).
 
-Valibot's wrapper takes no options, so `Date`, `bigint`, `Map` and `Set` go
-through `valibotOverride`: pass
-`toJsonSchema(schema, { overrideSchema: valibotOverride(toJsonSchema) })` as the
-structure instead.
+Valibot's wrapper takes no options, so for `Date`, `bigint`, `Map` and `Set`
+use the raw converter together with `valibotOverride`:
+
+```ts
+import { toJsonSchema } from "@valibot/to-json-schema";
+import { compile, valibotOverride } from "@chichurita/shorn";
+
+const structure = toJsonSchema(schema, { overrideSchema: valibotOverride(toJsonSchema) });
+const codec = compile(schema, structure);
+```
 
 ## Scope
 
-shorn covers strings, booleans, integers, numbers, literals, enums, nullable
-values, arrays, tuples, records, unions — discriminated, or with no two branches
-sharing a JSON type — recursive schemas, dynamic values (`z.any()`), and
-objects — closed or open, with optional fields. It does not support unions whose
-branches overlap, streaming, or automatic schema evolution. `Date`, `bigint`,
-`Map`, and `Set` each have a wire form of their own; `undefined`, symbols,
-`RegExp`, and class instances still need converting at the edge.
+shorn encodes strings, booleans, integers, floats, literals, enums, nullable
+values, arrays, tuples, records, recursive schemas, dynamic values (`z.any()`),
+and objects, closed or open, with optional fields. Unions work when shorn can
+tell the branches apart without guessing: either every branch carries its own
+literal tag, or no two branches share a JSON type. `Date`, `bigint`, `Map`, and
+`Set` each have a wire form of their own.
 
-The saving comes from the schema, not a compressor, so it costs no CPU: up to
-6.2× faster to encode and 13.7× faster to decode than JSON bytes. The low-level
-`m` API bundles to 6.44 KB gzip; `compile` with validation is 11.55 KB
-(esbuild-minified browser bundles, schema declarations excluded).
+It does not support unions whose branches overlap, streaming, or automatic
+schema migration. `undefined`, symbols, `RegExp`, and class instances have no
+wire form, so convert those before encoding.
+
+The size saving comes from the schema, not from a compressor, so it costs no
+CPU. Compared with JSON encoded to bytes, shorn is up to 6.2× faster to encode
+and 13.7× faster to decode. The low-level `m` API bundles to 6.44 KB gzip;
+`compile` with validation is 11.55 KB (esbuild-minified browser bundles, schema
+declarations excluded).
 
 ## Documentation
 
-See [getting started](https://shorn.dev/getting-started/introduction/) and the
-[API reference](https://shorn.dev/api/overview/) for the complete workflow. The
-docs also cover the [byte layout](https://shorn.dev/wire-format/layout/),
+Start with [getting started](https://shorn.dev/getting-started/introduction/)
+and the [API reference](https://shorn.dev/api/overview/). The docs also cover
+the [byte layout](https://shorn.dev/wire-format/layout/),
 [supported types](https://shorn.dev/schemas/supported-types/),
 [rejected shapes](https://shorn.dev/schemas/rejected-shapes/),
 [fingerprinting](https://shorn.dev/versioning/fingerprinting/), and

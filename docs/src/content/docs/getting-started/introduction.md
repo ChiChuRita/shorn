@@ -1,9 +1,9 @@
 ---
 title: Introduction
-description: shorn is compact binary serialization for Zod, Valibot, and ArkType. It reads the schema you already validate with and writes payloads without keys or type tags.
+description: shorn is compact binary serialization for Zod, Valibot, and ArkType. It reads the schema you already validate with and writes payloads without field names or type tags.
 ---
 
-shorn encodes data with the schema your project already uses. It reads [Standard Schema](https://standardschema.dev/schema) for validation and [Standard JSON Schema](https://standardschema.dev/json-schema) for structure, so there is no IDL, no code generation, and no second definition to keep in sync.
+shorn turns the validation schema you already have into a binary format. It reads two things from that schema: [Standard Schema](https://standardschema.dev/schema) for validation, and [Standard JSON Schema](https://standardschema.dev/json-schema) for structure. Because your validator already describes every field and its type, there is no separate schema file to write, no code to generate, and no second copy of your types to keep in sync.
 
 ```ts
 import { z } from "zod";
@@ -19,23 +19,28 @@ const bytes = encode(Person, { name: "Grace", age: 45, sex: "F" }); // 8 bytes
 const decoded = decode(Person, bytes);
 ```
 
-The same value is 35 bytes of minified JSON. Field names and type tags stay in the schema instead of being repeated in every payload. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) walks 35 down to 8 in three steps.
+As minified JSON, that value is 35 bytes. shorn writes 8, because the field names and type markers stay in the schema instead of being repeated in every payload. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) walks from 35 down to 8 in three steps.
 
-Equivalent Zod, Valibot, and ArkType schemas encode identically. Your validator runs on encode and again on decode. The runtime is small and tree-shakes per feature, so optional helpers cost nothing until imported. MIT licensed.
+A few things hold everywhere:
 
-## Good fit
+- The same schema written in Zod, Valibot, or ArkType produces the same bytes.
+- Your validator runs before encoding and again after decoding, so a payload never skips your rules.
+- The runtime is small. Helpers you do not import cost nothing in your bundle.
+- MIT licensed.
 
-Both endpoints are TypeScript or JavaScript, the application already validates its data, both ends can share one wire shape, and payload size or serialization cost matters. If any of those is false, [Comparisons](/comparisons/) covers what to reach for instead.
+## When it fits
+
+shorn is a good fit when all of these are true: both ends of the wire are TypeScript or JavaScript, your application already validates its data, both ends can share one schema, and payload size or serialization cost actually matters to you. If any of those is false, [Comparisons](/comparisons/) says what to use instead.
 
 ## Limits
 
-Some of these limits are permanent rather than unfinished:
+Some of these are design decisions rather than gaps that will be filled later:
 
-- **No schema evolution.** Only the matching wire shape can decode a payload. [`fingerprinted()`](/versioning/fingerprinting/) detects most mismatches; nothing resolves them.
+- **No schema evolution.** A payload can only be decoded by the exact wire shape that wrote it. [`fingerprinted()`](/versioning/fingerprinting/) catches most mismatches, but nothing migrates old payloads for you.
 - **No streaming**, random access, or zero-copy views.
 - **No cross-language decoder.** TypeScript and JavaScript only.
-- **No universal performance guarantee.** Results depend on schema, data, runtime, and compression. See [Throughput](/performance/throughput/) and benchmark your workload.
-- **Some values have no wire form.** `Date`, `bigint`, `Map`, `Set` and `date-time` strings are [native](/schemas/rich-types/); `undefined`, symbols, `RegExp`, class instances and one-way transforms still have to be converted at the edge.
-- **Not confidential.** Encrypt the bytes when secrecy matters.
+- **No universal speed guarantee.** Results depend on your schema, your data, the runtime, and compression. See [Throughput](/performance/throughput/) and measure your own workload.
+- **Some values have no wire form.** `Date`, `bigint`, `Map`, `Set` and `date-time` strings are [supported natively](/schemas/rich-types/). `undefined`, symbols, `RegExp`, class instances and one-way transforms are not, so convert those before encoding.
+- **Not confidential.** The bytes are compact, not secret. Encrypt them when secrecy matters.
 
 Next: [Installation](/getting-started/installation/), then [Quick Start](/getting-started/quick-start/).
