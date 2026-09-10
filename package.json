@@ -1,7 +1,7 @@
 {
   "name": "@chichurita/shorn",
   "version": "0.7.1",
-  "description": "One-line drop-in binary serialization for your existing Zod, Valibot, or ArkType schema",
+  "description": "Binary serialization for the Zod, Valibot, or ArkType schema you already have",
   "keywords": [
     "standard-schema",
     "serialization",

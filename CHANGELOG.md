@@ -2,21 +2,19 @@
 
 ## 0.7.1
 
-**Same bytes, one shape that compiles again.** Every payload written by 0.7.0 decodes unchanged and every fingerprint is the one it was. The patch is in what shorn reads, not in what it writes.
+**Same bytes.** Every payload written by 0.7.0 decodes unchanged and no fingerprint moves. One schema shape that failed to compile now compiles.
 
-### A JSON Schema `type` array is read as the union it abbreviates
+### A JSON Schema `type` array is read as a union
 
-Zod 4.5.0 changed how `toJSONSchema()` spells a union of bare types (colinhacks/zod#6339). `z.union([z.string(), z.number()])` and `z.string().nullable()` used to come out as `anyOf`, and from 4.5 come out as `type: ["string", "number"]` and `type: ["string", "null"]`. Valibot and ArkType still write `anyOf`, and so does Zod when any branch carries a constraint. shorn read the two-member nullable form and refused every other `type` array with `Only nullable JSON Schema type arrays are currently supported`, so a plain type-disjoint union from Zod 4.5 did not compile at all.
+Zod 4.5.0 changed how `toJSONSchema()` spells a union of bare types (colinhacks/zod#6339). `z.union([z.string(), z.number()])` and `z.string().nullable()` used to come out as `anyOf`; from 4.5 they come out as `type: ["string", "number"]` and `type: ["string", "null"]`. shorn only accepted the two-member nullable form of a `type` array, so a plain type-disjoint union from Zod 4.5 refused to compile with `Only nullable JSON Schema type arrays are currently supported`.
 
-A `type` array is now expanded into one branch per member and read by the same rules as `anyOf` and `oneOf`. Both spellings give one wire shape and one fingerprint, so a codec built from Zod 4.4 and one built from Zod 4.5 read each other's bytes, and a `pnpm update zod` moves nothing. A union that no value can tell apart, such as `type: ["integer", "number"]`, is refused with the union message: `Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported`. The type-array message is retired.
+A `type` array is now expanded into one branch per member and read by the same rules as `anyOf` and `oneOf`. Both spellings give one wire shape and one fingerprint, so a codec built from Zod 4.4 and one built from Zod 4.5 read each other's bytes. A union no value can tell apart, such as `type: ["integer", "number"]`, is refused with the union message: `Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported`. The type-array message is retired.
 
-### What it costs
-
-Nothing. The `compile` bundle row is 31 gzip bytes smaller, since one branch and one message are gone; `m` is unchanged. Zod 4.4 remains the version shorn is developed against; the test suite was run against 4.5.4 as well and is green on both.
+The `compile` bundle is 31 gzip bytes smaller. The test suite passes on Zod 4.4 and 4.5.4.
 
 ## 0.7.0
 
-**Wire-breaking for one shape: a `format: "date-time"` string.** A schema holding `z.iso.datetime()`, or any JSON Schema string with that format, now writes different bytes and derives a different fingerprint, so payloads it wrote under 0.6.0 cannot be read by 0.7.0 and the reverse. Every other shape writes the bytes it wrote before and keeps its fingerprint. The minor bump is the pre-1.0 rule for a wire change; the bold line is the warning the number cannot carry.
+**Wire-breaking for one shape: a `format: "date-time"` string.** A schema holding `z.iso.datetime()`, or any JSON Schema string with that format, now writes different bytes and derives a different fingerprint. Payloads it wrote under 0.6.0 cannot be read by 0.7.0, and the reverse. Every other shape is unchanged. Pre-1.0, a wire change ships as a minor bump.
 
 ### `Date`, `bigint`, `Set` and `Map` encode natively
 
@@ -31,18 +29,18 @@ const codec = compile(Event);
 codec.decode(codec.encode(value)); // a Date, a bigint, a Set and a Map come back
 ```
 
-All four used to be refused before shorn saw them, because JSON Schema has no keyword for any of them, and the docs said to convert at the edge. They now have wire forms of their own, on the `m` builders as `m.date()`, `m.bigint()`, `m.set(item)` and `m.map(key, value)`, and through `compile()`:
+All four used to be refused, because JSON Schema has no keyword for them. They now have wire forms of their own, as `m.date()`, `m.bigint()`, `m.set(item)` and `m.map(key, value)`, and through `compile()`:
 
 | Type | Bytes |
 | --- | --- |
-| `Date` | epoch milliseconds as a ZigZag varint, the `int` encoding: 6 bytes for any current date |
-| `bigint` | a varint header of the magnitude's byte count doubled plus the sign, then the magnitude little-endian, any width |
+| `Date` | epoch milliseconds as a ZigZag varint, 6 bytes for any current date |
+| `bigint` | a varint header (magnitude byte count doubled, plus the sign), then the magnitude little-endian |
 | `Set<T>` | a varint count then the elements, exactly what `z.array(T)` writes |
 | `Map<K, V>` | a varint count then each key followed by its value, exactly what an array of `[K, V]` tuples writes |
 
-Set and Map keep iteration order. A Set and an array of the same element write identical bytes and carry different fingerprints on purpose, since they decode to different things. An Invalid Date is refused at encode. On decode, a duplicate Set element or Map key is refused, and so is a `-0` in either position, because `Set.add` and `Map.set` would fold it into `+0` and the payload could never re-encode to itself. That keeps the rule every other shape has: one payload, one value, and back again.
+Set and Map keep iteration order. A Set and an array of the same element write identical bytes but carry different fingerprints, since they decode to different things. An Invalid Date is refused at encode. On decode, a duplicate Set element or Map key is refused, and so is `-0` in either position, because `Set.add` and `Map.set` would fold it into `+0` and the payload could not re-encode to itself.
 
-Zod and ArkType need nothing beyond the schema: `z.date()`, `z.bigint()`, `z.set()`, `z.map()`, and ArkType's `Date` and `bigint`. ArkType's `Set` and `Map` keywords carry no element type and are refused by name. Valibot's Standard JSON Schema wrapper takes no options, so its four go through the raw converter and a new export:
+Zod and ArkType need nothing beyond the schema: `z.date()`, `z.bigint()`, `z.set()`, `z.map()`, and ArkType's `Date` and `bigint`. ArkType's `Set` and `Map` keywords carry no element type and are refused. Valibot's Standard JSON Schema wrapper takes no options, so its four go through the raw converter and a new export:
 
 ```ts
 import { toJsonSchema } from "@valibot/to-json-schema";
@@ -52,23 +50,23 @@ const structure = toJsonSchema(Person, { overrideSchema: valibotOverride(toJsonS
 const codec = compile(Person, structure);
 ```
 
-Which is possible because `structure` now also accepts a plain JSON Schema document, used for both sides. The vocabulary those hooks write is shorn's own extension keyword, `x-shorn`, with values `date`, `bigint`, `set` and `map`; a hand-written document may carry it too. A recursive type reached through a Set or Map element is refused with a message saying to hold the recursion in an array or an object instead.
+`structure` now also accepts a plain JSON Schema document. The four types travel on shorn's own extension keyword, `x-shorn`, with values `date`, `bigint`, `set` and `map`; a hand-written document may carry it too. A recursive type reached through a Set or Map element is refused; hold the recursion in an array or an object instead.
 
 ### `date-time` strings take the Date form
 
-The one change to existing bytes. A `date-time` string is now stored as the instant it names, 6 bytes rather than 24 to 30 characters, and decodes back to the `toISOString()` spelling. Only that spelling is accepted at encode: epoch milliseconds cannot remember a fractional-digit count or an offset, so a string that would come back different is refused rather than silently normalised, the same rule uppercase UUIDs have followed since they were packed. `z.iso.date()` and `z.iso.time()` stay strings.
+The one change to existing bytes. A `date-time` string is stored as the instant it names, 6 bytes rather than 24 to 30 characters, and decodes back to the `toISOString()` spelling. Only that spelling is accepted at encode: epoch milliseconds cannot remember a fractional-digit count or an offset, so a string that would come back different is refused rather than silently normalized, the same rule uppercase UUIDs follow. `z.iso.date()` and `z.iso.time()` stay strings.
 
 ### What still needs the edge
 
-`undefined`, `NaN` as a type, symbols, functions, transforms and class instances have no wire form, and each is refused at compile as before. Zod's refusals keep Zod's words; where a vendor's converter throws on its own, shorn appends `(shorn has no wire form for this value; convert it at the edge, see Rejected Shapes)` in place of the sentence that used to point at the README.
+`undefined`, `NaN` as a type, symbols, functions, transforms and class instances have no wire form and are refused at compile as before. Where a vendor's converter throws on its own, shorn appends `(shorn has no wire form for this value; convert it at the edge, see Rejected Shapes)`.
 
-### What it costs
+### Cost
 
-The `m` bundle grows from 5,573 to 6,444 B gzip and, for the first time since the size table began, sits above `@msgpack/msgpack` rather than under it, by 9%. Four schema classes, the hex table `bigint` shares with UUIDs, and nothing else: the `date-time` class is reached only from `compile()`, and `valibotOverride` only by importing it. The trade was made knowingly, one namespace over a second entry point, and it is recorded on the footprint page. Throughput did not move; every existing size fixture is byte-identical.
+The `m` bundle grows from 5,573 to 6,444 B gzip and now sits 9% above `@msgpack/msgpack` rather than under it. Four schema classes and the hex table `bigint` shares with UUIDs account for it. Throughput did not move; every existing size fixture is byte-identical.
 
 ## 0.6.0
 
-**Same bytes, one new export.** Every payload written by 0.5.0 or earlier decodes unchanged and every fingerprint is the one it was. The minor bump is for one added function.
+**Same bytes, one new export.** Every payload written by 0.5.0 or earlier decodes unchanged and no fingerprint moves.
 
 ### `encodeInto(codec, value, target, offset?)`
 
@@ -79,25 +77,21 @@ for (const event of events) end = encodeInto(codec, event, frame, end);
 socket.send(frame.subarray(0, end));
 ```
 
-Writes the bytes `codec.encode(value)` would produce into a `Uint8Array` you own and returns the offset past the last one. It skips the output allocation and the copy that follows it, which is about 40% of a small encode: a Person goes from 48 ns to 23 ns, and a frame of 100 Persons builds in 40% of the time. Works with any codec from `compile()`, `fingerprinted()`, `unchecked()`, or `m`.
+Writes the bytes `codec.encode(value)` would produce into a `Uint8Array` you own and returns the offset past the last one. It skips the output allocation and the copy that follows it, about 40% of a small encode: a Person goes from 48 ns to 23 ns, and a frame of 100 Persons builds in 40% of the time. Works with any codec from `compile()`, `fingerprinted()`, `unchecked()`, or `m`.
 
-Use it in transports and frame builders. `encode()` stays the default, and decoding needs no counterpart because `decode()` already accepts `frame.subarray(start, end)`.
+Use it in transports and frame builders. `encode()` stays the default. Decoding needs no counterpart because `decode()` already accepts `frame.subarray(start, end)`.
 
 Throws `EncodeError`, with the field path, when the value does not fit, the offset is outside the target, or the target is not a `Uint8Array`. After a too-small target, bytes from the offset on are unspecified.
-
-### What it costs
 
 A free function rather than a method, so it tree-shakes: 185 gzip bytes if you import it, 12 on the `m` row if you do not.
 
 ## 0.5.0
 
-**Same bytes, one command fewer.** Every payload written by 0.4.x decodes unchanged, every fingerprint is the one it was, and no library export changed shape. `dist/index.js` is byte-identical to 0.4.1's, and every size and bundle row of the regression gate reads +0.0%. The minor bump is for a surface removed beside the library rather than anything altered inside it: installing the package no longer installs a command.
+**Same bytes, the `shorn` command is gone.** Every payload written by 0.4.x decodes unchanged, no fingerprint moves, and no library export changed. `dist/index.js` is byte-identical to 0.4.1's. The minor bump is because installing the package no longer installs a command.
 
-### The `shorn` command is gone
+0.4.0 shipped `shorn encode` and `shorn decode` as a `bin`. Both are removed, together with the second build that produced `dist/cli.mjs` and the CLI docs page. The command was a thin shell over `encode()` and `decode()`, and not worth a second build and a docs page to keep true.
 
-0.4.0 shipped `shorn encode` and `shorn decode` as a `bin` in the package. Both are removed, together with the `bin` field, the second build that produced `dist/cli.mjs`, and the CLI page of the docs. The command was a thin shell over `encode()` and `decode()`: import a module, pick an export, JSON on one side and bytes on the other. That is a few lines against the library for any given schema module, and not a surface worth a second build, a manifest field, and a docs page to keep true.
-
-A script that called `npx shorn` has two routes. Pin `@chichurita/shorn@0.4.1`, which keeps the command as it was. Or replace the call with a module of your own, which also spares the import-and-pick-an-export step because it names the schema directly:
+A script that called `npx shorn` has two routes. Pin `@chichurita/shorn@0.4.1`, which keeps the command. Or replace the call with a small module of your own:
 
 ```js
 // encode.mjs: JSON on stdin, bytes on stdout
@@ -107,43 +101,31 @@ const json = await new Response(process.stdin).text();
 process.stdout.write(encode(Person, JSON.parse(json)));
 ```
 
-### The library is untouched
-
-No source under `src/` other than the two CLI files changed, no export was added or removed, and the package is still ESM only on Node 20 or newer. Nothing a program that imports shorn does is different.
-
 ## 0.4.1
 
-**Same bytes, faster in three places.** Every payload written by 0.4.0 decodes unchanged, every fingerprint is the one it was, and no export changed shape. The patch is in how the codec runs, not in what it writes: every input that encoded or decoded before still does, to the same bytes and the same value, and every input that was refused is refused with the same message, except one retired varint message named below. Figures are medians over five separate processes against the 0.4.0 build on the same machine; the regression gate read no row outside its tolerance.
+**Same bytes, faster in three places.** Every payload written by 0.4.0 decodes unchanged, no fingerprint moves, and no export changed. Every input that was accepted still is, and every input that was refused still is, with the same message except one retired varint message named below.
 
 ### ArkType and Valibot objects take the generated encoder
 
-Every ArkType object and Valibot's `v.object()` produce a JSON Schema with no `additionalProperties`, so shorn checks for unknown keys when it encodes. That check used to keep the whole object on the interpreted field loop, and the same eight bytes cost 94 ns from an ArkType schema against 48 ns from a Zod one, whose schema says `additionalProperties: false`. The scan for unknown keys now runs first and the generated function writes the fields. An ArkType person encodes 32% faster through `unchecked()`, an array of a hundred of them 42% faster, and a validated encode 23% faster. Zod objects were already generated and do not move. The refusal is the same: an unknown key throws `Unknown object property "x"` before a field is written.
+ArkType objects and Valibot's `v.object()` produce a JSON Schema with no `additionalProperties`, so shorn checks for unknown keys when it encodes. That check used to force the whole object onto the interpreted path, so the same eight bytes cost 94 ns from an ArkType schema against 48 ns from a Zod one. The scan for unknown keys now runs first and the generated function writes the fields. An ArkType person encodes 32% faster through `unchecked()`, an array of a hundred of them 42% faster, and a validated encode 23% faster. Zod objects were already generated. The refusal is unchanged: an unknown key throws `Unknown object property "x"`.
 
 ### UUIDs decode seven times faster
 
-A `format: "uuid"` field decoded through `toString(16)` on four-byte words. Those words are heap numbers, V8's radix conversion for them is slow, and it was the whole cost: about 600 ns per UUID. A 256-entry byte-to-hex table brings that to about 80 ns for the same lowercase, dashed string. The table is built by the first UUID decoded, so a bundle that imports only `m`, which cannot build a UUID schema, does not carry it. Encode was already fast and is untouched.
+A `format: "uuid"` field decoded through `toString(16)` on four-byte words, about 600 ns per UUID. A 256-entry byte-to-hex table brings that to about 80 ns. The table is built by the first UUID decoded, so a bundle that imports only `m` does not carry it.
 
-### Multi-byte integers decode on the integer unit
+### Multi-byte integers decode faster
 
-`Reader` had two varint loops, one for unsigned values and one for the ZigZag path signed integers take, both in float arithmetic with a `Number.isSafeInteger` per byte, and only the unsigned one had an inline one-byte fast path. They now share one slow body behind the same fast path. Bytes one to four land in one 32-bit register and five to eight in a second, combined once; a value past 2^53 or an encoding past eight bytes goes to a separate BigInt tail. Two-byte signed integers decode 12% faster, two-byte unsigned 11%, three-byte 8%, six-byte millisecond timestamps 19%, and the nested-event fixture 4%. The regression gate, a different harness, read the 500-timestamp row 22% up and nested decode 8% up.
+`Reader` had two varint loops in float arithmetic. They now share one integer-unit body behind the same one-byte fast path. Two-byte signed integers decode 12% faster, two-byte unsigned 11%, three-byte 8%, six-byte millisecond timestamps 19%, and the nested-event fixture 4%.
 
-Two shapes that look the same are cliffs, and the source now says so: a shared body that keeps its BigInt code inline runs 3x slower on two- and three-byte values, and an integer-unit signed reader without the inline one-byte path runs 2x slower on small ones. Both are the inlining-budget behaviour the float reader already documents.
+One message is retired: `Invalid or unsafe variable-length integer`. An unsigned varint past its cap now reports `Unexpected end of input` or `Invalid variable-length integer`. The set of accepted and refused inputs is identical.
 
-One message is retired: `Invalid or unsafe variable-length integer`. An unsigned varint past its cap now reports `Unexpected end of input` or `Invalid variable-length integer`, at an offset inside the input. The set of accepted and refused inputs is identical.
+### Cost
 
-### What it costs, and what was measured and not shipped
-
-The `m` bundle row grows by 22 gzip bytes as the regression gate measures it, 5,539 to 5,561, 21 of them the varint reader. `compile` is 2 bytes smaller. The wire codec is 6% under `@msgpack/msgpack` gzipped; the footprint page had said 8% since before 0.3.0 and is corrected, with every other published number, from one run of this build.
-
-Removing the `finally` that releases the pooled `Writer` in `Schema.encode` measured 10% on a person encode as a prototype and 0% once `finish()` was kept inside the `try`, where it has to be so that an allocation failure still releases the pool. It stays as it was, and two tests now pin the release after a throwing encode so the next attempt starts from the constraint. A CPU profile of a person encode puts the output allocation in `finish()` at a third of the time, more than every `Writer` leaf call together.
-
-The throughput tables read lower on person encode than the 0.4.0 tables, 21.0M against 25.1M. The gate puts this build within noise of the recorded baseline on that row, and a control run of the unchanged 0.4.0 tree on the same day read 15% under its own recording; each table is one run of one build, and no row is carried over.
+The `m` bundle grows by 22 gzip bytes, 5,539 to 5,561. `compile` is 2 bytes smaller. The footprint page had said the wire codec was 8% under `@msgpack/msgpack` gzipped since before 0.3.0; the correct figure for this build is 6%, and every published number was re-run.
 
 ## 0.4.0
 
-**Same bytes, and a second way to reach them.** Every payload written by 0.3.x decodes unchanged, every fingerprint is the one it was, and no export changed shape. The minor bump is for a surface added beside the library rather than anything altered inside it: installing the package now also installs a command.
-
-### A `shorn` command, for a shell instead of a module
+**Same bytes, plus a `shorn` command.** Every payload written by 0.3.x decodes unchanged, no fingerprint moves, and no export changed. Installing the package now also installs a command. (Removed again in 0.5.0.)
 
 ```sh
 $ echo '{"name":"Grace","age":45,"sex":"F"}' | npx shorn encode ./person.mjs --export Person --base64
@@ -152,68 +134,52 @@ $ echo 'LQVHcmFjZQA=' | npx shorn decode ./person.mjs --export Person --base64
 {"name":"Grace","age":45,"sex":"F"}
 ```
 
-`encode` reads a JSON value on stdin and writes the encoded bytes on stdout, `decode` reverses it, and `--base64` puts text on the byte side of either so a payload can travel through a pipe you can read. The module path is imported, so it can export a Zod schema, an ArkType type, or a codec built by `compile()`, `fingerprinted()`, or `m`. Without `--export`, shorn takes the default export, or the only export when there is exactly one, and otherwise names what the module does export and stops.
+`encode` reads a JSON value on stdin and writes bytes on stdout, `decode` reverses it, and `--base64` puts text on the byte side of either. The module path is imported, so it can export a Zod schema, an ArkType type, or a codec from `compile()`, `fingerprinted()`, or `m`. Without `--export`, shorn takes the default export, or the only export when there is exactly one. Exit codes are 0 for success, 1 for a failure, and 2 for a bad command line. Arguments are parsed with `parseArgs` from `node:util`, so this adds no dependency.
 
-Errors are one line on stderr. The exit code is 0 for success, 1 for a failure, and 2 for a command line shorn could not read, so a script can tell a bad payload apart from a bad invocation. `shorn --help` lists every flag.
-
-The point is scripting: a shell, a Makefile, or an agent driving a terminal can now produce and read payloads without writing an integration first. Arguments are parsed by `parseArgs` from `node:util`, so this adds no dependency.
-
-### The library is untouched by it
-
-`dist/index.js` comes out byte-identical to 0.3.0's, and the bundle-size rows of the regression gate are unmoved. The CLI is built separately and imports the library at runtime rather than inlining it, so importing shorn in an application costs exactly what it did before. The only new field in the manifest is `bin`.
-
-Full reference on the [CLI page](https://shorn.dev/cli/).
+`dist/index.js` is byte-identical to 0.3.0's. The CLI is built separately and imports the library at runtime, so importing shorn in an application costs what it did before.
 
 ## 0.3.0
 
-**Same bytes, and one class of schema stops compiling.** Every payload written by 0.2.x decodes unchanged, every fingerprint is the one it was, and no export changed shape — the byte-layout rows of the regression gate and the golden vectors are identical, and 8,000 generated schemas encode to the same bytes as before. The minor bump is for schemas, not payloads: a shape that could allocate unboundedly from an empty payload is now refused when the codec is built, and one that used to be refused now compiles.
+**Same bytes, and one class of schema stops compiling.** Every payload written by 0.2.x decodes unchanged, no fingerprint moves, and no export changed. A shape that could allocate without bound from an empty payload is now refused when the codec is built, and one shape that used to be refused now compiles.
 
-Found by a fuzzing pass over the JSON Schema translation — 60,000 generated schema documents crossed with generated values, byte mutations and arbitrary bytes, plus every schema shape crossed with a pool of hostile values, and a separate 200,000-case run aimed at the allocation bound below.
+Found by a fuzzing pass over the JSON Schema translation: 60,000 generated schema documents crossed with generated values and byte mutations, plus a 200,000-case run aimed at the allocation bound below.
 
 ### An empty payload could exhaust memory and kill the process
 
-An array whose count the schema fixes (`minItems` equal to `maxItems`) may hold a zero-width element — a literal, an empty tuple, an empty object — because its count comes from the schema rather than from the payload. Nothing bounded that count once it was nested, and nesting multiplies:
+An array whose count the schema fixes (`minItems` equal to `maxItems`) may hold a zero-width element, because its count comes from the schema rather than from the payload. Nothing bounded that count once it was nested, and nesting multiplies:
 
 ```ts
 const bomb = z.array(z.array(z.array(z.literal("x")).length(1_000_000)).length(1_000_000)).length(1_000_000);
 decode(bomb, new Uint8Array(0));  // 10^18 slots. Process gone.
 ```
 
-This was **not** the documented exemption, which needed a variable-length outer container and told you to cap it yourself. Here there is no payload and no outer container to cap, so no caller could intervene, and the failure was an unrecoverable out-of-memory abort rather than a catchable error.
+There is no payload and no outer container to cap, so no caller could intervene, and the failure was an unrecoverable out-of-memory abort rather than a catchable error.
 
-Codec construction now bounds the slots such a schema can fill from no input — multiplied through nesting, summed through zero-width objects and tuples — at the same 1,000,000 collection limit a length varint answers to. One fixed array of a million literals still works. Two of them nested do not:
+Codec construction now bounds the slots such a schema can fill from an empty payload, multiplied through nesting, at the same 1,000,000 collection limit a length varint has. One fixed array of a million literals still works. Two of them nested do not:
 
 ```
 Array elements must occupy at least one byte, or a fixed count of them must stay under the collection limit
 ```
 
-That message replaces the array-of-zero-width-elements refusal and now covers both cases, since both come of an element that costs nothing. What counts as zero-width moved into the [error reference](https://shorn.dev/api/errors/).
-
-The bound needed two attempts. The first counted a tuple's items but not the tuple's own array, so `m.array(m.tuple([m.literal(true)]), 999_999)` passed the guard and then allocated *twice* the ceiling — 999,999 outer slots plus one array per tuple. Found by fuzzing the bound itself over 200,000 schemas rather than by re-reading it.
+That message replaces the array-of-zero-width-elements refusal and covers both cases.
 
 ### A validator that throws escaped every entry point
 
-A Standard Schema is expected to report problems as issues, but nothing stops one throwing — `z.int().refine((v) => { … })` whose body throws is all it takes. That error came out of `encode`, `decode`, `encodeAsync` and `decodeAsync` unchanged: a `RangeError` from functions documented to throw only `EncodeError` and `DecodeError`, so `instanceof` narrowing and the `safeEncode`/`safeDecode` error type all fell through it. The async pair are reachable from an ordinary zod schema.
+A Standard Schema is expected to report problems as issues, but a `refine` whose body throws is all it takes to escape. That error came out of `encode`, `decode`, `encodeAsync` and `decodeAsync` unchanged, so `instanceof EncodeError` narrowing and the `safeEncode`/`safeDecode` error type fell through it.
 
-A throw from the validator is now an `EncodeError` on the way in and a `DecodeError` on the way out, with `cause` set to the original and a thrown non-`Error` reported as `The validator threw a value that is not an Error`. A getter or proxy trap of your own that throws while the encoder reads a property still propagates unchanged — only the validator's own call is wrapped, because that is the only layer that knows a validator ran.
+A throw from the validator is now an `EncodeError` on the way in and a `DecodeError` on the way out, with `cause` set to the original. A thrown non-`Error` is reported as `The validator threw a value that is not an Error`. A getter or proxy trap of your own that throws while the encoder reads a property still propagates unchanged.
 
 ### `-0` silently became `0` through an enum
 
-`m.enum([0, 1])` accepted `-0` and decoded it back as `0`, with nothing on either side reporting it. A `Map` keys by SameValueZero, so `-0` found the `0` member and went out as that member's index. `m.literal(0).encode(-0)` has always been refused for exactly this reason; the enum now agrees, with `Unknown enum value -0`.
+`m.enum([0, 1])` accepted `-0` and decoded it back as `0`. It is now refused with `Unknown enum value -0`, as `m.literal(0).encode(-0)` always was.
 
 ### A recursive nullable type did not compile
 
-`T | null` where `T` is itself a recursive `T | null` failed to build:
-
-```
-This schema already decodes to null; wrapping it in nullable() would give null two encodings
-```
-
-The message blamed a `.nullable()` the caller had written for a marker shorn had added. Whether a cycle admits `null` cannot be answered while the cycle is still being built, so the redundant marker went on and was then refused. It now comes off where the definition table exists — which is also where the signature is taken, so the bytes and the fingerprint still agree. No fingerprint moves: every schema this affected threw, so none has payloads.
+`T | null` where `T` is itself a recursive `T | null` failed with `This schema already decodes to null; wrapping it in nullable() would give null two encodings`, blaming a `.nullable()` the caller wrote for a marker shorn had added. The redundant marker now comes off. No fingerprint moves, since every schema this affected threw.
 
 ### Four refusals reported the wrong error
 
-A message that quotes a value has to be able to print it. These interpolated values the schema does not constrain to a primitive, so an object with a null prototype, an object whose `toString` or `toJSON` throws, a `BigInt`, or a cycle replaced the `EncodeError` with a `TypeError` of its own — and told the caller about their getter instead of about their field. `EncodeError` narrowing and `safeEncode` now hold for all of them.
+A message that quotes a value has to be able to print it. An object with a null prototype, an object whose `toString` throws, a `BigInt`, or a cycle replaced the `EncodeError` with a `TypeError`. `EncodeError` narrowing and `safeEncode` now hold for all of them.
 
 | Where | Was | Now |
 | --- | --- | --- |
@@ -223,137 +189,81 @@ A message that quotes a value has to be able to print it. These interpolated val
 | an out-of-range `fingerprinted({ bytes })` | `TypeError` | `Fingerprint bytes must be 1, 2, 3 or 4, received object` |
 | an unreadable `type` in a fetched JSON Schema | `TypeError` | `Unsupported Standard JSON Schema type object` |
 
-This is the rule `m.uint()` and `m.int()` adopted in 0.2.2, applied to the rest. A getter or proxy trap of your own that throws while the encoder reads a property still propagates unchanged — swallowing it would report a wrong field instead of the real fault.
+### Docs corrections
 
-### Documented: a cached codec is built from the schema as it first read
+A cached codec is built from the schema as it first read it. A hand-built Standard Schema that later reports a different structure keeps the old plan; Zod, Valibot and ArkType schemas are immutable, so this cannot happen with them. Now stated in [Compilation and Caching](https://shorn.dev/core-concepts/compile-and-caching/).
 
-`compile`, `encode` and `decode` derive the wire plan once per schema object and never ask again, so a hand-built Standard Schema that reports a *different* structure later keeps the old plan and encodes to the old shape silently. This is a property of the cache rather than something shorn can check — re-deriving the JSON Schema to compare it is the entire cost the cache exists to remove — and it cannot arise from Zod, Valibot or ArkType, whose schemas are immutable. Now stated in [Compilation and Caching](https://shorn.dev/core-concepts/compile-and-caching/): treat a hand-built schema as frozen once encoded.
-
-### Corrected: the documented schema depth limit
-
-The docs said a schema nested about 5,900 levels deep throws `RangeError` instead of `DecodeError`. Re-measured on Node 22: it is about **1,400** levels through `compile()` and **1,600** through `m`, and it is thrown while the codec is being built rather than while a payload is read. The boundary is unchanged; only the number was wrong. A depth budget is still [on the roadmap](https://shorn.dev/hostile-input/).
+The documented schema depth limit was wrong. A deeply nested schema throws `RangeError` at about **1,400** levels through `compile()` and **1,600** through `m` on Node 22, not 5,900, and while the codec is built rather than while a payload is read.
 
 ### Cost
 
-**96 gzip bytes on the wire codec (`m`)** — 5,443 → 5,539 — and 265 on the full export surface, over the 1% bundle gate. It was 175 on `m` before trimming: one shared message replaced two (56 bytes), the sentence naming the three zero-width shapes moved to the docs (28), and a `try`/`catch` gave way to a `typeof` gate (28). The remainder is the slot counter and its propagation through objects and tuples, which is what makes the bound sound rather than local, plus 7 bytes for a tuple's own array. Wrapping the validator's throw costs nothing in `m`, which has no validator to wrap.
-
-Throughput did not move. The `-0` guard leads with `value === 0` so the comparison short-circuits before the call; checking the enum member instead measured **-12%** on the unchecked person fixture and was dropped. Every payload-size row is byte-identical, and the hostile-input, startup and memory gates report no regressions.
+96 gzip bytes on the wire codec (`m`), 5,443 to 5,539, and 265 on the full export surface. Throughput did not move, and every payload-size row is byte-identical.
 
 ## 0.2.3
 
-**Same bytes, smaller bundles.** Nothing on the wire moves and no API changes; payloads written by 0.2.2 decode unchanged and vice versa. If you store or queue shorn payloads, this upgrade needs nothing from you.
+**Same bytes, smaller bundles.** Payloads written by 0.2.2 decode unchanged and no API changes.
 
-### Private structure no longer ships as public-sized names
-
-Object codecs kept each field's key, schema and optional-bit position in an object. Those properties are private to shorn, but JavaScript minifiers cannot prove that and preserved their names in every bundle. They are now labeled readonly tuples: the source still destructures them as `key`, `schema` and `optionalIndex`, while the emitted bundle carries positions instead of names. The same compact return shape is used by record code generation and async validation.
-
-The encode entry point now shares one pooled and re-entrant control path instead of duplicating the whole operation, and recursive definition folding no longer creates a closure at every visited node. Private `ObjectSchema` fields were also renamed around what they mean — `encoder`, `knownKeys`, `rejectUnknown` — rather than how they happened to be implemented.
-
-### Bundle reduction
-
-The wire codec (`m`) drops **17,890 → 17,369 minified bytes (−2.9%)** and **5,514 → 5,443 gzip bytes (−1.3%)**. `compile + m` drops 1.7% minified and 0.8% gzip; the full export surface drops 1.7% minified and 0.7% gzip. No feature was removed, every payload-size regression row is byte-identical, and the throughput, hostile-input, startup and memory gates report no regressions.
+Object codecs kept each field's key, schema and optional-bit position as named properties, which minifiers preserved. They are now tuples, so the emitted bundle carries positions instead of names. The wire codec (`m`) drops from 17,890 to 17,369 minified bytes (-2.9%) and from 5,514 to 5,443 gzip bytes (-1.3%). `compile + m` and the full export surface each drop about 1.7% minified.
 
 ## 0.2.2
 
-**Same bytes, better errors.** Nothing on the wire moves and no API changes; payloads written by 0.2.1 decode unchanged and vice versa. If you store or queue shorn payloads, this upgrade needs nothing from you.
+**Same bytes, better errors.** Payloads written by 0.2.1 decode unchanged and no API changes.
 
 ### `EncodeError.path` reaches every value the encoder refuses
 
-`path` names the value that failed and is documented as absent only when no single field is at fault. Three cases broke that, and all three are cases where a validator passes the value and only the writer refuses it — a lone surrogate in a string, an oversized array, a value the schema cannot hold. With a plain type error the vendor's own issue path covered the gap.
+`path` names the value that failed. Three cases lost it, all where a validator passes the value and only the writer refuses it, such as a lone surrogate in a string or an oversized array:
 
-**An open object's extra keys were outside the walk.** A value refused among the keys the schema does not name reported no path at all, and one level down reported the enclosing field — pointing you at a value that was fine. `{ id: "ok", note: "…lone surrogate" }` under `z.object({ id: z.string() }).catchall(z.string())` now reports `note`, and `o.note` when nested.
+- **An open object's extra keys.** A value refused among the keys the schema does not name reported no path, or the enclosing field. `{ id: "ok", note: "…lone surrogate" }` under `z.object({ id: z.string() }).catchall(z.string())` now reports `note`, and `o.note` when nested.
+- **`optional()` and `nullable()` ended the walk.** `m.array(m.object({ a: m.string() }))` reported `[0].a`, and adding `.optional()` to the object stopped at `[0]`. Only array, tuple, record, and union elements were affected.
+- **`m.uint()` and `m.int()` threw a raw `TypeError`** for a value JavaScript cannot coerce, such as a symbol or an object whose `valueOf` throws. They now throw `EncodeError` like every other leaf.
 
-**`optional()` and `nullable()` ended the walk.** The same schema reported `[0].a` in one position and `[0]` in another: `m.array(m.object({ a: m.string() }))` named the field, and adding `.optional()` to that object stopped at the index. Inside an object schema the wrapper was already invisible, because the object unwraps an optional when it is built, so this only ever affected an array, tuple, record, or union element.
-
-**`m.uint()` and `m.int()` threw a raw `TypeError`.** For a value JavaScript declines to coerce — a symbol, or an object whose `valueOf` or `Symbol.toPrimitive` throws — the error escaping was a `TypeError` with no path, not the `EncodeError` every other leaf throws and every other leaf documents. A caller narrowing on `EncodeError` fell through it. Neither cause was a missing type check: the fast path compared the value before the predicate that would have answered safely, and the message meant to explain the refusal interpolated a value that cannot be interpolated.
-
-Three messages moved for values that were already refused as `EncodeError`. `m.uint()` given `"5"` says `received string` where it said `received 5`, and given `null` says `received object`, matching `Expected a Uint8Array, received …` beside it.
+Three messages changed wording: `m.uint()` given `"5"` says `received string` where it said `received 5`, and given `null` says `received object`.
 
 ### Cost
 
-399 minified bytes and 66 gzipped on the `compile` row. The wire codec (`m`) is **unchanged gzipped** — 5514 bytes before and after — because moving the open-object walk off `ObjectSchema` and onto a shape only the Standard Schema bridge builds took 14 gzip bytes back out of `m`, and the numeric guard put the same 14 back. `m` cannot build an open object, so a branch there would have charged every wire-codec bundle for a path it can never take.
-
-Two cheaper shapes of the numeric guard were measured and dropped: both moved it into `Writer.varuint`, saving 45 and 65 minified bytes, and both cost 2-4% on multi-byte integers, where the leaf costs 1%. Every other caller of that writer hands it a number it computed itself.
+399 minified bytes and 66 gzipped on the `compile` row. The wire codec (`m`) is unchanged gzipped, at 5,514 bytes.
 
 ## 0.2.1
 
-**Same bytes, faster.** Nothing on the wire moves and no API changes; payloads written by 0.2.0 decode unchanged and vice versa. If you store or queue shorn payloads, this upgrade needs nothing from you.
+**Same bytes, faster.** Payloads written by 0.2.0 decode unchanged and no API changes.
 
 ### Documents encode 68% faster and decode 60% faster
 
-Document-shaped data — many keys, optional fields, most of the payload being string content — was the shape shorn was slowest on, and it moved for three reasons.
+Document-shaped data, with many keys, optional fields, and mostly string content, was the shape shorn was slowest on. Three changes:
 
-**Objects with optional fields now build their encoder at construction**, as objects without them already did. Which fields arrive varies per payload, but each optional's bit in the presence bitmap is fixed by the schema, so the bitmap is assembled from constants instead of allocating a byte array and a parallel value array on every encode. Records with optional fields encode 2.2x faster; an array of them, 3.6x.
-
-**String encoding stopped measuring strings twice.** It walked every string once to total its UTF-8 length and again to write the bytes, when `TextEncoder` already reports the total. That walk was 85% of the cost of encoding a 256-byte ASCII string and 99% at 64 KB. A 4.5 KB string now encodes about 17x faster, a 258-byte one 2.9x, and the Unicode benchmark fixture 65%.
-
-**String decoding stopped allocating a view of every string** before handing it to the decoder, which accepts offsets directly. A thousand short strings decode 75% faster. On the Unicode fixture this closes most of a gap against Avro that used to be 19%.
-
-### Bundle cost
-
-The wire codec (`m`) grows 5.18 KB → 5.52 KB gzipped, which takes its lead over `@msgpack/msgpack` from 13% to 7%. That is the number that got worse, and it is stated in [footprint](https://shorn.dev/performance/footprint/) rather than left for you to find. A fourth optimization worth 2x on short non-ASCII strings was measured, priced at a further 238 gzip bytes, and dropped as not worth it.
-
-## 0.2.0
-
-**Wire-breaking, one shape.** A recursive type reached through a wrapper — `z.object({ roots: z.array(Tree) })` rather than `Tree` itself — now derives the same fingerprint from every validator. Valibot's spelling of such a schema previously derived a different one from zod's while writing byte-identical payloads, so `fingerprinted()` rejected payloads it could decode. Its fingerprint moves onto the bytes it was already writing; zod's and arktype's do not move, no other signature changes, and no payload's bytes change. A `fingerprinted()` payload written by 0.1.0 against that one shape under Valibot is refused by 0.2.0 — re-encode it, or pin both ends.
-
-### Every validator now agrees on every shape
-
-Found by a cross-vendor fuzz matrix: ~65 wire shapes crossed with Zod, Valibot and ArkType, and with the decoder contract — every truncated prefix, appended trailing bytes, every byte flipped to six values. The decoder held everywhere. Every fix below is in the JSON Schema bridge, and every one was a shape that compiled from one validator and not another.
-
-**A field named `__proto__` is refused instead of silently dropped.** No validator's JSON Schema can carry one: Valibot's emitter assigns the key, which sets the prototype of the `properties` object rather than joining it, and Zod drops the property while still listing it in `required`. The codec was built without the field, so `unchecked()` encoded and decoded without it — data lost with no error. Both spellings now throw `A "__proto__" property does not survive a JSON Schema; rename the field`. One spelling stays unfixable from here: optional under Zod, the field leaves no trace in the emitted document at all. The `m` API was never affected.
-
-**`unknown[]` compiles from ArkType.** It writes a bare `{"type":"array"}` with no `items`, which was refused with `Arrays require an item schema`; Zod and Valibot write `items: {}` and compiled. Absent `items` leaves the elements unconstrained, which is what `any` already means here. That error message is gone.
-
-**A union of literals compiles from Valibot.** Its branches carry a `const` and no `type`, and a branch's type was read from `type` alone. A `const` names its own JSON type, so it is now read from either — which also puts `v.nullable(v.literal("a"))` on the same nullable path Zod takes.
+- **Objects with optional fields now build their encoder at construction.** Each optional's bit in the presence bitmap is fixed by the schema, so the bitmap is assembled from constants. Records with optional fields encode 2.2x faster; an array of them, 3.6x.
+- **String encoding stopped measuring strings twice.** It walked every string once for its UTF-8 length and again to write it, when `TextEncoder` already reports the total. A 4.5 KB string now encodes about 17x faster, a 258-byte one 2.9x, and the Unicode benchmark fixture 65%.
+- **String decoding stopped allocating a view of every string** before decoding it. A thousand short strings decode 75% faster.
 
 ### Cost
 
-179 gzip bytes on the `compile` row. `m` is unchanged, so the size comparison against other codecs does not move.
+The wire codec (`m`) grows from 5.18 KB to 5.52 KB gzipped, which takes its lead over `@msgpack/msgpack` from 13% to 7%.
+
+## 0.2.0
+
+**Wire-breaking, one shape.** A recursive type reached through a wrapper, such as `z.object({ roots: z.array(Tree) })` rather than `Tree` itself, now derives the same fingerprint from every validator. Valibot's spelling of such a schema derived a different fingerprint from Zod's while writing byte-identical payloads, so `fingerprinted()` rejected payloads it could decode. Only Valibot's fingerprint for that shape moves, and no payload's bytes change. A `fingerprinted()` payload written by 0.1.0 against that shape under Valibot is refused by 0.2.0: re-encode it, or pin both ends.
+
+### Every validator now agrees on every shape
+
+Found by a cross-vendor fuzz matrix: about 65 wire shapes crossed with Zod, Valibot and ArkType, plus every truncation, trailing-byte, and byte-flip mutation of the payloads. The decoder held everywhere. Every fix is in the JSON Schema bridge.
+
+- **A field named `__proto__` is refused instead of silently dropped.** No validator's JSON Schema can carry one, so the codec was built without the field and `unchecked()` lost the data with no error. Both spellings now throw `A "__proto__" property does not survive a JSON Schema; rename the field`. An optional `__proto__` under Zod leaves no trace in the emitted document and cannot be caught from here. The `m` API was never affected.
+- **`unknown[]` compiles from ArkType.** It writes `{"type":"array"}` with no `items`, which was refused with `Arrays require an item schema`. Absent `items` now means `any`, as `items: {}` already did. That message is gone.
+- **A union of literals compiles from Valibot.** Its branches carry a `const` and no `type`. A `const` names its own JSON type, so the type is now read from either.
+
+### Cost
+
+179 gzip bytes on the `compile` row. `m` is unchanged.
 
 ## 0.1.0
 
-First release. The wire format is **not** frozen: payloads written by this version are
-not guaranteed to decode under the next one, and the version stays below `1.0.0` until
-it is. See [wire format](https://shorn.dev/wire-format/).
+First release. The wire format is **not** frozen: payloads written by this version are not guaranteed to decode under the next one, and the version stays below `1.0.0` until it is. See [wire format](https://shorn.dev/wire-format/).
 
-### What it does
+Turns a Standard Schema you already have (Zod, Valibot, or ArkType) into a compact binary codec, with `compile()`, `encode()`, `decode()`, and the `m` builders for schema-less use. `fingerprinted()` adds a prefix that catches a structural mismatch between writer and reader.
 
-Turns a Standard Schema you already have — Zod, Valibot, or ArkType — into a compact
-binary codec, with `compile()`, `encode()`, `decode()`, and the `m` builders for
-schema-less use. `fingerprinted()` adds a prefix that catches a structural mismatch
-between writer and reader.
+- **`unchecked()`** returns the same codec with the validator removed, for links where both ends are yours. On the three-field person fixture that is 2.3x on encode and 3.7x on decode. Bytes are identical, so a validated decoder reads what an unchecked encoder wrote. Every structural check survives, but transforms such as `z.string().trim()` no longer run, and bytes written against a schema that differs only in its refinements decode silently. Keep the validated codec at any boundary you do not own.
+- **`require("@chichurita/shorn")` resolves.** The `exports` map declared only an `import` condition. There is still no CommonJS build: Node 20.19+ and 22.12+ reach the ESM build through `require`, older versions get `ERR_REQUIRE_ESM`, and `await import("@chichurita/shorn")` remains the portable form.
+- **Generated decoders for objects with optional fields**, 17% faster on a document-shaped payload. A `__proto__` field, an open object, and an optional named after an `Object.prototype` member stay on the interpreted path.
+- **Strings decode through `Buffer.prototype.utf8Slice`** where it exists, about 45% cheaper than `TextDecoder.decode`. Malformed input still throws: a result containing U+FFFD is re-checked with the strict decoder.
 
-### Notable in this release
-
-**`unchecked()`** — the same codec with the validator removed, for links where both ends
-are yours and validation is work the process has already done. On the three-field person
-fixture that is 2.3x encode and 3.7x decode. Bytes are identical, so a validated decoder
-reads what an unchecked encoder wrote and a rollout can be gradual. Every structural
-check survives — bounds, length limits, trailing-byte refusal — but transforms such as
-`z.string().trim()` no longer run, and bytes written against a schema that differs only
-in its refinements now decode silently. Keep the validated codec at any boundary you do
-not own.
-
-**`require("@chichurita/shorn")` resolves.** The `exports` map declared only an `import` condition,
-so CommonJS callers were refused by the resolver before Node could decide whether it
-could load an ES module. There is still no CommonJS build and no plan for one — Node
-20.19+ and 22.12+ reach the ESM build through `require`, older versions get
-`ERR_REQUIRE_ESM`, and `await import("@chichurita/shorn")` remains the portable form.
-
-**Generated decoders for objects with optional fields**, rather than the interpreted
-loop — 17% faster on a document-shaped payload. Three shapes stay interpreted because
-they need `defineProperty`: a `__proto__` field, an open object, and an optional named
-after an `Object.prototype` member.
-
-**Strings decode through `Buffer.prototype.utf8Slice`** where it exists, which is ~45%
-cheaper than `TextDecoder.decode` at every length measured. Malformed input still
-throws: `utf8Slice` substitutes U+FFFD where the fatal decoder throws, so a result
-containing U+FFFD is re-run through `TextDecoder`. Environments without the Node global
-keep the `TextDecoder` path.
-
----
-
-Detailed rationale and measurements for the four entries above were written as
-changesets. They live in git at `1922796:.changeset/` — the last commit that carries
-them, before changesets was removed.
+Detailed rationale for these entries was written as changesets. They live in git at `1922796:.changeset/`, the last commit that carries them.
