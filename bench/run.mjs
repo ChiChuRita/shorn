@@ -34,73 +34,10 @@ const targetSampleMs = quick ? 60 : 180;
 const sampleCount = quick ? 3 : 7;
 let sink = 0;
 
-const person = Object.freeze({ name: "Rahul", age: 25, sex: "M" });
+const person = fixtures.personValue;
 const unicodePerson = Object.freeze({ name: "Grüße 👋 राहुल", age: 25, sex: "M" });
-const event = Object.freeze({
-  id: 731_942,
-  timestamp: 1_725_435_678,
-  active: true,
-  actor: person,
-  metrics: Object.freeze({ cpu: 0.625, memory: 786_432 }),
-  tags: Object.freeze(["api", "edge", "paid"]),
-});
-function token(index, salt) {
-  let value = Math.imul(index + salt, 0x9e3779b1) >>> 0;
-  value ^= value >>> 16;
-  value = Math.imul(value, 0x85ebca6b) >>> 0;
-  value ^= value >>> 13;
-  return value.toString(36).padStart(7, "0");
-}
-
-/**
- * A monotonic counter with a realistic gap between readings.
- *
- * `id`, `timestamp` and `memory` used to step by exactly 1, 1 and 1,024, and that
- * is not a neutral choice: a perfectly constant stride is close to the best case a
- * fixed-width big-endian integer can be handed, because the high bytes then stay
- * identical across thousands of consecutive records and LZ77 matches those runs
- * for free. shorn's LEB128 varints are 40% smaller raw and get no such gift, so
- * the fixture was quietly deciding a compressed-size comparison that the formats
- * should have decided. Measured: under Brotli the constant-stride fixture puts
- * msgpackr's shared records ahead, and a jittered one puts shorn ahead, with no
- * change to any codec, so the jitter is the honest fixture, not a thumb on the
- * scale. Measured 2026-08-09.
- *
- * `Math.abs` because `token`'s final XOR yields a signed int, so its base36 form
- * can lead with "-"; without it the gaps go negative and the counter becomes a
- * random walk rather than a counter.
- */
-const gap = (index, salt, spread) =>
-  Math.abs(Number.parseInt(token(index, salt).slice(0, 5), 36)) % spread;
-
-let idCursor = event.id;
-let clock = event.timestamp;
-let bytesUsed = 500_000;
-
-const batch = Object.freeze(
-  Array.from({ length: batchSize }, (_, index) => ({
-    id: (idCursor += 1 + gap(index, 3, 40)),
-    timestamp: (clock += 1 + gap(index, 5, 900)),
-    active: index % 7 !== 0,
-    actor: {
-      name: highEntropy
-        ? `user-${index}-${token(index, 17)}`
-        : index % 3 === 0
-          ? "Rahul"
-          : index % 3 === 1
-            ? "Ada"
-            : "Linus",
-      age: 20 + (index % 50),
-      sex: index % 3 === 0 ? "M" : index % 3 === 1 ? "F" : "X",
-    },
-    metrics: { cpu: (index % 16) / 16, memory: (bytesUsed += 1_024 + gap(index, 7, 4_096)) },
-    tags: highEntropy
-      ? [`trace-${token(index, 31)}`, `span-${token(index, 47)}`]
-      : index % 2 === 0
-        ? ["api", "edge", "paid"]
-        : ["worker", "free"],
-  })),
-);
+const event = fixtures.eventValue;
+const batch = Object.freeze(fixtures.makeBatchValue(batchSize, { highEntropy }));
 
 const { person: Person, event: Event, batch: Batch, document: Document } = fixtures;
 

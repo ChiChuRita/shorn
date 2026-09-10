@@ -53,24 +53,13 @@ function record(group, name, measurement, unit, direction, tolerance, floor = 0)
 const skip = (group) => only !== undefined && only !== group;
 
 // ---------------------------------------------------------------------------
-// Fixtures: the shapes the README and docs quote.
+// Fixtures: the shapes AND the values the README and docs quote. Both come from
+// fixtures.mjs so this gate cannot guard a payload nobody publishes, which is what it
+// did while it held its own `eventValue` with one tag fewer than `run.mjs`.
 // ---------------------------------------------------------------------------
 
-const { person, event, batch, document } = fixtures;
-const personValue = { age: 25, name: "Rahul", sex: "M" };
-const eventValue = {
-  active: true,
-  actor: personValue,
-  id: 731_942,
-  metrics: { cpu: 0.5, memory: 512_000 },
-  tags: ["api", "edge"],
-  timestamp: 1_725_435_678,
-};
-const batchValue = Array.from({ length: 100 }, (_, index) => ({
-  ...eventValue,
-  id: eventValue.id + index,
-  timestamp: eventValue.timestamp + index,
-}));
+const { person, event, batch, document, personValue, eventValue } = fixtures;
+const batchValue = fixtures.makeBatchValue(100);
 const unicode = m.string();
 const unicodeValue = "Grüße 👋 राहुल".repeat(8);
 const timestamps = m.array(m.uint());
