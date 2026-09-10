@@ -120,3 +120,58 @@ html {
 .sl-markdown-content table th:not(:first-child) {
   font-variant-numeric: tabular-nums;
 }
+
+/* Content that scrolls sideways keeps its thumb. `*:hover` above never fires on a
+   phone, so on touch there was no thumb, no fade, and no other signal: measured at
+   390px, the raw-bytes table on performance/size is 514px of content in a 358px box
+   (the msgpackr rows are entirely off-screen) and all 14 code blocks on api/functions
+   overflow, two of them past 3× the viewport. The table looked complete.
+
+   ink-3 for the thumb rather than gray-5: a scrollbar is a graphical control and needs
+   3:1. --shorn-rule is 1.33:1 against the ground, which the palette validator flags;
+   ink-3 is 4.61:1 on the ground and 4.22:1 on the code surface. */
+.sl-markdown-content table,
+.expressive-code pre {
+  scrollbar-color: var(--shorn-ink-3) transparent;
+}
+
+/* And a fade at the right edge, because an overlay scrollbar (macOS, iOS) is only drawn
+   while the finger is moving, so the thumb above is not an affordance on the devices
+   that lose the columns.
+
+   No script: the fade is driven by the element's own scroll position, and
+   `scroll(self inline)` is an *inactive* timeline when there is nothing to scroll in
+   that axis. An animation on an inactive timeline is not applied, which is exactly the
+   "only when it overflows" test CSS otherwise cannot make. It shrinks away over the
+   last fifth of the scroll, so the final column is never left dimmed.
+
+   The keyframes name no colour: a CSS gradient used as a mask is read for its alpha
+   only, so `currentColor` is just "opaque" here and the palette is not involved. */
+@supports (animation-timeline: scroll(self inline)) {
+  .sl-markdown-content table,
+  .expressive-code pre {
+    animation: shorn-scroll-edge linear both;
+    animation-duration: auto;
+    animation-timeline: scroll(self inline);
+  }
+
+  /* The mask takes the code block's own surface and hairline with it, which left the
+     panel looking unfinished for its last 36px. Painting the same panel on the frame
+     behind it fills that back in: every --ec-*Bg above is --shorn-surface, the inset
+     shadow lands exactly where the `pre` border does (the frame has no padding and no
+     border of its own), and neither costs a pixel of layout. */
+  .expressive-code .frame {
+    background: var(--shorn-surface);
+    box-shadow: inset 0 0 0 1px var(--shorn-rule);
+  }
+}
+
+@keyframes shorn-scroll-edge {
+  from,
+  80% {
+    mask-image: linear-gradient(to right, currentColor calc(100% - 36px), transparent 100%);
+  }
+  to {
+    mask-image: linear-gradient(to right, currentColor 100%, transparent 100%);
+  }
+}

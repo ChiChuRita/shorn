@@ -14,6 +14,26 @@
   overflow-x: auto;
   font-family: var(--mono, ui-monospace), monospace;
   font-size: 14px;
+
+  /* The cell grid, as two values rather than as numbers repeated down the file. The
+     indent further down is two cell slots wide and has to be computed from these: spelled
+     out by hand as `2 * (1.6ch + 2.5px)` it measured 37.64px against two real slots at
+     47.81px, a 10.17px drift in a figure whose whole conceit is byte-exactness.
+
+     2.5px: 35 cells share 34 gaps, so every extra half-pixel costs the strip 17px, and
+     the JSON run is what has to fit its column without clipping. */
+  --cell-gap: 2.5px;
+
+  /* Every cell is the SAME width, including a two-glyph one like the varint `34` or a hex
+     pair. Sizing to content let those run wider than their neighbours, which made the row
+     ragged.
+
+     2.1ch, not 1.5: `ch` is the advance width in a monospace face, so two glyphs need a
+     flat 2ch, and `34` was being squeezed into a cell that could not hold it. Paying the
+     width everywhere keeps the grid even and lets every glyph render full size. The strips
+     wrap, so the extra width costs a wrapped row rather than a clipped one, and both lanes
+     keep a shared cell width, which is what makes their lengths comparable at a glance. */
+  --cell: 2.1ch;
 }
 
 .bytes .lane {
@@ -29,33 +49,21 @@
 
 .bytes .strip {
   display: flex;
-  /* 2.5px: 35 cells share 34 gaps, so every extra half-pixel costs the strip 17px and
-     the JSON run is what has to fit its column without clipping. */
-  gap: 2.5px;
+  gap: var(--cell-gap);
   width: max-content;
 }
 
 .bytes .tok {
   display: inline-flex;
-  gap: 2.5px;
+  gap: var(--cell-gap);
 }
 
-/* Every cell is the SAME width, including a two-glyph one like the varint `34` or a
-   hex pair. Sizing to content let those run wider than their neighbours, which made
-   the row ragged.
-
-   2.1ch, not 1.5: `ch` is the advance width in a monospace face, so two glyphs need a
-   flat 2ch, and `34` was being squeezed into a cell that could not hold it. Paying the
-   width everywhere keeps the grid even and lets every glyph render full size. The
-   strips wrap, so the extra width costs a wrapped row rather than a clipped one, and
-   both lanes keep a shared cell width, which is what makes their lengths comparable
-   at a glance. */
 .bytes .strip i {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 2.1ch;
+  width: var(--cell);
   height: 28px;
   border-radius: 2px;
   background: var(--shorn-surface);
@@ -64,7 +72,7 @@
 }
 
 /* The characters that survive the trip. Ink, not inversion: inverting them put eight
-   white chips in the JSON strip and eight more on the wire, which at 15.9:1 against
+   white chips in the JSON strip and eight more on the wire, which at 16.91:1 against
    this ground was the loudest thing on the page. Brightness against the dim cells
    carries the same mapping, and it is the device the size table already uses. */
 .bytes .run i,
@@ -91,7 +99,7 @@
 
 .bytes .cells {
   display: flex;
-  gap: 2.5px;
+  gap: var(--cell-gap);
 }
 
 /* A rule under the run it names, so the name reads as a bracket over those bytes
@@ -188,14 +196,15 @@
 .bytes .strip.lines .line {
   display: flex;
   flex-wrap: wrap;
-  gap: 2.5px;
+  gap: var(--cell-gap);
   row-gap: 4px;
 }
 
 /* Two cell slots wide: the two spaces a formatter would print, drawn as the space they
-   would take rather than as two more cells. */
+   would take rather than as two more cells. Derived from the cell, never restated: two
+   slots is whatever a slot happens to be, at either size. */
 .bytes .strip.lines .line.in {
-  padding-left: calc(2 * (1.6ch + 2.5px));
+  padding-left: calc(2 * (var(--cell) + var(--cell-gap)));
 }
 
 /* One step down, so a small phone shows the whole JSON run rather than scrolling it. */
@@ -203,22 +212,20 @@
   .bytes,
   .bytes.lg {
     font-size: 12px;
+    /* Narrower cells and a tighter run. Only these two move: the strip gaps and the
+       indent are computed from them, so there is nothing left down here to restate, and
+       nothing left to restate wrongly. */
+    --cell-gap: 1px;
+    --cell: 2ch;
   }
 
   .bytes .strip i,
   .bytes.lg .strip i {
-    width: 2ch;
     height: 22px;
   }
 
-  .bytes .strip,
-  .bytes .tok,
-  .bytes .cells {
-    gap: 1px;
-  }
-
-  /* Restated because the rule above also matches the wire strip, and collapsing the
-     space between its groups runs the field runs into one word. */
+  /* Not a cell gap: this is the space between field groups, and 16px of it beside a 2ch
+     cell runs the strip off a phone. Narrowed by hand, not derived. */
   .bytes .wire {
     gap: 10px;
   }
@@ -234,17 +241,9 @@
     gap: 3px;
   }
 
-  /* Same two restatements for the pretty-printed strip: the rule above collapses the
-     gap between its lines, and the indent has to follow the narrower cell. */
+  /* Also not a cell gap: this is the space between the record's lines, and at 22px tall
+     cells they want a little more of it than at 34px. */
   .bytes .strip.lines {
     gap: 4px;
-  }
-
-  .bytes .strip.lines .line {
-    gap: 1px;
-  }
-
-  .bytes .strip.lines .line.in {
-    padding-left: calc(2 * (2ch + 1px));
   }
 }

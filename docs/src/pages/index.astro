@@ -94,7 +94,11 @@ const payloads = [
                 <th scope="row">
                   {row.label}{row.note && <small> ({row.note})</small>}
                 </th>
-                <td class="count">{row.bytes}</td>
+                {/* The unit, for a reader who gets the cell without the caption. The row
+                    announced as `rowheader "shorn", cell "8"`: eight what? The word is
+                    hidden rather than drawn, because the column is a bar chart's axis
+                    labels and "8 bytes" on all six rows is a column of noise. */}
+                <td class="count">{row.bytes}<span class="unit"> bytes</span></td>
                 <td class="bar" aria-hidden="true">
                   <span>
                     {Array.from({ length: row.bytes }, () => (
@@ -108,7 +112,8 @@ const payloads = [
         </tbody>
       </table>
       <figcaption>
-        shorn matches Avro's eight bytes without asking you to write an Avro schema.
+        Avro ties on bytes. It needs a second schema in its own format to get there, and
+        shorn needs nothing you have not already written.
       </figcaption>
     </figure>
   </section>
@@ -169,18 +174,18 @@ Event   { active, actor: Person, id,
       batch of 100 Events in an array.
     </p>
 
-    <dl class="setup">
+    <dl class="setup figures">
       <div class="self">
-        <dt>4.2 MB</dt>
+        <dt>4.3 MB</dt>
         <dd>
-          <strong>for 100,000 events</strong> that take 16 MB as JSON, before any
+          <strong>for 100,000 events</strong> that take 16.5 MB as JSON, before any
           compressor runs. Gzipping those shorn bytes afterwards costs a further 48 ms
           of CPU.
         </dd>
       </div>
       <div>
-        <dt>up to 6.2×</dt>
-        <dd>faster than JSON to encode, and up to 13.7× faster to decode.</dd>
+        <dt>up to 6.7×</dt>
+        <dd>faster than JSON to encode, and up to 13.0× faster to decode.</dd>
       </div>
       <div>
         <dt>up to 77%</dt>
@@ -267,6 +272,15 @@ Event   { active, actor: Person, id,
   }
 
   .setup .self dt {
+    color: var(--shorn-ink);
+  }
+
+  /* In this list the dt IS the claim, and at ink-3 (4.61:1) it was dimmer than the dd
+     that explains it at ink-2 (7.66:1): the number read quieter than its own caption.
+     Ink, the same brightness `.self dt` above already gets. Scoped to `.figures` because
+     the setup-cost list above wants the opposite: there a dt is a competitor's name, and
+     its dimness against `.self` is the comparison. */
+  .setup.figures dt {
     color: var(--shorn-ink);
   }
 
@@ -396,6 +410,21 @@ Event   { active, actor: Person, id,
     padding-right: 16px;
     text-align: right;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Off-screen but spoken. Starlight ships `.sr-only`, but this page renders outside the
+     Starlight shell and only loads tokens.css, so the class is not here to reuse. Same
+     declarations, kept to this one span. */
+  .unit {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border-width: 0;
   }
 
   .sizes .bar span {

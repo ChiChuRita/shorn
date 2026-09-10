@@ -13,8 +13,13 @@
    Because links cannot be distinguished by colour under this palette, custom.css
    underlines them permanently. That is the accessible affordance anyway.
 
-   Contrast against --shorn-bg: ink 15.9:1, ink-2 7.66:1, ink-3 4.61:1. All three
-   clear 4.5:1 at normal text size, ink-3 only just, so do not darken it. */
+   Contrast against --shorn-bg: ink 16.91:1, ink-2 7.66:1, ink-3 4.61:1. All three
+   clear 4.5:1 at normal text size, ink-3 only just, so do not darken it.
+
+   The ink figure read 15.9:1 until it was recomputed from WCAG relative luminance:
+   #ededed linearizes to 0.8469, #0a0a0a to 0.0030, and (0.8469 + 0.05) / (0.0030 + 0.05)
+   is 16.91. The error understated contrast, so nothing was ever at risk, but every other
+   number in this file holds and this one did not. */
 :root {
   /* Ground and structure, darkest to lightest. */
   --shorn-bg: #0a0a0a;
@@ -36,8 +41,10 @@
   /* De-emphasis fill for non-text graphical marks (the competitor byte cells).
      3.15:1 against --shorn-bg, so it clears the 3:1 floor WCAG asks of graphical
      objects; --shorn-rule at 1.33:1 does not, and the palette validator flags it.
-     Paired against --shorn-ink at 16.9:1 for the emphasised series, which is ΔE
-     31.3 apart under deuteranopia and tritanopia. */
+     Pairs with --shorn-ink for the emphasised series: the two are 5.37:1 against each
+     other and ΔE 31.3 apart under deuteranopia and tritanopia. (The 16.91:1 above is
+     ink against the ground, not against this; the line used to quote it here, where it
+     read as the pairing and was wrong by three times.) */
   --shorn-mark-dim: #606060;
 
   /* No accent hue. Kept under the `brand` names so the landing page and the
@@ -54,4 +61,17 @@
   --shorn-danger: #ff6b6b;
 
   --shorn-radius: 4px;
+}
+
+/* The focus ring, here rather than in a component, for the reason the file opens with: a
+   value that lives in only one of the two places is a value the other cannot see. Astro
+   scopes component styles with a per-file hash, so this rule in Landing.astro never
+   reached the replay button HeroShear.astro slots into it. Measured at tab stop 7, that
+   button reported Chrome's fallback `1px auto rgb(153, 200, 255)` at offset 0 while every
+   other stop reported `2px solid rgb(237, 237, 237)`: the only chromatic pixel on a page
+   whose palette has no hue in it. */
+:focus-visible {
+  outline: 2px solid var(--shorn-ink);
+  outline-offset: 3px;
+  border-radius: 2px;
 }

@@ -3,6 +3,10 @@
 import { DEFAULT_PAYLOAD, DEFAULT_SCHEMA } from "./toy";
 // The same two strips the hero draws, here fed by whatever you type.
 import "../styles/strips.css";
+
+// BASE_URL carries the configured base with a trailing slash, so strip it before
+// joining or the link below emits a doubled separator.
+const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/size/`;
 ---
 
 <section data-playground aria-labelledby="toy">
@@ -14,6 +18,7 @@ import "../styles/strips.css";
       Zod schema
       <textarea
         data-schema
+        aria-describedby="toy-keys"
         spellcheck="false"
         rows="8"
         autocomplete="off"
@@ -24,6 +29,7 @@ import "../styles/strips.css";
       payload
       <textarea
         data-payload
+        aria-describedby="toy-keys"
         spellcheck="false"
         rows="8"
         autocomplete="off"
@@ -32,21 +38,43 @@ import "../styles/strips.css";
     </label>
   </div>
 
-  <p class="hint">Tab indents. Press Escape first to tab out of the box.</p>
+  {/* `id` so both boxes can point at it: the hint sits after the inputs in DOM order, so
+      a screen reader tabbing in announced "Zod schema, edit text, multiline" and nothing
+      about Escape. `aria-describedby` reads it out regardless of where it sits. */}
+  <p class="hint" id="toy-keys">Tab indents. Press Escape first to tab out of the box.</p>
 
   {/* Same figure as the hero, live. Hidden until the first successful run so a failed
-      parse leaves the last good drawing up rather than an empty frame. */}
-  <div class="bytes wrap" data-diagram hidden>
+      parse leaves the last good drawing up rather than an empty frame.
+
+      One labelled image, like the hero panel: the 104 `<i>` cells in here came back from
+      the accessibility tree as 104 separate text nodes, so the payload was spelled out a
+      character at a time and then read as 98 hex pairs. `run()` writes the label.
+
+      The two paragraphs below used to live inside this div. `role="img"` would have
+      buried both, and they are prose a reader needs: one says where the saving comes
+      from, the other admits the drawing is of an older input. */}
+  <div class="bytes wrap" data-diagram role="img" hidden>
     <p class="lane">JSON<span data-json-count></span></p>
     <div class="strip lines" data-json-strip></div>
     <div class="split"><span data-delta></span></div>
     <p class="lane">shorn, as hex<span data-wire-count></span></p>
     <div class="strip wire hex big" data-wire-strip></div>
-    <p class="packed" data-packed></p>
-    <p class="stale" data-stale-note hidden>Showing the last input that parsed.</p>
   </div>
 
+  <p class="packed" data-packed hidden></p>
+  <p class="stale" data-stale-note hidden>Showing the last input that parsed.</p>
+
   <p data-out aria-live="polite">loading the encoder…</p>
+
+  {/* The default record is four booleans, an enum and an int, the best case this encoder
+      has: it reads 16.33x here, against the 4.35x the size section below quotes as its
+      four-fixture ceiling. A reader who spots that gap unaided discounts both figures.
+      No number in the line itself, so re-measuring the fixtures cannot make it false. */}
+  <p class="caveat">
+    The record above is a deliberate best case: booleans and enum members are what shorn
+    shrinks hardest. Every figure quoted elsewhere on this page is measured on the
+    <a href={sizeResults}>benchmark fixtures</a> instead, which are ordinary records.
+  </p>
 </section>
 
 <script>
@@ -214,11 +242,19 @@ import "../styles/strips.css";
           `an enum member is a small index, and a string is its UTF-8 bytes behind a length.`;
         const saved = jsonSize - bytes.length;
         deltaEl.textContent = saved === 0 ? "same size" : `${saved > 0 ? "−" : "+"}${Math.abs(saved)} bytes`;
+        const verdict = compare(bytes.length, jsonSize);
+        // The whole figure as one sentence, in place of the cells. Written here rather
+        // than in the markup because these are the only numbers that are true of what is
+        // currently drawn, and a label that lags the drawing is worse than none.
+        diagram.setAttribute(
+          "aria-label",
+          `Two byte strips. This record is ${jsonSize} bytes of JSON and ${bytes.length} bytes of shorn: ${verdict.ratio} ${verdict.unit}, ${verdict.delta}.`,
+        );
         diagram.hidden = false;
+        packed.hidden = false;
         staleNote.hidden = true;
         delete out.dataset.error;
 
-        const verdict = compare(bytes.length, jsonSize);
         out.textContent = `${verdict.ratio} ${verdict.unit}, ${verdict.delta}. ${
           roundTrips ? "Round-trips to identical bytes." : "Round-trip mismatch, please report it."
         }`;
@@ -350,6 +386,21 @@ import "../styles/strips.css";
     color: var(--shorn-ink-3);
   }
 
+  /* The disclosure the toy needs and the page does not otherwise make. Quiet, and at the
+     size of the stale note beside it: it is a caveat, not a claim. */
+  .caveat {
+    margin: 12px 0 0;
+    max-width: 68ch;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--shorn-ink-3);
+  }
+
+  /* Landing.astro's `a { color: inherit }` is scoped to that component, so a link in here
+     renders as the one blue on a monochrome page unless it is told otherwise. */
+  .caveat a {
+    color: inherit;
+  }
 
   /* Says what the readable lane is not: the cells above are values, and the byte count
      comes from the encoding underneath them. */

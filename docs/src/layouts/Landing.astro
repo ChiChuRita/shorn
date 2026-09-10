@@ -131,7 +131,11 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
           <a class="btn" href={p("getting-started/quick-start/")}>{cta}</a>
           <span class="cmd">
             <code>{install}</code>
-            <button type="button" data-copy={install}>copy</button>
+            {/* `aria-live` on the button itself rather than a region on the page: the only
+                thing in here that ever changes is this label, and it only changes on
+                click, so nothing is announced on load or on hover. Without it the swap to
+                "copied" is silent and the button reads as having done nothing. */}
+            <button type="button" data-copy={install} aria-live="polite">copy</button>
           </span>
         </div>
       </div>
@@ -223,11 +227,12 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
         color: inherit;
       }
 
-      :focus-visible {
-        outline: 2px solid var(--shorn-ink);
-        outline-offset: 3px;
-        border-radius: 2px;
-      }
+      /* The focus ring is in tokens.css, not here. Astro scopes component styles with a
+         per-file hash, and HeroShear.astro carries a different one, so a `:focus-visible`
+         rule in this file never reached the replay button it slots in: measured at tab stop
+         7 that button reported Chrome's `1px auto rgb(153, 200, 255)`, the only chromatic
+         pixel on a page whose stated law is no accent hue anywhere. Both files already read
+         tokens.css, so that is where a rule both of them need belongs. */
 
       /* ---------- header: the one navigation ---------- */
       header {
@@ -311,11 +316,19 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
         order: 1;
       }
 
-      main > :global(figure) {
+      /* The actions come before the figure, not after it. Measured against a 900px
+         viewport: with the 465-493px figure in between, the button's top sat at y=1281 at
+         390px wide, y=1255 at 1024 and y=1266 at 1239, so on every width below the
+         two-column breakpoint the one thing this page asks the reader to do was a screen
+         and a half down. Only the 1240px layout put an action on the first screen. */
+      main > .demo > .actions {
         order: 2;
+        /* The figure carries its own bottom margin, so once the actions moved above it
+           there was nothing separating the two. */
+        margin-bottom: clamp(28px, 4vh, 40px);
       }
 
-      main > .demo > .actions {
+      main > :global(figure) {
         order: 3;
       }
 
@@ -381,10 +394,16 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
         }
 
         /* The grid owns vertical rhythm here. Leaving the stacked-layout bottom
-           margins on would double it and push the hero back past the fold. */
+           margins on would double it and push the hero back past the fold.
+
+           `main > .demo > .actions` and not `.demo > .actions`: the stacked rule that
+           separates the actions from the figure is three classes deep, and a media query
+           adds no specificity, so a two-class selector in here loses to it and the
+           two-column column would carry a 40px tail under the button. */
         main > h1,
         main > p,
         .demo > pre,
+        main > .demo > .actions,
         main > :global(figure) {
           margin-bottom: 0;
         }
@@ -462,6 +481,25 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
         white-space: pre;
       }
 
+      /* Measured at 390px: the block is 333px wide against 459px of content, so 126px
+         (27%) of the two longest lines was clipped with no scroll affordance, and those
+         two lines are `// -> 8 canonical bytes, validated before...` and `// -> { name:
+         string; age: number; sex: ...`, the payoff annotations. Wrapping rather than a
+         fade, because these comments carry the argument and so have to be read, not
+         scrolled to. `pre-wrap` breaks at spaces only and preserves the single space that
+         holds a blank line open, and `overflow-x: auto` above stays as the backstop for a
+         token longer than the box.
+
+         The hanging indent is what keeps the tail of a wrapped comment from reading as a
+         new line of code. It costs the continuation 2ch and the first line nothing. */
+      @media (max-width: 640px) {
+        pre .ln {
+          white-space: pre-wrap;
+          padding-left: 2ch;
+          text-indent: -2ch;
+        }
+      }
+
       /* Not ink-3: that clears 4.5:1 on the page ground but only 4.22:1 on this
          lighter surface. These comments carry the actual argument, so they use the
          raised-surface dim instead, at 5.25:1 where they are really drawn. */
@@ -502,7 +540,13 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
       .cmd button {
         border: 0;
         background: none;
-        padding: 0;
+        /* Measured 29x16, under the 24x24 WCAG 2.5.8 floor, and unlike the nav it has no
+           spacing exception to fall back on: it is the only way to grab the install
+           command on touch. The padding takes the target to 45x28 and the matching
+           negative margin gives the space back, so the flex row and the glyph do not
+           move. */
+        padding: 6px 8px;
+        margin: -6px -8px;
         cursor: pointer;
         font-family: var(--mono);
         font-size: 12px;
@@ -517,6 +561,13 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
         padding: 28px 0;
         font-size: 13.5px;
         color: var(--shorn-ink-3);
+      }
+
+      /* Measured 38x15, 50x15 and 46x15, so only the height was under the 24x24 WCAG 2.5.8
+         floor. Vertical padding on an inline box grows the target without moving the line
+         it sits on, so this costs no layout and no negative margin. */
+      footer a {
+        padding: 6px 0;
       }
     </style>
   </body>
