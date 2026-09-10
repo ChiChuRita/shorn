@@ -23,6 +23,22 @@ export default defineConfig({
           // dropping the pages that argue for it or measure it.
           exclude: ["comparisons", "performance/**"],
           details: AGENT_GUIDANCE,
+          // Pages are emitted in collator order over their IDs, so left alone the full
+          // file opens on `# Errors` and does not reach `# Introduction` until around
+          // line 1200: an agent reading top-down meets `DecodeError.offset` long before
+          // it learns what shorn is, which is the opposite of the reading order llms.txt
+          // recommends. `promote` and `demote` prefix IDs with underscores to move them,
+          // earlier pattern meaning earlier in the file, so these two lists are that
+          // reading order. They replace the plugin's `promote: ["index*"]`, which matches
+          // nothing here: the landing page is `src/pages/index.astro`, not a docs entry.
+          promote: [
+            "getting-started/introduction",
+            "getting-started/**",
+            "core-concepts/how-it-works",
+            "core-concepts/canonical-bytes",
+            "core-concepts/**",
+          ],
+          demote: ["api/**", "performance/**"],
           customSets: [
             {
               label: "Getting Started and Core Concepts",
@@ -111,38 +127,31 @@ export default defineConfig({
       // tokens.css first: custom.css maps Starlight's ramp onto the tokens it
       // declares, and the landing page imports the same file directly.
       customCss: ["./src/styles/tokens.css", "./src/styles/custom.css"],
+      // Six groups, five children at most, and nothing top-level that is a bare page or
+      // an outbound file. The previous eleven entries of five different kinds overran
+      // the sidebar's own scroll container at 1440x900: it stopped at "Schema Changes",
+      // so the whole API group sat below the fold and the reference read as missing to
+      // the reader most likely to want it. Regrouping alone did not fix that, since 33
+      // expanded rows still want 1138px of an 836px pane, hence `collapsed` on every
+      // group: Starlight opens the one holding the current page, so a reader sees where
+      // they are plus the other five section names, and the pane never scrolls.
+      // Labels and nesting only. Every slug below is the slug it was, because the pages
+      // cross-link each other by path and the site is live.
       sidebar: [
         {
           label: "Getting Started",
+          collapsed: true,
           items: [
             { label: "Introduction", slug: "getting-started/introduction" },
             { label: "Installation", slug: "getting-started/installation" },
             { label: "Quick Start", slug: "getting-started/quick-start" },
             { label: "Using Payloads", slug: "getting-started/using-payloads" },
-          ],
-        },
-        {
-          label: "Validators",
-          items: [
-            { label: "Zod", slug: "validators/zod" },
-            { label: "ArkType", slug: "validators/arktype" },
-            { label: "Valibot", slug: "validators/valibot" },
-          ],
-        },
-        {
-          label: "Core Concepts",
-          items: [
-            { label: "How It Works", slug: "core-concepts/how-it-works" },
-            { label: "Canonical Bytes", slug: "core-concepts/canonical-bytes" },
-            {
-              label: "Compilation and Caching",
-              slug: "core-concepts/compile-and-caching",
-            },
-            { label: "Validation", slug: "core-concepts/validation" },
+            { label: "Comparisons", slug: "comparisons" },
           ],
         },
         {
           label: "Schemas",
+          collapsed: true,
           items: [
             { label: "Supported Types", slug: "schemas/supported-types" },
             { label: "Rejected Shapes", slug: "schemas/rejected-shapes" },
@@ -150,28 +159,49 @@ export default defineConfig({
               label: "Date, BigInt, Map, Set",
               slug: "schemas/rich-types",
             },
-          ],
-        },
-        {
-          label: "Versioning",
-          items: [
-            { label: "Wire Fingerprints", slug: "versioning/fingerprinting" },
             {
-              label: "Schema Changes",
-              slug: "versioning/schema-evolution",
+              // Three pages, one skeleton each (extra properties, rich types, version
+              // note), and a reader needs exactly one of them. Collapsed they cost one
+              // row instead of four; Starlight opens the group on its own pages.
+              label: "Validators",
+              collapsed: true,
+              items: [
+                { label: "Zod", slug: "validators/zod" },
+                { label: "ArkType", slug: "validators/arktype" },
+                { label: "Valibot", slug: "validators/valibot" },
+              ],
             },
           ],
         },
         {
-          label: "Byte Layout",
-          slug: "wire-format/layout",
+          // "Wire Format" is the name the prose and the llms-txt set above use, and it
+          // is what someone searching the sidebar types. It also puts the first segment
+          // of /wire-format/layout/ on screen, which "Byte Layout" alone never did.
+          label: "Wire Format",
+          collapsed: true,
+          items: [
+            { label: "How It Works", slug: "core-concepts/how-it-works" },
+            { label: "Canonical Bytes", slug: "core-concepts/canonical-bytes" },
+            { label: "Byte Layout", slug: "wire-format/layout" },
+          ],
         },
         {
-          label: "Comparisons",
-          slug: "comparisons",
+          label: "Production",
+          collapsed: true,
+          items: [
+            { label: "Validation", slug: "core-concepts/validation" },
+            {
+              label: "Compilation and Caching",
+              slug: "core-concepts/compile-and-caching",
+            },
+            { label: "Wire Fingerprints", slug: "versioning/fingerprinting" },
+            { label: "Schema Changes", slug: "versioning/schema-evolution" },
+            { label: "Hostile Input", slug: "hostile-input" },
+          ],
         },
         {
           label: "Performance",
+          collapsed: true,
           items: [
             { label: "Payload Size", slug: "performance/size" },
             { label: "Throughput", slug: "performance/throughput" },
@@ -179,11 +209,8 @@ export default defineConfig({
           ],
         },
         {
-          label: "Hostile Input",
-          slug: "hostile-input",
-        },
-        {
           label: "API",
+          collapsed: true,
           items: [
             { label: "API Overview", slug: "api/overview" },
             { label: "Functions", slug: "api/functions" },
@@ -191,14 +218,9 @@ export default defineConfig({
             { label: "Errors", slug: "api/errors" },
           ],
         },
-        {
-          label: "LLM Docs",
-          link: "/llms-full.txt",
-          attrs: {
-            target: "_blank",
-            rel: "noopener noreferrer",
-          },
-        },
+        // No "LLM Docs" entry. It pointed at /llms-full.txt, 200 KB of plain text that
+        // no human wants, and machines never needed the sidebar: Head.astro emits
+        // <link rel="alternate" type="text/markdown" href="/llms.txt"> on every page.
       ],
     }),
   ],

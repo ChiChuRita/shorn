@@ -3,6 +3,21 @@ title: Using Payloads
 description: Send shorn bytes over HTTP, store or queue them safely, and frame multiple values.
 ---
 
+Every example on this page uses one schema and one value:
+
+```ts
+import { z } from "zod";
+import { compile, encode, fingerprinted, safeDecode } from "@chichurita/shorn";
+
+const Person = z.object({
+  name: z.string(),
+  age: z.int().nonnegative(),
+  sex: z.enum(["M", "F", "X"]),
+});
+
+const person = { name: "Grace", age: 45, sex: "F" } as const;
+```
+
 ## HTTP
 
 ```ts

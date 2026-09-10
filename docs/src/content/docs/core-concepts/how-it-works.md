@@ -51,13 +51,10 @@ Both interfaces are vendor-neutral, which is why shorn needs no code specific to
 
 ## The wire plan
 
-The JSON Schema becomes a `WireShape`, a small closed set of cases:
+The JSON Schema becomes a `WireShape`, a small closed set of cases. Most of them are the obvious ones: one per scalar wire type (`uint`, `int`, `float64`, `string`, `boolean`, `uuid`, `any`), and one each for arrays, tuples, objects, records, enums, literals and nullables. Three cases carry a decision worth spelling out:
 
 ```
-any | boolean | float64 | int | string | uint | uuid
-| { array } | { tuple } | { object, rejectUnknown } | { record }
-| { enum }  | { literal } | { nullable } | { ref }
-| { union, on, cases } | { union, types }
+{ union, on, cases } | { union, types } | { ref }
 ```
 
 The two union cases are the two ways a branch can be identified without trying each one. `on`/`cases` means one property names the branch, a discriminant. `types` means the JSON type of the value names the branch. A union whose branches could overlap has neither, and is [refused](/schemas/rejected-shapes/#overlapping-unions).
@@ -66,8 +63,8 @@ A `{ ref }` is the back edge of a cycle in a recursive schema. It points into a 
 
 Two JSON Schema details decide most of what matters:
 
-- **`type: "integer"` with `minimum >= 0`** becomes `uint`, a plain varint. Without the bound it becomes `int`, which uses ZigZag encoding and crosses every size boundary at half the value.
-- **`additionalProperties`** decides what happens to fields the schema does not name. `false` means the validator already rejects or strips them. If the keyword is absent, shorn refuses extras during encoding. `true` or a schema makes the object open.
+- **`type: "integer"` with `minimum >= 0`** becomes `uint`, a plain varint: seven bits of value per byte, so a small number costs one byte. Without the bound it becomes `int`, which is ZigZag encoded first, interleaving negative and positive values, and so crosses every size boundary at half the value. [Integers](/wire-format/layout/#integers) shows both encodings byte by byte.
+- **`additionalProperties`** decides what happens to fields the schema does not name. `false` means the validator already rejects or strips them. If the keyword is absent, shorn refuses extras during encoding, and the object case records that as a `rejectUnknown` flag. `true` or a schema makes the object open.
 
 shorn converts both `jsonSchema.input()` and `.output()` and compares them. If the two sides differ, the schema would need a codec that runs in two directions, and it is refused.
 
