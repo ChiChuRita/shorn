@@ -14,7 +14,7 @@ No schema file, no code generation, no second copy of your types to keep in sync
 <p align="center">
   <a href="https://www.npmjs.com/package/@chichurita/shorn"><img src="https://img.shields.io/npm/v/%40chichurita%2Fshorn" alt="npm version"></a>
   <a href="https://github.com/ChiChuRita/shorn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ChiChuRita/shorn/ci.yml?branch=main" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/gzip-6.44_kB-blue" alt="bundle size, 6.44 kB gzip">
+  <img src="https://img.shields.io/badge/gzip-6.45_kB-blue" alt="bundle size, 6.45 kB gzip">
   <a href="https://github.com/ChiChuRita/shorn/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/%40chichurita%2Fshorn" alt="MIT license"></a>
 </p>
 
@@ -107,9 +107,9 @@ Not supported: overlapping unions, streaming, and schema migration.
 `undefined`, symbols, `RegExp`, and class instances have no wire form, so
 convert those first.
 
-Against JSON bytes, encoding is up to 6.2× faster and decoding up to 13.7×,
-with no compressor involved. The `m` API is 6.44 KB gzip; `compile` with
-validation is 11.55 KB.
+Against JSON bytes, encoding is up to 6.7× faster and decoding up to 13.0×,
+with no compressor involved. The `m` API is 6.45 KB gzip; `compile` with
+validation is 11.52 KB.
 
 ## Documentation
 

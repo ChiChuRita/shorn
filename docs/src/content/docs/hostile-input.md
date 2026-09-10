@@ -47,7 +47,7 @@ A variable-length container around a fixed one is still yours to bound, because 
 ## Security boundaries
 
 - **No security audit or coverage-guided fuzzing.** Property-based and mutation tests are not a substitute for either.
-- **No depth limit from the schema.** A deeply nested schema exhausts the JavaScript stack while the codec is built and throws `RangeError`, at about **1,400** levels through `compile()` and **1,600** through `m` on Node 22. That takes a hostile schema, not hostile bytes, and a `RangeError` is recoverable. Limit depth if schemas come from untrusted input. Depth chosen by the payload is capped: 64 levels for a dynamic value, 256 for a recursive schema.
+- **No depth limit from the schema.** A deeply nested schema exhausts the JavaScript stack while the codec is built and throws `RangeError`, at about **1,400** levels through `compile()` and **1,600** through `m`, measured on Node 22 and not re-measured since. That takes a hostile schema, not hostile bytes, and a `RangeError` is recoverable. Limit depth if schemas come from untrusted input. Depth chosen by the payload is capped: 64 levels for a dynamic value, 256 for a recursive schema.
 - **Not a sandbox.** Validation code runs with the same privileges as your application.
 - **Not authentication or encryption.** Fingerprints are unkeyed, and payloads are readable by anyone with the schema.
 
