@@ -78,7 +78,7 @@ m.array<T>(item: Schema<T>, length?: number): Schema<T[]>;
 
 Writes a varint count, then the elements in order. Building the codec fails if `item` can occupy zero bytes. Arrays are limited to 1,000,000 elements, and an impossible count is rejected before anything is allocated.
 
-Pass `length` for a fixed-size array. The count then comes from the schema and is not written, and the element may be zero-width, exactly as in a tuple. `compile` selects this form when `minItems` equals `maxItems`. A value whose length disagrees is an `EncodeError`. With a zero-width element the count is answerable to the schema alone, so construction fails when the slots one could fill from no input, multiplied through nesting and summed through zero-width objects and tuples, pass 1,000,000.
+Pass `length` for a fixed-size array. The count then comes from the schema and is not written, and the element may be zero-width, exactly as in a tuple. `compile` selects this form when `minItems` equals `maxItems`. A value whose length disagrees is an `EncodeError`. With a zero-width element nothing in the payload bounds the allocation, so construction fails if the total number of slots the schema can fill from an empty payload, multiplied through nesting, passes 1,000,000. See [Hostile Input](/hostile-input/).
 
 ## `m.set(item)`
 
@@ -88,13 +88,13 @@ m.set<T>(item: Schema<T>): Schema<Set<T>>;
 
 A varint count, then the elements in iteration order. Byte-identical to `m.array(item)` over the same elements. The two differ in what they decode to and in their signature.
 
-Construction fails if `item` can occupy zero bytes, exactly as `m.array` fails, and there is no fixed-count form to exempt it:
+Construction fails if `item` can occupy zero bytes, as `m.array` does, and there is no fixed-count form to exempt it:
 
 ```
 Set elements must occupy at least one byte
 ```
 
-Sets are limited to 1,000,000 elements, and an impossible count is rejected before allocation. A **duplicate element** in the payload is a `DecodeError`: merging it would let the value re-encode to a shorter payload than the one it was read from.
+Sets are limited to 1,000,000 elements, and an impossible count is rejected before allocation. A **duplicate element** in the payload is a `DecodeError`, because merging it would give one value two encodings.
 
 ## `m.map(key, value)`
 

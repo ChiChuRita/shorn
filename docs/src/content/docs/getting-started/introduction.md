@@ -21,7 +21,7 @@ const decoded = decode(Person, bytes);
 
 As minified JSON, that value is 35 bytes. shorn writes 8, because the field names and type markers stay in the schema instead of being repeated in every payload. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) walks from 35 down to 8 in three steps.
 
-A few things hold everywhere:
+In every case:
 
 - The same schema written in Zod, Valibot, or ArkType produces the same bytes.
 - Your validator runs before encoding and again after decoding, so a payload never skips your rules.

@@ -104,9 +104,9 @@ the edge, see Rejected Shapes)
 
 This suffix is added when a **validator's own** conversion throws, so the reason stays the validator's and the remedy is shorn's. In practice that means Valibot's converter (`v.undefined()`, a `v.transform`, and `v.date()`, `v.bigint()`, `v.set()` or `v.map()` without the [`valibotOverride` recipe](/validators/valibot/#rich-types)), and an ArkType constraint shorn has no hook for, such as the predicate behind `"string.date"`.
 
-A refusal that is shorn's own carries no suffix, because it already says what to do. Zod's are all in that group: `undefined cannot be represented in JSON Schema` and its siblings come from shorn's conversion hook, not from Zod.
+A refusal that is shorn's own carries no suffix, because it already says what to do. Zod's refusals are all in that group: `undefined cannot be represented in JSON Schema` and its siblings come from shorn's conversion hook, not from Zod.
 
-`Date`, `bigint`, `Map`, `Set` and `date-time` strings are no longer in this group. They are [supported](/schemas/rich-types/). What remains is `undefined`, `void`, `nan`, symbols, functions, `custom` types and transforms.
+`Date`, `bigint`, `Map`, `Set` and `date-time` strings are [supported](/schemas/rich-types/). What has no wire form is `undefined`, `void`, `nan`, symbols, functions, `custom` types and transforms.
 
 ### Async
 
@@ -150,9 +150,9 @@ compile(), optionally wrapped by fingerprinted()
 | `Expected a tuple with at least N items` | fewer items than a rest tuple's fixed part |
 | *validation issues, joined by `; `* | your refinements failed. Paths are prefixed as `field.nested: message` |
 
-Every one of these is an `EncodeError`, whatever the value. A `Symbol`, an object with a null prototype, and an object whose `valueOf`, `toString`, `toJSON` or `Symbol.toPrimitive` throws are all refused like any other wrong type. The coercion's own `TypeError` never escapes, so `instanceof EncodeError` and `safeEncode` narrowing hold for anything a caller can pass. Wherever a message quotes a value it does not restrict to a primitive, `X` is the value when printing it is safe and its type (`symbol`, `object`, `bigint`, `function`) when it is not, because a value that cannot be printed cannot explain its own refusal.
+Every one of these is an `EncodeError`, whatever the value. A `Symbol`, a null-prototype object, or an object whose `valueOf` or `toString` throws is refused like any other wrong type, and no `TypeError` from the coercion escapes. Where a message quotes a value, `X` is the value when printing it is safe and its type (`symbol`, `object`, `bigint`, `function`) when it is not.
 
-The one thing that still escapes as itself is your own code. A getter or a proxy trap that throws while the encoder reads a property propagates unchanged, because swallowing it would report a wrong field instead of the real fault.
+The one thing that still escapes as itself is your own code. A getter or a proxy trap that throws while the encoder reads a property propagates unchanged, because swallowing it would report the wrong fault.
 
 ## Decode-time errors
 

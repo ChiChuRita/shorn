@@ -111,7 +111,7 @@ A one-way transform has no reverse direction in Standard Schema, so shorn cannot
 const Node = z.object({ get kids() { return z.set(Node); } });
 ```
 
-A set's element is converted as a document of its own and inlined where `items` would go, because Zod's generator writes an empty container and never descends into it. A `$ref` in that document would resolve against the root, where its target is not. Put the cycle in an array or an object; both [support recursion](/schemas/supported-types/#recursive-schemas).
+A set's element is converted as a document of its own, so a `$ref` inside it would resolve against the wrong document. Put the cycle in an array or an object; both [support recursion](/schemas/supported-types/#recursive-schemas).
 
 ## Non-canonical `date-time` strings
 
@@ -134,7 +134,7 @@ Same reason as [uppercase UUIDs](#uppercase-uuids). Call `toISOString()` at the 
 
 > Duplicate Map key
 
-Refused on **decode**, not at build. `new Set` would merge the pair, and the value would then re-encode to one element for a payload that declared two, so one value would have two encodings. Only a primitive can trip this, since every decoded object is a fresh reference. No encoder shorn ships writes such a payload. A hand-made or corrupted one can.
+Refused on **decode**. `new Set` would merge the pair, so the value would re-encode shorter than the payload it came from, and one value would have two encodings. No encoder shorn ships writes such a payload. A hand-made or corrupted one can.
 
 ## Zero-width `Set` elements and `Map` entries
 
@@ -154,7 +154,7 @@ No valid value means no index to write.
 
 An enum whose members are not all strings orders them by their JSON text, because `<` cannot order mixed types consistently. Four numbers do not survive that: `NaN`, `Infinity` and `-Infinity` all serialize as `null`, so they would share an index with each other and with a real `null` member, and `-0` serializes and reads back as `0`. All four are refused rather than reordered.
 
-Encoding `-0` against an enum that *does* list `0` is refused too, at encode time rather than at build. A `Map` compares keys with SameValueZero, so `-0` used to find the `0` member, go out as that member's index, and come back as `0`: the round trip broke silently. `m.literal(0).encode(-0)` has always been refused for the same reason; since 0.3.0 the enum agrees.
+Encoding `-0` against an enum that *does* list `0` is refused too, at encode time rather than at build: it would go out as the `0` member's index and come back as `0`. `m.literal(0).encode(-0)` is refused for the same reason.
 
 The same four values as a **single literal** are not caught, because the validator's JSON Schema has already lost them. `z.literal(NaN)` and both infinities arrive as `{ type: "number", const: null }`, and `z.literal(-0)` as `{ const: 0 }`. The first three build a codec that refuses every value it is given and decodes to `null`. `-0` round-trips to `0`. Do not use a non-finite number or `-0` as a literal.
 
@@ -213,7 +213,7 @@ A plain object counts as a document when it has `$schema`, `$ref`, `type`, `anyO
 
 > Expected a lowercase UUID, received X
 
-A `format: "uuid"` string is stored as its 16 bytes, and 16 bytes have no case. Validators accept either spelling (RFC 4122 says to generate lowercase and accept both), so this is refused at encode and only for values that would not survive the round trip. Lowercase at the edge. `String.prototype.toLowerCase` is exact for hexadecimal.
+A `format: "uuid"` string is stored as its 16 bytes, and 16 bytes have no case. Validators accept either spelling (RFC 4122 says to generate lowercase and accept both), so shorn refuses at encode the one spelling that would not survive the round trip. Lowercase at the edge.
 
 A `format: "date-time"` string is packed too, into the 6 bytes of the instant it names, and for the same reason it accepts only [the canonical spelling](#non-canonical-date-time-strings). Those two are the only string formats shorn packs. Every other one is stored as text.
 

@@ -123,7 +123,7 @@ const structure = toJsonSchema(Person, { overrideSchema: valibotOverride(toJsonS
 const codec = compile(Person, structure);
 ```
 
-`toStandardJsonSchema` takes no options, which is why the raw converter is used here. You pass the converter in rather than shorn importing it, for two reasons: shorn depends on no validator, and a Set inside a Set has to be converted through the same hook or the inner one would throw where the outer one did not. Zod and ArkType need none of this; shorn passes their hooks itself. See [Valibot](/validators/valibot/#rich-types).
+`toStandardJsonSchema` takes no options, which is why the raw converter is used here. Zod and ArkType need none of this. See [Valibot](/validators/valibot/#rich-types) for why the converter is passed in rather than imported.
 
 ## `fingerprinted`
 
@@ -140,7 +140,7 @@ codec.fingerprint;     // Uint8Array, a fresh copy every read
 codec.fingerprintHex;  // "7236d1", the Map key for dispatch
 ```
 
-`fingerprint` returns a copy so that a caller cannot change the codec's internal bytes. An accidental write would leave the codec non-canonical while it still round-trips against itself. Use `fingerprintHex` as a `Map` key.
+`fingerprint` returns a copy so that a caller cannot change the codec's internal bytes. Use `fingerprintHex` as a `Map` key.
 
 Throws `EncodeError` for a codec without a signature, and for `bytes` outside 1 to 4. The default is 3 bytes. Use 4 for persistent data. See [Wire Fingerprints](/versioning/fingerprinting/).
 

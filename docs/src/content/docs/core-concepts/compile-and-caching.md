@@ -32,23 +32,19 @@ type = "string";
 encode(mutable, 5);   // still the integer plan
 ```
 
-This follows from what a cache is, and shorn cannot check for it: re-deriving the JSON Schema to compare it would cost exactly what the cache exists to save. Zod, Valibot, and ArkType schemas are immutable, so this cannot happen with them. If you build a Standard Schema object by hand, treat it as frozen once it has been encoded, and build a new object instead of mutating it.
+shorn cannot detect this without re-deriving the JSON Schema on every call, which is the cost the cache exists to avoid. Zod, Valibot, and ArkType schemas are immutable, so this cannot happen with them. If you build a Standard Schema object by hand, treat it as frozen once it has been encoded, and build a new object instead of mutating it.
 
 For Valibot the cache key is the schema **and** the structure object together. So `toStandardJsonSchema` must be hoisted too: it returns a fresh object each time and does real work itself, so an inline call pays twice. See [Valibot](/validators/valibot/).
 
 ## Generated encoders
 
-For object schemas that qualify, shorn generates specialized encode and decode functions with `new Function` when the codec is built. Objects with optional fields qualify too. Which fields are present varies per payload, but each optional field's bit in the presence bitmap is fixed by the schema, so the generated code tests a constant mask.
+For most object schemas, shorn generates specialized encode and decode functions with `new Function` when the codec is built. Open objects, and objects with a field named like something on `Object.prototype`, use an interpreted path instead. Schema keys are passed to the generated function as arguments, never pasted into its source, so a key from an external JSON Schema can never become executable code.
 
-A schema that must reject unknown properties checks for them first, then runs the same generated encoder. Two cases use the interpreted path instead: an open object, and an object where a field name collides with something on `Object.prototype`, because that field needs `defineProperty` rather than a plain assignment.
+A Content Security Policy without `unsafe-eval` blocks `new Function`. shorn then uses the interpreted path automatically, with identical bytes and results.
 
-Schema keys are passed to the generated function as arguments, never pasted into its source, so a key from an external JSON Schema can never become executable code.
+## Buffers
 
-A Content Security Policy without `unsafe-eval` blocks `new Function`. In that case shorn uses the interpreted path automatically, with identical bytes and results.
-
-## The `Writer` is pooled
-
-`encode` reuses one internal `Writer` and resets it after every call, including when encoding throws. It returns an **exact-size copy** of the bytes, never a view into a larger reused buffer. A buffer that grew past 64 KiB is released afterwards, so one large encode does not permanently inflate the process. `encodeInto` keeps a second pooled `Writer` pointed at your buffer, and lets go of any target larger than 64 KiB once the call returns, so a one-off frame is not pinned in memory either.
+`encode` reuses one internal `Writer` and returns an **exact-size copy** of the bytes, never a view into a larger reused buffer. A buffer that grew past 64 KiB is released afterwards, so one large encode does not permanently inflate the process. `encodeInto` writes into your buffer and keeps no reference to a target larger than 64 KiB once the call returns.
 
 ## When cold setup matters
 

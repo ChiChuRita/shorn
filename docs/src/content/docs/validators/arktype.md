@@ -45,7 +45,7 @@ const Event = type({ when: "Date", id: "bigint" });
 const codec = compile(Event); // 6 bytes for the Date
 ```
 
-JSON Schema has no keyword for either, so shorn hands ArkType a `fallback` for the two error codes it would otherwise throw, `{ code: "date" }` and `{ code: "domain", domain: "bigint" }`, and tags them with [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword). An equivalent Zod schema produces the same bytes and the same fingerprint.
+JSON Schema has no keyword for either, so shorn asks ArkType's converter to write shorn's own [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword) keyword for them. An equivalent Zod schema produces the same bytes and the same fingerprint.
 
 `Set` and `Map` are **refused**:
 
@@ -54,7 +54,7 @@ ArkType's Set carries no element type, so there is nothing to encode its
 members as; convert it at the edge
 ```
 
-Both are keywords in ArkType, and neither says what type its members have. A format without type tags writes the members and nothing else, so there is nothing to write them as, and encoding them as empty containers would silently drop data. Zod's `z.set(T)` and Valibot's `v.set(T)` name the element type and are supported. Any other prototype is refused too, as `RegExp cannot be represented in JSON Schema`.
+Both are keywords in ArkType, and neither says what type its members have. A format without type tags has nothing to write the members as, and encoding them as empty containers would silently drop data. Zod's `z.set(T)` and Valibot's `v.set(T)` name the element type and are supported. Any other prototype is refused too, as `RegExp cannot be represented in JSON Schema`.
 
 ArkType has no `format: "date-time"` spelling either. `"string.date.iso"` converts to a pattern, so an ISO timestamp stays an ordinary string rather than becoming the 6 bytes `z.iso.datetime()` gets.
 

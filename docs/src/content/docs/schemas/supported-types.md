@@ -45,9 +45,9 @@ A `Date` is those same 6 bytes, decoded back to a `Date`. A `bigint` is a varint
 
 An array writes its element count on the wire. A tuple gets its count from the schema. That difference is why a tuple may contain zero-width elements and an array may not.
 
-A **Set** writes exactly what an array of the same elements writes, and a **Map** exactly what an array of `[key, value]` tuples writes, both in iteration order. What differs is what they decode to and their [fingerprint](/versioning/fingerprinting/), so a payload written as one is never read back as the other. Neither has a fixed-count form, so neither may hold a zero-width element. The decoder refuses a duplicate element or key instead of silently merging it. ArkType's `Set` and `Map` keywords carry no element type and are [refused](/schemas/rejected-shapes/#arktypes-set-and-map).
+A **Set** writes exactly what an array of the same elements writes, and a **Map** exactly what an array of `[key, value]` tuples writes, both in iteration order. They differ in what they decode to and in their [fingerprint](/versioning/fingerprinting/), so a payload written as one is never read back as the other. Neither may hold a zero-width element, and the decoder refuses a duplicate element or key instead of silently merging it. ArkType's `Set` and `Map` keywords carry no element type and are [refused](/schemas/rejected-shapes/#arktypes-set-and-map).
 
-An array whose `minItems` equals its `maxItems` is a third case. The schema fixes the count, so the count is not written and the element may be zero-width, just as in a tuple. The count is still checked against the remaining input before anything is allocated, because `minItems` may have come from a fetched JSON Schema. When the element is zero-width there is no input to check against, so instead the total number of slots such a schema can fill from nothing is capped at 1,000,000 across all nesting. See [Hostile Input](/hostile-input/).
+An array whose `minItems` equals its `maxItems` is a third case. The schema fixes the count, so the count is not written and the element may be zero-width, just as in a tuple. The count is still checked against the remaining input before anything is allocated. When the element is zero-width there is no input to check against, so instead the total number of slots such a schema can fill from an empty payload is capped at 1,000,000 across all nesting. See [Hostile Input](/hostile-input/).
 
 ## Discriminated unions
 
@@ -94,7 +94,7 @@ A definition that is reached twice but never through itself is not recursive. It
 
 The cycle has to pass through an array or an object. A recursive type reached through a `Set` or `Map` element is [refused](/schemas/rejected-shapes/#recursion-through-a-set-or-map), because that element is converted as a document of its own, and a reference inside it would resolve against the wrong document.
 
-A nullable marker over a recursive definition that already admits `null` is dropped rather than doubled, the same rule every non-recursive shape follows. Whether a cycle admits `null` cannot be answered while it is still being built, so before 0.3.0 the marker was added and then refused, and `T | null` where `T` was itself a recursive `T | null` did not compile at all.
+A nullable marker over a recursive definition that already admits `null` is dropped rather than doubled, the same rule every other shape follows.
 
 Recursion works with both union forms, which is what a general JSON value needs:
 

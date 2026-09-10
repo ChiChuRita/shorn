@@ -1,6 +1,6 @@
 ---
 title: Footprint
-description: Bundle size, cold setup, and memory. The wire codec is 6.44 KB gzip, 9% over the smallest measured alternative since Date, bigint, Set and Map arrived.
+description: Bundle size, cold setup, and memory, measured against the other codecs.
 ---
 
 ## Bundle size
@@ -16,9 +16,7 @@ An esbuild-minified browser bundle for each codec API as imported. Validation li
 | shorn `compile` (validating) | 37.54 KB | 11.55 KB |
 | protobufjs/light | 88.35 KB | 25.93 KB |
 
-**`@msgpack/msgpack` is the smallest measured. shorn's wire codec is 9% larger gzipped.** That gap is the price of native `Date`, `bigint`, `Set` and `Map`: 871 gzip bytes on `m`, spent deliberately in this release so that every builder stays on one namespace. `compile` is 79% larger than `m` because it validates on encode and decode, which no other row does, and it now sits about 1.1 KB over msgpackr and cbor-x, which validate nothing. Compare the row that matches what you ship.
-
-Before this release the wire codec led `@msgpack/msgpack` by 6%, down from 26% as throughput work traded bytes for speed. The lead was given up knowingly, not lost by drift.
+**`@msgpack/msgpack` is the smallest measured. shorn's wire codec is 9% larger gzipped.** The gap is the cost of native `Date`, `bigint`, `Set` and `Map` on the `m` namespace: 871 gzip bytes. `compile` is 79% larger than `m` because it validates on encode and decode, which no other row does, and it sits about 1.1 KB over msgpackr and cbor-x, which validate nothing. Compare the row that matches what you ship.
 
 `avsc` needs a browser `stream` polyfill and SchemaPack needs a `buffer` polyfill, so neither has a comparable zero-polyfill result.
 
@@ -34,19 +32,9 @@ Before this release the wire codec led `@msgpack/msgpack` by 6%, down from 26% a
 | + `encodeInto` | 40,958 | 12,602 | 179 gzip |
 | everything | 41,993 | 12,927 | 325 gzip |
 
-**Only code that imports a feature pays for it.** Fingerprinting is the most expensive single import at 429 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it. `valibotOverride` is in the last row only.
+**Only code that imports a feature pays for it.** Fingerprinting is the most expensive single import at 429 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it. `valibotOverride` is in the last row only. `m` is one object, so importing it keeps all of its builders.
 
-These numbers have grown across releases, spent on schema coverage: discriminated unions, records, open objects, dynamic values, packed UUIDs, non-string enums, fixed-length arrays, tuple rest elements, type-disjoint unions, and recursive schemas. Earlier, 334 gzip bytes went on a generated encoder for objects with optional fields and a faster string encoder, worth about two thirds on document encode and decode.
-
-0.3.0 spent 96 gzip bytes on the wire codec (`m`) as the regression gate measures it, the first release to spend them on correctness rather than coverage: a bound on what a fixed-count array of zero-width elements can allocate from an empty payload, which without it was an unrecoverable out-of-memory abort, and refusals that report a hostile value's type instead of calling its `toString`. It was 175 bytes before trimming. The message that names the three zero-width shapes moved to [the error reference](/api/errors/) for 28 bytes, one shared message replaced two for 56, and a `try`/`catch` gave way to a `typeof` gate for 28. Throughput and the bytes on the wire did not move.
-
-0.4.1 spent 22 gzip bytes on `m`, 21 of them on a varint reader that keeps multi-byte integers on the integer unit and one on letting objects that reject unknown properties use the generated encoder. Both bought throughput rather than coverage, and `compile` came out 2 bytes smaller.
-
-0.6.0 added `encodeInto`: 185 gzip bytes for a bundle that imports it, and 12 on `m` for the writer's float view now covering the target's own window, since a frame slice rarely starts at byte zero. The two helper methods that would have made it tidier measured at 91 gzip bytes on every `m` bundle and were not shipped.
-
-The release after it spent 871 gzip bytes on `m` and about 1.7 KB on `compile` for native `Date`, `bigint`, `Set` and `Map`: four schema classes, the hex table they share with UUIDs, the `x-shorn` keyword, and the Zod and ArkType hooks that write it. The `date-time` class is reached only from `compile()` and costs `m` nothing. It is the first spend that moved a row past a competitor rather than nearer to one. [Date, BigInt, Map, Set](/schemas/rich-types/) has what it bought.
-
-The functional helpers and fingerprinting tree-shake by export. `m` is one object, so importing it keeps all of its builders. Add the size of your validator if it is not already part of the application.
+These numbers grow as schema coverage grows. What each release spent, and on what, is in the [changelog](https://github.com/ChiChuRita/shorn/blob/main/CHANGELOG.md). Add the size of your validator if it is not already part of the application.
 
 ## Cold setup
 

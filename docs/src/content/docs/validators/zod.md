@@ -50,19 +50,19 @@ const Event = z.object({
 const codec = compile(Event);
 ```
 
-JSON Schema has no keyword for any of the four, so shorn asks Zod to write shorn's own. It detects the Zod vendor and passes `unrepresentable: "any"` plus an `override` hook to Zod's Standard JSON Schema method. The hook tags these four with [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword) and re-throws for the types that still have no wire form. `z.iso.datetime()` is packed into the same 6 bytes, and accepts only the `toISOString()` spelling.
+JSON Schema has no keyword for any of the four, so shorn asks Zod's converter to write shorn's own [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword) keyword for them. `z.iso.datetime()` is packed into the same 6 bytes as a Date, and accepts only the `toISOString()` spelling.
 
 `z.date().nullable()` works, and so does a Set of Sets. A recursive type reached through a Set or Map element is [refused](/schemas/rejected-shapes/#recursion-through-a-set-or-map). A Date cannot be a branch of a type-disjoint union, because it has no JSON type to identify it by.
 
 ### What is still refused
 
-`z.undefined()`, `z.void()`, `z.symbol()`, `z.nan()`, `z.custom()`, `z.function()` and a transform still fail at compile, each named by Zod's own word for it:
+`z.undefined()`, `z.void()`, `z.symbol()`, `z.nan()`, `z.custom()`, `z.function()` and a transform fail at compile, each named by Zod's own word for it:
 
 ```
 undefined cannot be represented in JSON Schema
 ```
 
-`z.literal(undefined)` and a bigint literal get a line of their own, because with the representability check off Zod would drop the first and write the second as a number.
+`z.literal(undefined)` and a bigint literal get a message of their own, because Zod's converter would otherwise drop the first and write the second as a number.
 
 For a **transform**, `z.codec()` declares both directions in the schema itself, and shorn encodes the wire side:
 

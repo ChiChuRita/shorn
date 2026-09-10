@@ -20,7 +20,7 @@ const codec = compile(Event);
 codec.decode(codec.encode(value)); // a Date, a bigint, a Set and a Map back
 ```
 
-JSON Schema has no keyword for any of these, and for a long time that was the whole reason they were refused. shorn now supplies one, `x-shorn`, and asks each validator to write it during conversion. See [the extension keyword](#the-x-shorn-keyword) for what it looks like.
+JSON Schema has no keyword for any of these, so shorn adds one, `x-shorn`, and asks each validator to write it during conversion. See [the extension keyword](#the-x-shorn-keyword).
 
 ## What each validator spells
 
@@ -53,7 +53,7 @@ m.map(m.string(), m.uint()).encode(new Map([["x", 1]]));  // [1, 1, 120, 1]
 
 [Byte Layout](/wire-format/layout/#dates) walks through each one, the canonical rules, and what the decoder refuses.
 
-A Set writes exactly the bytes an array of the same elements writes, and a Map exactly what an array of `[key, value]` tuples writes. What differs is what they decode to, and their [fingerprint](/versioning/fingerprinting/). A `{ set: T }` signature and an `{ array: T }` signature are deliberately different, so a payload written as one is never read back as the other.
+A Set writes exactly the bytes an array of the same elements writes, and a Map exactly what an array of `[key, value]` tuples writes. They differ in what they decode to and in their [fingerprint](/versioning/fingerprinting/), so a payload written as one is never read back as the other.
 
 Iteration order reaches the wire. Two Sets with the same members inserted in a different order write different payloads, and each decodes back to its own order.
 
@@ -74,12 +74,12 @@ When.encode({ at: "2026-09-03T12:00:00.000000Z" });   // refused: six fractional
 
 > Expected a canonical ISO-8601 date-time (the toISOString() spelling), received X
 
-This is the [UUID rule](/schemas/supported-types/#primitives) again. Epoch milliseconds cannot remember a fractional-digit count or an offset spelling, so exactly one spelling survives the round trip. Silently normalizing the others would make `decode(encode(x))` differ from `x`, which is the one property [canonical bytes](/core-concepts/canonical-bytes/) rest on. Call `toISOString()` at the edge. It is what `JSON.stringify` already does to a Date.
+This is the [UUID rule](/schemas/supported-types/#primitives) again. Epoch milliseconds cannot remember a fractional-digit count or an offset, so exactly one spelling survives the round trip, and normalizing the others would break `decode(encode(x)) === x`, the property [canonical bytes](/core-concepts/canonical-bytes/) rest on. Call `toISOString()` at the edge. It is what `JSON.stringify` already does to a Date.
 
 ArkType has no `format: "date-time"` spelling. Its `"string.date.iso"` converts to a pattern, so it stays an ordinary string.
 
-:::caution[Wire-breaking for existing date-time schemas]
-A `date-time` string used to travel as its text. A schema holding one now writes different bytes and derives a different fingerprint, so payloads written before this change cannot be read after it. Keep the old codec while old payloads exist; see [Schema Changes](/versioning/schema-evolution/).
+:::caution[Wire-breaking in 0.7.0 for existing date-time schemas]
+Before 0.7.0 a `date-time` string traveled as text. A schema holding one now writes different bytes and derives a different fingerprint, so payloads written by earlier versions cannot be read. Keep the old codec while old payloads exist; see [Schema Changes](/versioning/schema-evolution/).
 :::
 
 ## Valibot
@@ -97,9 +97,7 @@ const structure = toJsonSchema(Person, { overrideSchema: valibotOverride(toJsonS
 const codec = compile(Person, structure);
 ```
 
-You pass the converter in rather than shorn importing it, for two reasons. shorn depends on no validator. And a Set inside a Set has to be converted through the same hook, or the inner one would throw where the outer one did not. Hoist `structure` to a module constant, as with any Valibot structure, so the codec stays [cached](/core-concepts/compile-and-caching/).
-
-Without the override, Valibot's converter refuses these four before shorn sees anything. shorn keeps the reason and appends what to do about it.
+Hoist `structure` to a module constant, as with any Valibot structure, so the codec stays [cached](/core-concepts/compile-and-caching/). [Valibot](/validators/valibot/#rich-types) explains why the converter is passed in rather than imported, and what the error looks like without the override.
 
 ## The `x-shorn` keyword
 
@@ -121,7 +119,7 @@ A node with the keyword needs no `type`, because there is no JSON type to name. 
 
 ## Limits
 
-**ArkType's `Set` and `Map`.** In ArkType both are keywords, and neither carries an element type, so there is nothing to say how the members should be encoded. They are refused by name rather than encoded as empty containers:
+**ArkType's `Set` and `Map`.** In ArkType both are keywords, and neither carries an element type, so there is nothing to say how the members should be encoded. They are refused rather than encoded as empty containers:
 
 > ArkType's Set carries no element type, so there is nothing to encode its members as; convert it at the edge
 
@@ -175,7 +173,7 @@ const bytes = codec.encode(z.encode(Rich, value)); // rich → wire → bytes
 const back = z.decode(Rich, codec.decode(bytes));  // bytes → wire → rich
 ```
 
-It takes two calls because Standard Schema v1 exposes only `validate` and `jsonSchema`. There is no reverse operation in it, and `z.encode` is Zod-specific, so shorn cannot run the conversion for you without validator-specific code. Valibot and ArkType transforms expose no reverse direction at all, so there you write both conversions by hand.
+It takes two calls because Standard Schema has no reverse operation, and `z.encode` is Zod-specific, so shorn cannot run the conversion for you without validator-specific code. Valibot and ArkType transforms expose no reverse direction at all, so there you write both conversions by hand.
 
 Passing a `structure` does not rescue a bidirectional codec either. Rich values fail validation as wire values, and wire values become rich values the wire codec cannot encode.
 

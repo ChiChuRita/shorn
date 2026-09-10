@@ -28,9 +28,9 @@ The schema also knows the order and the type of each field, so the brackets, com
 └── age, 45
 ```
 
-The middle step is one most people accept without argument: an array carries the same information as the object, because the reader knows what each position means. shorn takes that idea one step further, and the schema is what makes both steps safe.
+The middle step is the familiar one: an array carries the same information as the object, because the reader knows what each position means. shorn applies the same idea to every byte, and the schema is what makes that safe.
 
-Two details worth noticing. `2d` is age 45, and it comes first even though `name` was declared first, because fields are written in [canonical order](/core-concepts/canonical-bytes/), not declaration order. `00` is the index of `"F"` in the sorted enum `["F", "M", "X"]`. [Byte Layout](/wire-format/layout/) covers every wire type this way.
+Two bytes deserve a second look. `2d` is age 45, and it comes first even though `name` was declared first, because fields are written in [canonical order](/core-concepts/canonical-bytes/), not declaration order. `00` is the index of `"F"` in the sorted enum `["F", "M", "X"]`. [Byte Layout](/wire-format/layout/) covers every wire type this way.
 
 ## The four steps
 
@@ -40,14 +40,14 @@ value ──▶ validate ──▶ wire plan ──▶ bytes
            Schema)      JSON Schema)
 ```
 
-1. **Your validator checks the value** through Standard Schema. That includes every rule you wrote, such as `.min(1)`, `.email()`, or `.refine()`.
+1. **Your validator checks the value** through Standard Schema, including every rule you wrote, such as `.min(1)`, `.email()`, or `.refine()`.
 2. **Standard JSON Schema supplies the structure**: field names, types, which fields are optional. shorn turns that into a wire plan once and caches it per schema object.
 3. **The plan writes the values**, with no keys and no type tags.
-4. **Decoding runs the same steps backwards**, and validates again with your original library.
+4. **Decoding runs the same steps backwards**, and validates again with your library.
 
 A payload that decodes structurally but fails one of your rules is a `DecodeError`. It is never handed back as an accepted value.
 
-Both interfaces are vendor-neutral. Standard Schema gives shorn `validate(value)`, and Standard JSON Schema gives it `jsonSchema.input()` and `.output()`. That is why shorn needs no code specific to any one validator. Where JSON Schema has no way to describe something, shorn adds one extension keyword of its own, `x-shorn`. That keyword is how `Date`, `bigint`, `Map` and `Set` reach the wire. What is left after that has no wire form at all: `undefined`, `NaN`, a symbol, a class instance. See [Date, BigInt, Map, Set](/schemas/rich-types/).
+Both interfaces are vendor-neutral, which is why shorn needs no code specific to any one validator. Where JSON Schema cannot describe a value, shorn adds one extension keyword, `x-shorn`. That is how `Date`, `bigint`, `Map` and `Set` reach the wire. Values with no wire form at all, such as `undefined`, `NaN`, a symbol, or a class instance, are refused. See [Date, BigInt, Map, Set](/schemas/rich-types/).
 
 ## The wire plan
 
@@ -62,23 +62,21 @@ any | boolean | float64 | int | string | uint | uuid
 
 The two union cases are the two ways a branch can be identified without trying each one. `on`/`cases` means one property names the branch, a discriminant. `types` means the JSON type of the value names the branch. A union whose branches could overlap has neither, and is [refused](/schemas/rejected-shapes/#overlapping-unions).
 
-A `{ ref }` is the back edge of a cycle in a recursive schema. It is the only shape that is not self-contained: it points into a table of definitions that the plan carries alongside its root shape. That table exists only when a `$ref` actually closes a cycle. A `$ref` that is reached twice but never through itself is simply inlined.
+A `{ ref }` is the back edge of a cycle in a recursive schema. It points into a table of definitions that the plan carries alongside its root shape. That table exists only when a `$ref` closes a cycle. A `$ref` reached twice but never through itself is inlined.
 
-Two details decide most of what matters:
+Two JSON Schema details decide most of what matters:
 
-- **`type: "integer"` with `minimum >= 0`** becomes `uint`, a plain varint. Without the bound it becomes `int`, which uses ZigZag encoding and so crosses every size boundary at half the value.
-- **`additionalProperties`** decides what happens to fields the schema does not name. `false` means the validator already handles them. If the keyword is absent, shorn refuses extras during encoding. `true` or a schema makes the object open.
+- **`type: "integer"` with `minimum >= 0`** becomes `uint`, a plain varint. Without the bound it becomes `int`, which uses ZigZag encoding and crosses every size boundary at half the value.
+- **`additionalProperties`** decides what happens to fields the schema does not name. `false` means the validator already rejects or strips them. If the keyword is absent, shorn refuses extras during encoding. `true` or a schema makes the object open.
 
 shorn converts both `jsonSchema.input()` and `.output()` and compares them. If the two sides differ, the schema would need a codec that runs in two directions, and it is refused.
 
-## Compiled, then signed
+## From plan to codec
 
-The `WireShape` becomes a tree of `Schema` objects. These are the same objects the [`m` API](/api/m/) builds by hand, which is why the two produce identical bytes.
+The `WireShape` becomes a tree of `Schema` objects, the same objects the [`m` API](/api/m/) builds by hand. That is why the two produce identical bytes.
 
-Each node carries a `_minWidth`, the fewest bytes any value of that shape can occupy. That number lets an array refuse an impossible element count before allocating anything. See [Hostile Input](/hostile-input/).
+Each node knows the fewest bytes a value of its shape can occupy. The decoder uses that to refuse an impossible element count before allocating anything. See [Hostile Input](/hostile-input/).
 
-A cycle is built definitions first, so a back edge can report its `_minWidth` before the cycle it closes exists. Those nodes are also where nesting depth is counted, because in a recursive schema the depth comes from the payload rather than the schema.
-
-shorn also stores a canonical string signature: the `WireShape` written as JSON, minus `rejectUnknown`. Leaving that flag out lets equivalent Zod and ArkType schemas agree even though they handle extra properties differently. [`fingerprinted()`](/versioning/fingerprinting/) hashes this signature. An `m` codec has no signature, so `fingerprinted()` refuses it.
+The plan also carries a canonical signature: the `WireShape` written as JSON, minus `rejectUnknown`. Leaving that flag out lets equivalent Zod and ArkType schemas agree even though they handle extra properties differently. [`fingerprinted()`](/versioning/fingerprinting/) hashes this signature. An `m` codec has no signature, so `fingerprinted()` refuses it.
 
 The plan is cached in a `WeakMap` keyed by the schema object, so conversion runs once per schema. See [Compilation and Caching](/core-concepts/compile-and-caching/).

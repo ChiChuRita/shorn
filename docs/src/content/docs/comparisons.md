@@ -58,7 +58,7 @@ These are self-describing: a decoder can read the values without your applicatio
 | Cross-language | No | Yes |
 | Streaming | No | Available |
 
-msgpackr and cbor-x can move repeated field names into a shared record table, which shrinks payloads but requires both ends to keep that table in sync. shorn uses the validation schema as its shared structure instead. msgpackr's `bundleStrings` mode also decodes document-shaped payloads faster than shorn does. That gap is measured honestly in [Throughput](/performance/throughput/#documents-where-msgpackr-decodes-faster).
+msgpackr and cbor-x can move repeated field names into a shared record table, which shrinks payloads but requires both ends to keep that table in sync. shorn uses the validation schema as its shared structure instead. msgpackr's `bundleStrings` mode also decodes document-shaped payloads faster than shorn does. That gap is measured in [Throughput](/performance/throughput/#documents-where-msgpackr-decodes-faster).
 
 Choose MessagePack or CBOR when payloads have to be self-describing, when other languages need to decode them, or when a value shorn has no wire form for, such as `undefined` or a class instance, has to travel as itself.
 

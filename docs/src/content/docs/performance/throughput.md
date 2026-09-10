@@ -36,7 +36,9 @@ msgpackr has three modes. This table compares against one of them. `bundleString
 | 100 events | enc | **94.9K** | 41.8K | 53.7K | 26.0K |
 | 100 events | dec | **123.2K** | 51.6K | 57.5K | 87.3K |
 
-Two of these margins are ties, not leads. **Person encode** shows 27% over Avro in this shared-process table, but measured alone in its own process the gap is 2%. Quote that figure. **Unicode decode** shows Avro 3% ahead, which is the same width. The decode columns on the nested and batch fixtures are the margins with real room in them.
+:::caution[Narrow margins are noise]
+The codecs share one benchmark process, so small margins move between runs. **Person encode** shows 27% over Avro here, but measured alone in its own process the gap is 2%: 45.05 ns against 46.09 ns. **Unicode decode**, where Avro shows 3% ahead, is the same width. Treat margins that narrow as ties. The decode columns on the nested and batch fixtures are the margins with real room in them. Benchmark representative production data before deciding.
+:::
 
 ### Documents: where msgpackr decodes faster
 
@@ -56,10 +58,6 @@ shorn is smallest and fastest to encode, by 68% over the next codec, and fourth 
 **The alphabet has nothing to do with it.** The fixture is pure ASCII and shorn still decodes it at 59% of `bundleStrings`. What costs is the *number* of strings, not what is in them.
 
 The remaining gap is a wire-format question rather than a tuning one: bundling strings would change the bytes.
-
-:::caution[Microbenchmark margins vary]
-The codecs share one benchmark process, so small margins can move between runs. In isolated Person-encode measurements on the same machine, shorn took 45.05 ns and Avro 46.09 ns: a 2% difference, against the 27% the shared table shows. Treat narrow results as directional and benchmark representative production data.
-:::
 
 ## Validation included
 
