@@ -20,7 +20,7 @@ const person = { name: "Rahul", age: 25, sex: "M" as const };
 
 describe("fingerprint envelope", () => {
   // The fingerprint hashes `wireSignature`, which is JSON.stringify over object
-  // literals — so property *insertion order* in wireShape() silently decides these
+  // literals, so property *insertion order* in wireShape() silently decides these
   // bytes. A cosmetic refactor there would reissue every fingerprint in existence
   // and invalidate stored data. This vector is what makes that a failing test
   // rather than a support ticket.
@@ -121,7 +121,7 @@ describe("fingerprint envelope", () => {
 
   // The evolution story is dispatch: shorn detects a mismatch and never resolves one,
   // so an application keeps a codec per schema version it has written. That needs a
-  // stable string key, which `fingerprint` cannot be — it is a fresh array per read.
+  // stable string key, which `fingerprint` cannot be: it is a fresh array per read.
   it("exposes a hex key a dispatch map can actually use", () => {
     const codec = fingerprinted(compile(Person));
     expect(codec.fingerprintHex).toBe("7236d1");
@@ -146,7 +146,7 @@ describe("fingerprint envelope", () => {
   // `fingerprinted(compile(asyncSchema))`, the combination that was once unusable in
   // every direction: encoding said to use encodeAsync, and no async entry point took
   // a codec, so the advice could not be followed. A sync encode still refuses, because
-  // the validator still returns a promise — what changed is that the remedy it names
+  // the validator still returns a promise: what changed is that the remedy it names
   // now exists for this codec.
   describe("asynchronous validation through the envelope", () => {
     const Async = z.object({ name: z.string() }).refine(async () => true);
@@ -187,7 +187,7 @@ describe("fingerprint envelope", () => {
     });
   });
 
-  // Two wrappers deep — the envelope over the compiled codec — and the path still
+  // Two wrappers deep, the envelope over the compiled codec, and the path still
   // has to survive both. Either one failing to delegate ends the walk at the top.
   it("names the failing field through the envelope", () => {
     const codec = fingerprinted(compile(Person));

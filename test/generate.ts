@@ -198,7 +198,7 @@ export function wrappable(
 
 /**
  * `inputBounded` drops tuples and literals. A tuple's arity is fixed by the schema,
- * so a zero-byte payload can legitimately yield four elements — schema-bounded, not
+ * so a zero-byte payload can legitimately yield four elements: schema-bounded, not
  * input-bounded. Only the element-count budget test needs the restriction.
  */
 export function schemaGen(rng: Rng, depth: number, inputBounded = false, rich = false): Gen {

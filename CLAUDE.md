@@ -1,6 +1,6 @@
 # Notes for Claude
 
-Read `AGENTS.md` first — setup, layout, and the two rules about changing `src/`. This file
+Read `AGENTS.md` first: setup, layout, and the two rules about changing `src/`. This file
 holds what an agent gets wrong that a human contributor would not.
 
 ## Releasing: push the tag, never publish
@@ -20,7 +20,7 @@ gh run list --limit 3           # confirm the Release run went green
 
 **Do not run `pnpm release` or `npm publish`.** The `release` script predates the workflow
 and survives only for a registry outage. Publishing from a laptop produces an artifact with
-no provenance, and without credentials it fails as **`E404` on the `PUT`** — which reads as
+no provenance, and without credentials it fails as **`E404` on the `PUT`**, which reads as
 "this package does not exist" and sends you hunting for the wrong problem. `npm whoami`
 returning 401 is the honest signal that you have no publish auth, and you do not need any.
 
@@ -32,7 +32,7 @@ Never hand-edit the `version` field in `package.json` or an existing `CHANGELOG.
 `pnpm check` is the gate CI runs and the release runs. `pnpm regress` is separate: it
 compares wall-clock throughput and bundle bytes against `bench/baseline.json`.
 
-Throughput rows are noisy — on a busy machine the **unmodified** tree can read 8% down
+Throughput rows are noisy: on a busy machine the **unmodified** tree can read 8% down
 against its own recording. Before believing a throughput delta, measure the control: stash
 the change, run `pnpm regress`, and see what the baseline scores against itself. Bundle-byte
 rows are deterministic and can be trusted from a single run.

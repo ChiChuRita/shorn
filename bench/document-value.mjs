@@ -3,7 +3,7 @@
  * holds schemas only and every bench supplies its own values.
  *
  * Deterministic, no RNG: the same bytes on every run, so a size row is a size row.
- * Proportions are matched to the document that exposed the gap — around 7.5 KB, three
+ * Proportions are matched to the document that exposed the gap: around 7.5 KB, three
  * quarters of it string content, ASCII throughout. ASCII deliberately: the published
  * decode caveat blamed Unicode, and the fixture that beat us had no multi-byte
  * character in it. The cost is the number of strings, not what is in them.
@@ -45,7 +45,7 @@ export const documentValue = Object.freeze({
   id: 179_246_831,
   measures: Array.from({ length: 6 }, (_, index) => ({
     count: 100 + index * 37,
-    label: `measure ${index} — ${sentence(index, 5)}`,
+    label: `measure ${index}, ${sentence(index, 5)}`,
     mean: 12.5 + index * 1.75,
     stddev: 0.5 + index / 8,
     unit: index % 2 === 0 ? "ms" : "%",

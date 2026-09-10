@@ -135,7 +135,7 @@ type WireShape =
 
 /**
  * A whole document's shape. The definition table is a property of the document rather
- * than of any shape inside it — a `{ ref }` is only ever resolved against the top level —
+ * than of any shape inside it: a `{ ref }` is only ever resolved against the top level , 
  * and it is absent unless a cycle was found, so a schema without one keeps the signature,
  * and therefore the fingerprint, it already had.
  */
@@ -154,7 +154,7 @@ export type EncodableStandardSchema<Input = unknown, Output = Input> =
 
 /**
  * The structure half a validator that carries no JSON Schema of its own has to be handed
- * separately — the extra argument on the second overload of every entry point below. One
+ * separately: the extra argument on the second overload of every entry point below. One
  * alias rather than the same four lines nine times.
  */
 type StructureFor<S extends StandardSchemaV1> =
@@ -195,7 +195,7 @@ function validationError(issues: ReadonlyArray<StandardSchemaV1.Issue>): EncodeE
 /**
  * A validator that throws instead of returning issues, in the class the entry point
  * promises. `z.int().refine((v) => { … })` whose body throws is all it takes, and until
- * 0.3.0 that error escaped `encode`, `decode` and both async twins as itself — a
+ * 0.3.0 that error escaped `encode`, `decode` and both async twins as itself: a
  * `RangeError` out of a function documented to throw only `EncodeError`, so a caller
  * narrowing on the class fell straight through it. Wrapped here rather than at the four
  * entry points, which is also the only layer that knows a validator ran at all: an
@@ -347,7 +347,7 @@ function discriminant(
 /**
  * The JSON type a branch declares, taken from `type` or from the `const` standing in for
  * it. valibot writes a literal union as bare consts where zod puts a `type` beside each
- * one, and a const names its own type as plainly as the keyword does — without this the
+ * one, and a const names its own type as plainly as the keyword does: without this the
  * same union compiled from one vendor and was refused from the other.
  */
 function branchType(branch: JsonSchema): string | undefined {
@@ -363,7 +363,7 @@ function branchType(branch: JsonSchema): string | undefined {
  *
  * `integer` folds into `number` because no value carries which of the two it was declared
  * as, so a union of the pair is not disjoint and stays refused. A branch with a `type`
- * array, or none at all — `z.any()`, a bare `{}` — is refused for the same reason: it
+ * array, or none at all, `z.any()`, a bare `{}`, is refused for the same reason: it
  * overlaps whatever sits beside it.
  */
 function disjointTypes(
@@ -372,8 +372,8 @@ function disjointTypes(
 ): readonly string[] | undefined {
   const types: string[] = [];
   for (const branch of branches) {
-    // A branch that is a bare `$ref` — one arm of a union being the whole recursive
-    // definition — keeps its type at the far end of the pointer. One hop, deliberately:
+    // A branch that is a bare `$ref`: one arm of a union being the whole recursive
+    // definition: keeps its type at the far end of the pointer. One hop, deliberately:
     // a pointer to another pointer reads as typeless and is refused, like any other
     // branch whose type cannot be named.
     const target =
@@ -388,15 +388,15 @@ function disjointTypes(
 }
 
 /**
- * Whether a shape already decodes to `null` without a marker of its own — exactly the set
+ * Whether a shape already decodes to `null` without a marker of its own: exactly the set
  * `Schema.nullable()` declines to put a second marker on.
  */
 function admitsNull(shape: WireShape, defNulls?: readonly boolean[]): boolean {
   if (typeof shape === "string") return shape === "any";
   if ("literal" in shape) return shape.literal === null;
   if ("enum" in shape) return shape.enum.includes(null);
-  // Only the undiscriminated form can carry a `null` branch — a discriminated one is all
-  // objects — but reading the branches keeps both forms on a single rule.
+  // Only the undiscriminated form can carry a `null` branch: a discriminated one is all
+  // objects, but reading the branches keeps both forms on a single rule.
   if ("union" in shape) return shape.union.some((branch) => admitsNull(branch, defNulls));
   // Unanswerable while the cycle is still open, which is every call from `nullableOf`.
   // `defNulls` settles it later, and `LazySchema` carries the answer to the check.
@@ -406,12 +406,12 @@ function admitsNull(shape: WireShape, defNulls?: readonly boolean[]): boolean {
 
 /**
  * A nullable marker over a shape that already holds `null` is dropped here, one level
- * above where `Schema.nullable()` would deal with it — which is the level the signature
+ * above where `Schema.nullable()` would deal with it, which is the level the signature
  * is taken at, and that turns out to matter.
  *
  * Two cases arrive here, and both reached the caller wrong. `any`, `null` and a
  * null-bearing `enum` made `Schema.nullable()` throw "already decodes to null", blaming a
- * `.nullable()` the caller did write for a marker this compiler added — `z.any().nullable()`
+ * `.nullable()` the caller did write for a marker this compiler added: `z.any().nullable()`
  * is the plain one, since tag 0 is already `null`. A nested `{nullable:{nullable:…}}` did
  * *not* throw, because `Schema.nullable()` collapses a repeat and returns itself, but it
  * collapsed below the signature: two schemas writing byte-identical payloads carried
@@ -431,14 +431,14 @@ function nullableOf(shape: WireShape): WireShape {
  * same document.
  */
 interface RefContext {
-  /** What a pointer is relative to. `$ref: "#"` — zod's spelling — names this. */
+  /** What a pointer is relative to. `$ref: "#"`, zod's spelling, names this. */
   readonly document: JsonSchema;
   /** Pointers being expanded right now; a `$ref` back to one of these is a cycle. */
   readonly active: Set<string>;
   /**
    * What each pointer resolved to: the shape itself once expanded, or the `{ ref }` a
    * cycle head was numbered with the moment something referred back to it. Also what
-   * keeps a shared subtree from being walked once per reference — a chain of refs each
+   * keeps a shared subtree from being walked once per reference: a chain of refs each
    * used twice would otherwise expand exponentially, which matters because the document
    * may have been fetched rather than written.
    */
@@ -473,8 +473,8 @@ function resolvePointer(document: JsonSchema, pointer: string): JsonSchema {
  *
  * A reference reached while its own target is still being expanded is the back-edge of a
  * cycle: it becomes a numbered definition, and every later reference to that pointer is
- * the same number. A reference to something already finished is simply that shape again
- * — a shared subtree, not a recursive one — so it is inlined, which keeps a
+ * the same number. A reference to something already finished is simply that shape again,
+ * a shared subtree, not a recursive one, so it is inlined, which keeps a
  * non-recursive `$ref` out of the signature and off `LazySchema`'s indirection.
  */
 function refShape(pointer: string, ctx: RefContext): WireShape {
@@ -483,7 +483,7 @@ function refShape(pointer: string, ctx: RefContext): WireShape {
 
   if (ctx.active.has(pointer)) {
     // The back-edge of a cycle. Numbered here and remembered, so every later reference to
-    // this pointer — including the one that finishes the expansion below — is the same id.
+    // this pointer, including the one that finishes the expansion below, is the same id.
     const ref: WireShape = { ref: ctx.defs.length };
     ctx.defs.push(undefined);
     ctx.shapes.set(pointer, ref);
@@ -508,7 +508,7 @@ function refShape(pointer: string, ctx: RefContext): WireShape {
 /**
  * Every child that *is* one of the definitions, replaced by a reference to it.
  *
- * The top of `shape` is deliberately not tested — a definition's own body is equal to
+ * The top of `shape` is deliberately not tested: a definition's own body is equal to
  * itself, and folding that would leave a definition standing for nothing but its own
  * back-edge. Callers that need the top tested compare it themselves.
  */
@@ -543,7 +543,7 @@ function toWireShape(document: JsonSchema): WireDocument {
   // points a `$ref` at the definition from wherever the type is used, while valibot
   // inlines a copy of it there and refers back from inside that copy. Both write the
   // same bytes, so folding a copy of a definition back onto the definition is what keeps
-  // the fingerprint from depending on which validator wrote the schema — the promise
+  // the fingerprint from depending on which validator wrote the schema: the promise
   // made in the schema-changes documentation, and otherwise a `fingerprinted()` codec
   // rejects a payload it can decode.
   //
@@ -570,7 +570,7 @@ function toWireShape(document: JsonSchema): WireDocument {
  * A `{ nullable: { ref } }` over a definition that already decodes to `null`, collapsed
  * to the definition. This is `nullableOf`'s rule, applied where the answer exists: a
  * cycle is still open when that function runs, so `admitsNull` reads a back-edge as "no"
- * and wraps a marker that `Schema.nullable()` then refuses outright — `T.nullable()`
+ * and wraps a marker that `Schema.nullable()` then refuses outright: `T.nullable()`
  * where `T` is a recursive `T | null` did not compile at all, and the message blamed the
  * `.nullable()` the caller had written for a marker this compiler added.
  *
@@ -644,15 +644,15 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
     const branches = union.map(asSchema);
     const nonNull = branches.filter((branch) => branchType(branch) !== "null");
     // `z.null().nullable()` writes `anyOf: [{type:"null"}, {type:"null"}]`. Every branch
-    // is the same one value, so the union is that value — and refusing it as "not a
+    // is the same one value, so the union is that value, and refusing it as "not a
     // nullable union" named the one thing it unmistakably was.
     if (nonNull.length === 0 && branches.length > 0) return { literal: null };
     if (branches.length === 2 && nonNull.length === 1) {
       return nullableOf(wireShape(nonNull[0]!, ctx));
     }
 
-    // ArkType spells `string.uuid` as three branches — the lowercase pattern, plus
-    // the nil and max UUIDs as consts — every branch tagged `format: "uuid"`. One
+    // ArkType spells `string.uuid` as three branches: the lowercase pattern, plus
+    // the nil and max UUIDs as consts: every branch tagged `format: "uuid"`. One
     // wire shape already covers all three, so the union collapses to it.
     if (
       nonNull.length > 0 &&
@@ -737,7 +737,7 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
           : { tuple };
       }
       // No `items` leaves the elements unconstrained, which is what `any` already means
-      // here — a bare `{}` compiles to it below. arktype spells `unknown[]` that way,
+      // here: a bare `{}` compiles to it below. arktype spells `unknown[]` that way,
       // where zod and valibot both write `items: {}`; refusing it made the same type
       // compile from two vendors and not the third.
       const array = "items" in schema ? wireShape(asSchema(schema.items), ctx) : "any";
@@ -763,7 +763,7 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
           ? undefined
           : wireShape(additional === true ? {} : asSchema(additional), ctx);
       // No declared properties makes it a record: every key open, one value type. With
-      // them it is an open object — the same record, written after the declared fields.
+      // them it is an open object: the same record, written after the declared fields.
       if (extras !== undefined && Object.keys(properties).length === 0) {
         return { record: extras };
       }
@@ -775,7 +775,7 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
       for (const key of required) {
         if (Object.hasOwn(properties, key)) continue;
         // The `__proto__` case again, from the vendor that drops the property instead of
-        // setting a prototype with it — zod lists it in `required` and omits it from
+        // setting a prototype with it: zod lists it in `required` and omits it from
         // `properties`. Same remedy, so the same sentence rather than one naming a
         // missing schema, which is not what went wrong.
         throw new EncodeError(
@@ -791,7 +791,7 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
           value: wireShape(asSchema(properties[key]), ctx),
         })),
         // Asks whether *shorn* must police extra properties, not whether the schema
-        // does. `false` means the vendor's own validate() already dealt with them —
+        // does. `false` means the vendor's own validate() already dealt with them , 
         // zod's `object` strips, `strictObject` refuses, both emit `false`. `undefined`
         // (arktype) passes them through, and a closed object has nowhere to put them.
         rejectUnknown: additional === undefined,
@@ -801,7 +801,7 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
     default: {
       // A node with no `type` and nothing structural left to read is `any`: `z.any()`,
       // `z.unknown()`, a bare `{}`. Combinators are excluded deliberately, so a shape
-      // carrying one is refused by name rather than quietly re-typed as a tagged blob —
+      // carrying one is refused by name rather than quietly re-typed as a tagged blob , 
       // "type undefined" told the caller nothing. A well-formed `$ref` returned at the
       // top of this function; it stays on the list to name the malformed spelling.
       if (schema.type === undefined) {
@@ -810,7 +810,7 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
         throw new EncodeError(`Unsupported JSON Schema combinator ${combinator}`);
       }
       // Not `String(schema.type)`: the document may have been fetched, and a node
-      // carrying an object with no prototype — or a `toString` of its own — would
+      // carrying an object with no prototype, or a `toString` of its own, would
       // replace this refusal with a TypeError of its own.
       throw new EncodeError(
         `Unsupported Standard JSON Schema type ${
@@ -899,8 +899,8 @@ function compileWireShape(shape: WireShape, lazies?: Lazies): Schema<unknown> {
  */
 function defNulls(defs: readonly WireShape[]): boolean[] {
   const nulls = new Array<boolean>(defs.length).fill(false);
-  // One round per definition settles a lattice this shallow — a back-edge starts at "no"
-  // and only ever turns on — and there is one definition in every schema seen so far, so
+  // One round per definition settles a lattice this shallow: a back-edge starts at "no"
+  // and only ever turns on, and there is one definition in every schema seen so far, so
   // the quadratic shape of this costs nothing worth an early exit.
   for (let round = 0; round < defs.length; round++) {
     defs.forEach((def, id) => (nulls[id] = admitsNull(def, nulls)));
@@ -1161,7 +1161,7 @@ function buildCodec(
   let inputJsonSchema: unknown;
   let outputJsonSchema: unknown;
   if (isStandardJsonSchema(structuralSchema)) {
-    // What a vendor still throws on here — undefined, NaN, a symbol, a transform — is a
+    // What a vendor still throws on here, undefined, NaN, a symbol, a transform, is a
     // value with no wire form at all. Unwrapped, that error never mentions shorn or says
     // what to do instead, so the vendor's reason is kept and the remedy appended.
     const std = structuralSchema["~standard"];
@@ -1187,7 +1187,7 @@ function buildCodec(
   if (wireSignature(inputShape) !== signature) {
     // Rarely reached: zod's `z.codec()` has a rich output type, so the conversion above
     // throws before the shapes are compared. What survives here is a schema whose two
-    // sides are both JSON Schema representable and still differ — a default, say.
+    // sides are both JSON Schema representable and still differ: a default, say.
     throw new EncodeError(
       "Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported",
     );
@@ -1199,7 +1199,7 @@ const directCache = new WeakMap<object, StandardBackedSchema<unknown>>();
 const structuredCache = new WeakMap<object, WeakMap<object, StandardBackedSchema<unknown>>>();
 
 /**
- * The one place a non-Standard-Schema argument is caught — every public entry point
+ * The one place a non-Standard-Schema argument is caught: every public entry point
  * funnels through `getCompiled`. Without it, reading `schema["~standard"]` throws a
  * raw TypeError naming an internal property.
  */
@@ -1215,9 +1215,9 @@ function assertStandardSchema(schema: unknown): asserts schema is StandardSchema
   throw new EncodeError(
     `Expected a Standard Schema (zod, valibot, arktype), received ${
       schema instanceof Schema
-        ? "a shorn schema — already a codec, call encode/decode on it directly"
+        ? "a shorn schema: already a codec, call encode/decode on it directly"
         : holdsProperties && ("type" in schema || "$schema" in schema)
-          ? "a raw JSON Schema — wrap it in a validator"
+          ? "a raw JSON Schema: wrap it in a validator"
           : schema === null
             ? "null"
             : typeof schema
@@ -1292,14 +1292,14 @@ export function compile(
 /**
  * The same codec with the validator taken out. Identical bytes on the wire; the
  * refinements are simply not run, on either side. On the three-field zod person fixture
- * in `bench/regression.mjs` that is 2.3x on encode and 3.7x on decode — once the
+ * in `bench/regression.mjs` that is 2.3x on encode and 3.7x on decode: once the
  * structural half is generated code, validation is most of what is left.
  *
  * For a producer you own, at both ends of a link you own. It removes everything the
  * validator did, not only the checks that were going to pass: a transform such as
  * `z.string().trim()` no longer runs, so a value goes out exactly as handed over.
  * Decoding still bounds-checks every read and still refuses trailing bytes, so
- * malformed input throws `DecodeError` rather than escaping — but bytes written against
+ * malformed input throws `DecodeError` rather than escaping, but bytes written against
  * a schema that differs only in its refinements now decode silently. Wrap in
  * `fingerprinted()` to keep the structural half of that check, and keep the validated
  * codec at any boundary you do not own.

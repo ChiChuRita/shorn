@@ -2,7 +2,7 @@
 //
 // src/core.ts sends every non-ASCII string through encodeInto with a 3x reserve and
 // a copyWithin, and every ASCII string through a charCodeAt loop with no upper gate.
-// Five other codecs gate the two strategies by length — avsc's own comment puts the
+// Five other codecs gate the two strategies by length: avsc's own comment puts the
 // crossover at 64 chars: "roughly 50% faster than the manual implementation below
 // for long strings". This finds shorn's crossover, on shorn's fixtures.
 //
@@ -21,7 +21,7 @@ const textEncoder = new TextEncoder();
 
 // ---------------------------------------------------------------- shared writer
 // Every variant runs against the REAL Writer from dist, with only the string
-// strategy swapped — a hand-written replica of the class measured 6x slower than
+// strategy swapped: a hand-written replica of the class measured 6x slower than
 // the shipped one, so the replica was what got benchmarked, not the code. TypeScript
 // `private` is erased at runtime, so buffer/offset/ensure/varuint are all reachable.
 // `offset = 0` between operations keeps the grown buffer, removing allocation noise
@@ -115,7 +115,7 @@ function manualUtf8(writer, value) {
 
 // encodeInto for ASCII too, replacing the charCodeAt loop. ASCII byte length is the
 // code-unit length, so this needs no scan beyond the surrogate check the format
-// requires anyway — for pure ASCII that check cannot fail, so it is skipped here
+// requires anyway, for pure ASCII that check cannot fail, so it is skipped here
 // and this is therefore the most generous possible reading of the native path.
 function asciiEncodeInto(writer, value) {
   writer.varuint(value.length);

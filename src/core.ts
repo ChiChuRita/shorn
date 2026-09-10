@@ -5,7 +5,7 @@ const ASCII_FAST_PATH_LIMIT = 8;
 /**
  * Code units below which `Writer.string` copies them by hand rather than calling
  * `encodeInto`. The native call costs a flat ~45ns whatever the length while the loop
- * costs about 0.9ns per unit, so the crossover is where they meet — `bench/string-threshold.mjs`
+ * costs about 0.9ns per unit, so the crossover is where they meet: `bench/string-threshold.mjs`
  * sweeps it. It sat at 128 only because the one-byte length varint is valid up to there,
  * which bounds the *speculation*, not the strategy.
  */
@@ -18,7 +18,7 @@ const SLICE_COPY_LIMIT = 16;
 
 /**
  * The one total order behind every canonical wire decision. UTF-16 code-unit order,
- * which is `Array.prototype.sort`'s default and the reason no comparator is passed —
+ * which is `Array.prototype.sort`'s default and the reason no comparator is passed , 
  * every caller sorts strings, where the default's string coercion is a no-op. Swapping
  * in `localeCompare`, `Intl.Collator`, code points or case folding changes the bytes of
  * every object and every string enum. Named members only; tuple and array elements
@@ -41,7 +41,7 @@ export function canonicalEnumOrder(values: readonly EnumValue[]): EnumValue[] {
   for (const value of values) {
     // A member has to survive its own JSON text. `JSON.stringify` writes NaN and both
     // infinities as `null` and `-0` as `0`, so each would decode back as a different
-    // value than was declared. Refused rather than reordered — JSON Schema cannot
+    // value than was declared. Refused rather than reordered: JSON Schema cannot
     // express them either.
     if (typeof value === "number" && (!Number.isFinite(value) || Object.is(value, -0))) {
       throw new EncodeError(
@@ -55,7 +55,7 @@ export function canonicalEnumOrder(values: readonly EnumValue[]): EnumValue[] {
 }
 
 /**
- * Realm-tolerant `Uint8Array` test — `instanceof` fails for bytes from a `node:vm`
+ * Realm-tolerant `Uint8Array` test: `instanceof` fails for bytes from a `node:vm`
  * context, an iframe, a worker or jsdom. Shared by `Schema.decode` and
  * `BytesSchema._encode`, which once disagreed: a payload could be read in one realm
  * and not written back.
@@ -77,7 +77,7 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
 /**
- * Node's own UTF-8 decoder, when there is one — 45% cheaper than `TextDecoder` at every
+ * Node's own UTF-8 decoder, when there is one: 45% cheaper than `TextDecoder` at every
  * length measured, and the difference is the whole cost of decoding a document.
  *
  * `Buffer.prototype.utf8Slice` rather than a `Buffer`: it runs on any `Uint8Array`, so
@@ -109,7 +109,7 @@ const REPLACEMENT_CHARACTER = "�";
  * round-trip as a different string.
  *
  * `String.prototype.isWellFormed` where there is one, and it is not merely a tidier
- * spelling of the loop below — V8 answers in constant time for a one-byte string, which
+ * spelling of the loop below: V8 answers in constant time for a one-byte string, which
  * cannot hold a surrogate at all, and scans about seven times faster than JS when it has
  * to. That is what lets `Writer.string` stop counting UTF-8 bytes by hand.
  *
@@ -122,7 +122,7 @@ const REPLACEMENT_CHARACTER = "�";
 const LONE_SURROGATE = /\p{Surrogate}/u;
 const isWellFormed: (value: string) => boolean =
   // Typed here rather than by raising `lib` to ES2024, which would also let
-  // `Object.groupBy` and `Promise.withResolvers` typecheck — neither of which Node 20,
+  // `Object.groupBy` and `Promise.withResolvers` typecheck, neither of which Node 20,
   // the supported floor, has.
   typeof (String.prototype as { isWellFormed?: unknown }).isWellFormed === "function"
     ? (value) => (value as unknown as { isWellFormed(): boolean }).isWellFormed()
@@ -130,7 +130,7 @@ const isWellFormed: (value: string) => boolean =
 
 /**
  * A value in a message, or its type when naming it is what would fail. `String` on an
- * object throws when it has no `toString` — one with a null prototype — and when the
+ * object throws when it has no `toString`, one with a null prototype, and when the
  * caller's own throws or a proxy trap does, and `JSON.stringify` adds a BigInt and a
  * cycle to that list. So the sentence meant to explain a refusal replaced it with an
  * error of its own, and the caller was told about their getter instead of about their
@@ -138,7 +138,7 @@ const isWellFormed: (value: string) => boolean =
  * message quotes a value the schema does not constrain to a primitive.
  *
  * A `typeof` gate rather than a `try`: every remaining case is a primitive, and a
- * primitive stringifies both ways without running anything — Symbol and `undefined`
+ * primitive stringifies both ways without running anything: Symbol and `undefined`
  * included, which `JSON.stringify` reports as `undefined` exactly as it always did.
  * The catch this replaced cost 28 gzip bytes and bought nothing over the gate.
  */
@@ -168,7 +168,7 @@ export class EncodeError extends Error {
   override readonly name = "EncodeError";
 
   /**
-   * Field path to the value that failed — `user.address.zip`, `tags[3]`. Appended to
+   * Field path to the value that failed: `user.address.zip`, `tags[3]`. Appended to
    * the message once, at the top, by `Schema.encode`, so throwing from a leaf costs
    * nothing.
    */
@@ -204,13 +204,13 @@ function encodePath(schema: Schema<unknown>, value: unknown): string | undefined
   try {
     // Bounded, because a recursive schema holding a value that refers to itself gives the
     // walk no bottom to reach: each step finds another failing child, forever. No encode
-    // that got as far as producing a path nests deeper than this — `LazySchema` refuses
-    // past it — so the bound truncates nothing a caller could otherwise have been told.
+    // that got as far as producing a path nests deeper than this: `LazySchema` refuses
+    // past it, so the bound truncates nothing a caller could otherwise have been told.
     for (let step = 0; step < MAX_RECURSION_DEPTH; step++) {
       const child: FailingChild | undefined = node._failingChild(current);
       if (child === undefined) break;
       // ponytail: a record or extras key is data, so a key of `a.b`, `[0]` or `""` joins
-      // into a path indistinguishable from nesting. Quoting the segment — `a["a.b"]` — is
+      // into a path indistinguishable from nesting. Quoting the segment, `a["a.b"]`, is
       // the upgrade, and it changes the documented `user.address.zip` shape for every
       // caller who parses a path, so it waits for someone the ambiguity hurts.
       path =
@@ -223,7 +223,7 @@ function encodePath(schema: Schema<unknown>, value: unknown): string | undefined
   } catch {
     // The walk is cosmetic and re-reads the caller's value, so a getter or a proxy
     // trap that throws only on the second read would otherwise escape from here and
-    // replace the encode failure with its own — the caller would see the getter's
+    // replace the encode failure with its own: the caller would see the getter's
     // RangeError instead of the EncodeError that says which field is wrong. Keep
     // whatever path was found and let the real error through.
   }
@@ -277,7 +277,7 @@ export class Writer {
   private offset = 0;
 
   /**
-   * Built on first float, discarded when the buffer moves — a schema with no float
+   * Built on first float, discarded when the buffer moves: a schema with no float
    * field would otherwise pay for a DataView on every encode.
    */
   private view: DataView | undefined;
@@ -320,7 +320,7 @@ export class Writer {
     // Most varints on the wire are one byte, so take them before the guard and the
     // loop: skips Number.isSafeInteger, the 8-byte reserve and the shift loop. The
     // comparison leads and `Number.isInteger` trails, so a multi-byte value never pays
-    // for the predicate — hoisting it measured -4% on a 500-element array of millisecond
+    // for the predicate: hoisting it measured -4% on a 500-element array of millisecond
     // timestamps. That order also means a value JavaScript declines to coerce throws out
     // of `value >= 0` before anything here could refuse it politely, which is why
     // `UintSchema` refuses one before the call.
@@ -395,7 +395,7 @@ export class Writer {
       // Not ASCII after all: rewind and let the general path below write the whole
       // string, `encodeInto`'s flat ~45ns included. Finishing it here with a hand-written
       // UTF-8 loop instead measured 2x on a short accented string and cost 238 gzip
-      // bytes — the worst byte-per-benefit on this path, for 25 lines reimplementing
+      // bytes: the worst byte-per-benefit on this path, for 25 lines reimplementing
       // `TextEncoder`. Worth revisiting only if short non-ASCII encode becomes the
       // complaint, and the flush-against-the-buffer-end case it needs is already pinned
       // in `test/core.test.ts`.
@@ -403,7 +403,7 @@ export class Writer {
     }
 
     // Nothing counts UTF-8 bytes by hand any more. `encodeInto` already knows the total
-    // and reports it, so the only question left for JS is well-formedness — and that is
+    // and reports it, so the only question left for JS is well-formedness, and that is
     // free on a one-byte string. The hand-written scan this replaced was 85% of an ASCII
     // encode at 256 units and 99% at 64K; `bench/string-threshold.mjs` measures both.
     if (!isWellFormed(value)) throw new EncodeError("String contains an unpaired surrogate");
@@ -411,7 +411,7 @@ export class Writer {
 
     // Written before the length is known, so the length varint has to be reserved. The
     // width of `units` is the right guess: UTF-8 is never shorter than the code-unit
-    // count, so the real width is this or wider — never narrower — and for ASCII, which
+    // count, so the real width is this or wider, never narrower, and for ASCII, which
     // is most strings, it is exactly this and nothing moves afterwards.
     const reserved = varuintWidth(units);
     // Capped rather than the plain 3x bound: a 30M-unit string of 3-byte characters is
@@ -420,7 +420,7 @@ export class Writer {
     // `read` is how that is detected.
     //
     // ponytail: reserving 3x means a 60MB ASCII string peaks at a 128MB buffer where the
-    // scan this replaced sized it exactly at 64MB — traded for not walking 60M code units
+    // scan this replaced sized it exactly at 64MB: traded for not walking 60M code units
     // to learn a length `encodeInto` reports for free. `Writer.reset` drops the buffer
     // straight after, so it is a peak and not a leak. Size it exactly for strings past a
     // megabyte if that peak ever matters.
@@ -429,7 +429,7 @@ export class Writer {
     // The backfill shifts the payload up by a byte when the guess is short, and that
     // shift has to land inside the buffer: reserving only the guess truncated the last
     // byte of, say, a 48-character CJK string whenever the reserve ended flush on the
-    // end of the buffer — silently, since a store past a Uint8Array is dropped, not
+    // end of the buffer: silently, since a store past a Uint8Array is dropped, not
     // thrown. `varuintWidth` is monotonic and `written <= capacity`, so this bounds it.
     this.ensure(varuintWidth(capacity) + capacity);
     const start = this.offset + reserved;
@@ -441,7 +441,7 @@ export class Writer {
 
     // The move comes first: a wider varint than was reserved reaches into the payload's
     // first byte, so writing it before the bytes are out of the way corrupts them.
-    // A native memmove, and only when the guess was a byte short — never for ASCII.
+    // A native memmove, and only when the guess was a byte short: never for ASCII.
     const width = varuintWidth(written);
     if (width !== reserved) this.buffer.copyWithin(this.offset + width, start, start + written);
     this.putVaruint(this.offset, written, width);
@@ -474,8 +474,8 @@ export class Writer {
   /**
    * Always a copy, never a view: `Schema.encode` reuses one Writer, so a subarray
    * would alias a buffer the next encode overwrites. `slice` pays a fixed setup cost
-   * whatever the length — 41.8ns against 24.8ns for allocate-and-copy at 4 bytes,
-   * level at 16, 344ns against 140ns at 512 — so short payloads copy by hand.
+   * whatever the length: 41.8ns against 24.8ns for allocate-and-copy at 4 bytes,
+   * level at 16, 344ns against 140ns at 512, so short payloads copy by hand.
    * `set()` from a subarray loses to both at every length.
    */
   finish(): Uint8Array {
@@ -503,10 +503,10 @@ export class Writer {
 
 /**
  * The Writer `Schema.encode` reuses: its buffer and DataView were the two allocations
- * a small encode spent most of its time on — the DataView alone profiled at 29% of a
+ * a small encode spent most of its time on: the DataView alone profiled at 29% of a
  * nested-event encode. An encode reached from inside another sees the flag set and
  * allocates its own Writer. The flag is a boolean rather than clearing the slot to
- * `undefined`, which costs a write barrier each way — 12.5ns of a 68ns Person encode.
+ * `undefined`, which costs a write barrier each way: 12.5ns of a 68ns Person encode.
  */
 const pooledWriter = new Writer();
 let pooledWriterBusy = false;
@@ -592,8 +592,8 @@ export class Reader {
   /**
    * Built once a decode has read `FLOAT_VIEW_TRIP` floats, never before: a DataView
    * costs more to allocate than the scratch copy below saves on a record holding one
-   * or two of them — a 38-byte nested event decodes 34% slower if this is built eagerly
-   * — while an array of floats amortizes the one allocation to nothing.
+   * or two of them: a 38-byte nested event decodes 34% slower if this is built eagerly,
+   * while an array of floats amortizes the one allocation to nothing.
    */
   private view: DataView | undefined;
   private floatsRead = 0;
@@ -707,7 +707,7 @@ export class Reader {
 
     // Node's decoder first, and it keeps the fatal contract rather than weakening it.
     // `utf8Slice` substitutes U+FFFD for every malformed sequence, so a result with no
-    // U+FFFD in it *proves* the input was well formed — that is the whole check, and
+    // U+FFFD in it *proves* the input was well formed: that is the whole check, and
     // `String.prototype.indexOf` is a native scan rather than a byte loop in JS, which
     // is why an explicit ASCII pre-scan lost past 64 bytes and this does not.
     //
@@ -885,7 +885,7 @@ export abstract class Schema<T> {
 
   /**
    * The two halves a validating codec fuses, kept apart so `encodeAsync`/`decodeAsync`
-   * can `await` the validator between them. Set together or not at all — a wrapper
+   * can `await` the validator between them. Set together or not at all: a wrapper
    * opts in by assigning both, so neither async function needs to know
    * `FingerprintedSchema` exists. Undefined on `m` schemas, which the async entry
    * points refuse.
@@ -896,7 +896,7 @@ export abstract class Schema<T> {
   /**
    * Fewest bytes any value of this schema can occupy on the wire, computed once at
    * construction. `ArraySchema` multiplies it by a declared count and refuses to
-   * allocate when the remaining input is too short — without it seven bytes buy a
+   * allocate when the remaining input is too short: without it seven bytes buy a
    * million-slot allocation, and each nesting level multiplies the ceiling again.
    */
   _minWidth = 1;
@@ -906,7 +906,7 @@ export abstract class Schema<T> {
    * everything the `_minWidth` budget already bounds: the one shape that allocates for
    * free is a fixed-count array of a zero-width element, whose count comes from the
    * schema rather than the input. Nesting those multiplies, so `ArraySchema` holds the
-   * product to the same collection ceiling a length varint answers to — without it three
+   * product to the same collection ceiling a length varint answers to: without it three
    * levels of a million turn an empty payload into 10^18 slots and a fatal OOM. Summed
    * by the two containers that can be zero-width themselves; every other shape costs at
    * least a byte, which makes its slots the input's problem and not this counter's.
@@ -999,8 +999,8 @@ export abstract class Schema<T> {
 export type Infer<S extends Schema<unknown>> = S["_output"];
 
 // Exported for `standard.ts`, which builds wire schemas straight from these rather
-// than through `m`: referencing `m` there retained the whole object — and with it
-// `BytesSchema` and `Float32Schema` — in every bundle importing only `codec`.
+// than through `m`: referencing `m` there retained the whole object, and with it
+// `BytesSchema` and `Float32Schema`, in every bundle importing only `codec`.
 export class StringSchema extends Schema<string> {
   _encode(writer: Writer, value: string): void {
     if (typeof value !== "string") throw new EncodeError("Expected a string");
@@ -1043,8 +1043,8 @@ export class BooleanSchema extends Schema<boolean> {
 export class UintSchema extends Schema<number> {
   _encode(writer: Writer, value: number): void {
     // On the leaf and not in `varuint`, because every other caller of that hands it a
-    // number it computed itself — an array length, a record count, an enum or union
-    // index — so a check there charges all of them for a case only a caller's value can
+    // number it computed itself: an array length, a record count, an enum or union
+    // index, so a check there charges all of them for a case only a caller's value can
     // reach. Measured on 500 millisecond timestamps, every value multi-byte: this 1%, the
     // same check inside `varuint` 2%, hoisting `Number.isInteger` there 4%, against a
     // byte-identical control at 0.1%. `Float64Schema` guards its leaf the same way, and
@@ -1066,7 +1066,7 @@ export class IntSchema extends Schema<number> {
       // The type, not the value, for anything that is not a number: `${value}` throws on a
       // Symbol and on an object whose `valueOf` throws, so the message meant to explain
       // the refusal would replace it with an error of its own. This leaf needs no guard
-      // beside it, unlike `UintSchema` — `Number.isSafeInteger` already answers false for
+      // beside it, unlike `UintSchema`: `Number.isSafeInteger` already answers false for
       // both without coercing anything.
       throw new EncodeError(
         `Expected a safe integer, received ${typeof value === "number" ? value : typeof value}`,
@@ -1148,7 +1148,7 @@ export class OptionalSchema<T> extends Schema<T | undefined> {
   /**
    * No segment of its own, as `UnionSchema` and `LazySchema` also have none: the
    * position holding the wrapper is the parent's to name, and without this the path
-   * stops there. The absent case ends the walk rather than descending — `_encode` never
+   * stops there. The absent case ends the walk rather than descending: `_encode` never
    * reached `inner`, so no failure came from there, and `inner` would refuse the
    * sentinel that only means "not present".
    */
@@ -1235,7 +1235,7 @@ export class EnumSchema<T extends readonly [EnumValue, ...EnumValue[]]> extends 
     // here: keys compare with SameValueZero, so `-0` finds the `0` member, is written as
     // that member's index and reads back as `0`.
     //
-    // `value === 0` leads, and it is not redundant — it is what keeps the call off the
+    // `value === 0` leads, and it is not redundant: it is what keeps the call off the
     // hot path. Comparing the member instead, `!Object.is(this.values[index], value)`,
     // reads a field and calls on every encode and measured **-12%** on the unchecked
     // person fixture, whose one enum field is a third of the record. A `-0` against an
@@ -1468,7 +1468,7 @@ export class BigIntSchema extends Schema<bigint> {
 
 export class ArraySchema<T> extends Schema<T[]> {
   /**
-   * `length` is the element count when the schema fixes it — `minItems` equal to
+   * `length` is the element count when the schema fixes it: `minItems` equal to
    * `maxItems`. A fixed count is not written, and its element may be zero-width.
    */
   constructor(private readonly item: Schema<T>, private readonly length?: number) {
@@ -1487,12 +1487,12 @@ export class ArraySchema<T> extends Schema<T[]> {
     // it has to be small enough to simply allocate. One fixed array of a million literals
     // stays legal; a second one around it does not, nor does a zero-width object or tuple
     // between them. Three levels of a million made an *empty* payload allocate 10^18
-    // slots and took the process with it, and the exemption's advice — bound the outer
-    // collection yourself — has no outer collection to bound.
+    // slots and took the process with it, and the exemption's advice: bound the outer
+    // collection yourself, has no outer collection to bound.
     //
     // One refusal for both: the cause is the one thing and the ceiling is the one number,
     // and a second message with a second throw measured 56 gzip bytes. What a zero-width
-    // element *is* moved to `api/errors.md`, which costs a reader nothing at runtime —
+    // element *is* moved to `api/errors.md`, which costs a reader nothing at runtime , 
     // naming the three shapes here was 28 of the 91 gzip bytes this whole guard spends.
     const slots = length === undefined ? Infinity : length * (1 + item._slots);
     if (slots > MAX_COLLECTION_LENGTH) {
@@ -1524,7 +1524,7 @@ export class ArraySchema<T> extends Schema<T[]> {
   override _failingChild(value: unknown): FailingChild | undefined {
     if (!Array.isArray(value)) return undefined;
     // `Array.from`, not `.map`: map skips a sparse array's holes, and a hole is one of
-    // the values that gets here — `_encode` writes it as `undefined` and throws.
+    // the values that gets here: `_encode` writes it as `undefined` and throws.
     return firstFailing(
       Array.from(value, (item, index) => ({
         schema: this.item,
@@ -1702,7 +1702,7 @@ export class MapSchema<K, V> extends Schema<Map<K, V>> {
  * Keys the schema does not name, each holding a value of one declared type. The one
  * shape that writes its keys, since a record's keys are data rather than schema.
  *
- * On decode, out-of-order keys are refused rather than sorted — which also refuses a
+ * On decode, out-of-order keys are refused rather than sorted, which also refuses a
  * duplicate key. Sorting instead would let two payloads decode to the same record.
  */
 export class RecordSchema<T> extends Schema<Record<string, T>> {
@@ -1803,7 +1803,7 @@ function jsonTypeOf(value: unknown): string | undefined {
  * Branches are ordered by discriminant, so declaration order does not reach the wire.
  *
  * With no discriminant to read, `key` is undefined and `cases` are JSON type names: the
- * type of the value picks the branch. That is not a guess — `standard.ts` builds this
+ * type of the value picks the branch. That is not a guess: `standard.ts` builds this
  * form only when no two branches share a runtime type, so exactly one can match, and
  * the decoder reads the same index either way. A union whose branches *do* overlap
  * stays refused, because choosing between them would mean trying each in turn and the
@@ -1873,7 +1873,7 @@ export class UnionSchema<T> extends Schema<T> {
 }
 
 /**
- * How deep a recursive schema may nest, on either side — the same protection
+ * How deep a recursive schema may nest, on either side: the same protection
  * `MAX_DYNAMIC_DEPTH` gives a dynamic value, for the same reason: a cycle takes its
  * depth from the payload rather than the schema, so a handful of bytes would otherwise
  * buy unbounded stack. Higher than the dynamic limit because a recursive schema is
@@ -1885,12 +1885,12 @@ const MAX_RECURSION_DEPTH = 256;
 /**
  * The back-edge of a recursive schema: a `$ref` to a definition that encloses it, which
  * is what `z.lazy` and a self-referential type compile to. Built before the schema it
- * points at exists — the cycle cannot be closed any other way — and wired by `resolve`
+ * points at exists, the cycle cannot be closed any other way, and wired by `resolve`
  * once that schema is built.
  *
  * `_minWidth` stays the inherited 1, and that is exact enough to keep every allocation
  * guard sound. An inhabited cycle has to be escapable, and the only ways out are an
- * optional field, a nullable marker, an array count, a record count or a union index —
+ * optional field, a nullable marker, an array count, a record count or a union index , 
  * each of which costs a byte inside the definition. So one byte is a true lower bound,
  * and computing a tighter one would mean a second implementation of every container's
  * width rule. A definition with *no* way out has no finite value at all; rather than
@@ -1963,15 +1963,15 @@ export class LazySchema<T> extends Schema<T> {
 const MAX_DYNAMIC_DEPTH = 64;
 
 /**
- * The escape hatch for a schema that declines to describe something — `z.any()`,
+ * The escape hatch for a schema that declines to describe something: `z.any()`,
  * `z.unknown()`, an empty JSON Schema node. The one shape that writes type tags,
  * because it is the one shape whose type is not in the schema.
  *
  * | Tag | Value | Payload |
  * | --- | --- | --- |
- * | 0 | null | — |
- * | 1 | false | — |
- * | 2 | true | — |
+ * | 0 | null | none |
+ * | 1 | false | none |
+ * | 2 | true | none |
  * | 3 | safe integer | ZigZag varint |
  * | 4 | other number | 8 bytes |
  * | 5 | string | varint length + UTF-8 |
@@ -2040,15 +2040,15 @@ export class DynamicSchema extends Schema<unknown> {
           writer.byte(6);
           return this.nested(() => this.values._encode(writer, value));
         }
-        // Anything with a prototype of its own is a rich type wearing an object's shape
-        // — a Date, a Map, a class instance — and would go on the wire as `{}`.
+        // Anything with a prototype of its own is a rich type wearing an object's shape:
+        // a Date, a Map, a class instance, and would go on the wire as `{}`.
         //
         // The third test is realm tolerance, for `isUint8Array`'s reason: a plain object
         // from a `node:vm` context, an iframe or a worker carries *that* realm's
         // `Object.prototype`, which fails `!==` here and was refused rather than encoded.
         // Every realm's `Object.prototype` is an object whose own prototype is null,
-        // while a rich type's never is — `Date.prototype` and a class's `prototype` both
-        // sit on `Object.prototype` — so one more step separates them. It runs only once
+        // while a rich type's never is: `Date.prototype` and a class's `prototype` both
+        // sit on `Object.prototype`, so one more step separates them. It runs only once
         // the two cheap identity checks have missed, so a same-realm object pays nothing.
         const prototype = Object.getPrototypeOf(value) as object | null;
         if (
@@ -2118,7 +2118,7 @@ export class TupleSchema<S extends readonly Schema<unknown>[]> extends Schema<Tu
     // `items.length` and not only the items' own slots: decoding a tuple materializes an
     // array of exactly that many slots, and leaving its own length out let
     // `m.array(m.tuple([m.literal(true)]), 999_999)` past the guard at *twice* the
-    // ceiling — 999,999 outer slots plus one per tuple. Found by fuzzing the bound rather
+    // ceiling: 999,999 outer slots plus one per tuple. Found by fuzzing the bound rather
     // than by reading it; `ArraySchema` charges the same slot through its `1 +`.
     for (const item of this.items) {
       width += item._minWidth;
@@ -2144,7 +2144,7 @@ export class TupleSchema<S extends readonly Schema<unknown>[]> extends Schema<Tu
   }
 
   /**
-   * Rest elements are numbered from the tuple's start, not the rest's own — handing
+   * Rest elements are numbered from the tuple's start, not the rest's own: handing
    * them to `this.tail` would report `[0]` for what the caller wrote at `[3]`. Indexing
    * past `items` into `rest` is what keeps that one walk rather than two.
    */
@@ -2195,7 +2195,7 @@ type ObjectField = readonly [
 ];
 
 /**
- * One `k`/`s` pair per field, after an optional dependency bound as `x` — which is
+ * One `k`/`s` pair per field, after an optional dependency bound as `x`, which is
  * what keeps every key a runtime argument rather than interpolated source.
  */
 function recordParts(
@@ -2220,7 +2220,7 @@ function recordParts(
  * Objects **with** optional fields are generated too, which they were not. The presence
  * bitmap was read as making the field set ungeneratable, and that conflated two things:
  * *which* fields arrive is dynamic, but each optional's byte and mask within the bitmap
- * are fixed by the schema, so they emit as literals — `if(b[2]&16)` — and every field
+ * are fixed by the schema, so they emit as literals, `if(b[2]&16)`, and every field
  * still gets its own monomorphic call site. Those objects are not an edge case:
  * heterogeneous array elements are the normal shape of a real document, and shorn was
  * decoding them 2.1x behind msgpackr's shared records on their own benchmark.
@@ -2250,8 +2250,8 @@ function buildRecordDecoder(
     } else {
       const statements: string[] = [];
       // One local per bitmap byte, not the `r.bytes(width)` subarray this replaced: the
-      // width is fixed by the schema, so the view was one allocation per decoded object
-      // — the whole of it on an array of small optional-carrying records.
+      // width is fixed by the schema, so the view was one allocation per decoded object,
+      // the whole of it on an array of small optional-carrying records.
       const load = Array.from({ length: bitmapWidth }, (_, byte) => `b${byte}=r.byte()`);
       statements.push(`const ${load.join(",")}`);
       // The same rejection the interpreted path makes, before any field is read: padding
@@ -2289,7 +2289,7 @@ function buildRecordDecoder(
  * The encode-side twin of `buildRecordDecoder`, for its reasons and under its rules.
  * Here the shared loop that goes megamorphic is `for (const field of this.fields)`.
  *
- * Objects **with** optional fields are generated too, which they were not — the same
+ * Objects **with** optional fields are generated too, which they were not: the same
  * oversight the decoder had, and the one `bench/fixtures.mjs` named. A presence bitmap
  * makes *which* fields arrive dynamic, but each optional's bit is fixed by the schema,
  * so a bitmap byte is a constant OR of literals rather than the `Uint8Array` and
@@ -2302,7 +2302,7 @@ function buildRecordEncoder(
 ): ((writer: Writer, value: Record<string, unknown>) => void) | undefined {
   try {
     // `EncodeError` arrives as argument `x` rather than a capture: a wrapper closure
-    // would be one creation site shared by every schema — the megamorphism this exists
+    // would be one creation site shared by every schema: the megamorphism this exists
     // to avoid.
     const [parameters, args] = recordParts(fields, EncodeError);
     const guard = `if(typeof v!=="object"||v===null||Array.isArray(v))throw new x("Expected an object")`;
@@ -2313,8 +2313,8 @@ function buildRecordEncoder(
       const optionals = fields
         .map((field, index) => ({ field, index }))
         .filter(({ field }) => field[2] >= 0);
-      // Hoisted, and read exactly once each: the value is wanted twice — for its bit and
-      // for its bytes — and a field backed by a getter must not see two reads.
+      // Hoisted, and read exactly once each: the value is wanted twice, for its bit and
+      // for its bytes, and a field backed by a getter must not see two reads.
       const hoist = `const ${optionals.map(({ index }) => `o${index}=v[k${index}]`).join(",")}`;
       const bitmap = Array.from({ length: bitmapWidth }, (_, byte) => {
         const bits = optionals
@@ -2361,7 +2361,7 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
      * `m` still tree-shakes `RecordSchema` away: one `new RecordSchema(...)` in this
      * constructor cost every `m`-only bundle 491 gzip bytes for a shape it cannot
      * express. Undefined for a closed object, which is also what keeps the generated
-     * encoder and decoder — both of which would drop the tail — off an open shape.
+     * encoder and decoder, both of which would drop the tail, off an open shape.
      */
     protected readonly tail?: Schema<Record<string, unknown>>,
   ) {
@@ -2369,7 +2369,7 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     // Integer-like keys need no special case, though it looks as though they might:
     // `Object.keys` hoists them ahead of the string keys in ascending numeric order, so
     // `{"2":…,"10":…}` enumerates as `2,10` where this sorts to `10,2`. Only the sorted
-    // order reaches the wire — a field is read by key, never by enumeration — so the
+    // order reaches the wire, a field is read by key, never by enumeration, so the
     // bytes are canonical either way, including for an absent optional's bitmap slot and
     // for an open object's extras record. A refusal stood here until it was measured and
     // found to reject `{"200":…,"404":…}` for nothing.
@@ -2413,7 +2413,7 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
     // Held in a field and dispatched from the prototype method, *not* shadowed onto the
     // instance the way the decoder is: a distinct `_encode` per schema tips
     // `ArraySchema`'s shared `this.item._encode(...)` site megamorphic, measured at
-    // -25% on an array of plain uints — a shape holding no object schema at all.
+    // -25% on an array of plain uints: a shape holding no object schema at all.
     //
     // Built for a shape that rejects unknown properties too. It was not, and that held
     // every ArkType object and Valibot `v.object()` (a JSON Schema with no
@@ -2503,7 +2503,7 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
    * `defineProperty` throughout, not `Object.assign`: assignment goes through
    * `[[Set]]`, and a decoded `__proto__` key would reassign the prototype.
    *
-   * A key repeating a declared field is refused rather than merged — it would
+   * A key repeating a declared field is refused rather than merged: it would
    * overwrite the field decoded moments earlier, so two payloads would decode alike.
    */
   private readExtras(reader: Reader, result: Record<string, unknown>): void {
@@ -2568,7 +2568,7 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
         (bitmap![optionalIndex >> 3]! & (1 << (optionalIndex & 7))) === 0
       ) {
         // An absent optional named like an `Object.prototype` member would read back as
-        // the inherited member — an optional `toString` decoding to a function, which
+        // the inherited member: an optional `toString` decoding to a function, which
         // the vendor's validate() then rejects. A non-enumerable own `undefined`
         // shadows it. A null-prototype record was tried and handed back objects that
         // failed `String()` and `instanceof Object`.
@@ -2602,7 +2602,7 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
 /**
  * Everything an open object does with its undeclared keys on the way out: deriving them,
  * and walking them for a path. Out here rather than in `ObjectSchema` because only the
- * Standard Schema bridge builds a tail, so an `m`-only bundle can run neither — and pays
+ * Standard Schema bridge builds a tail, so an `m`-only bundle can run neither, and pays
  * for them anyway when they sit there: the derivation alone measured 164 minified bytes.
  * The same finding that keeps `new RecordSchema(...)` out of that constructor. Nothing `m`
  * exports names this class, so a bundle without `compile` drops it whole.
@@ -2615,7 +2615,7 @@ export class OpenObjectSchema<S extends Shape> extends ObjectSchema<S> {
   /**
    * Declared fields first, in the order encode writes them, then the undeclared keys. The
    * tail names the key itself, so an extras key is a direct child of the object in path
-   * terms — `o.note` rather than `o.<extras>.note`.
+   * terms: `o.note` rather than `o.<extras>.note`.
    *
    * The guard repeats the base's because a non-object has no undeclared keys either: the
    * extras of a string would be its character indices.

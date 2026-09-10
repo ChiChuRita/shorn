@@ -15,15 +15,15 @@ import { containsNaN } from "./generate.js";
  * The cross-vendor fuzz matrix.
  *
  * `vendors.test.ts` proves one case per wire shape agrees across vendors; this file is
- * the wide version — every shape a vendor can spell, especially the ones whose bytes
- * depend on the payload rather than on the schema (unions, `any`, records, recursion) —
+ * the wide version: every shape a vendor can spell, especially the ones whose bytes
+ * depend on the payload rather than on the schema (unions, `any`, records, recursion) , 
  * crossed with the decoder contract from `fuzz.test.ts`: truncate it, extend it, flip
  * every byte, and it either throws a `DecodeError` or decodes to something that
  * re-encodes to exactly those bytes.
  *
  * A missing vendor on a case means that vendor cannot spell the shape, and the comment
  * on the case says which and why. Do not fill one in without checking it emits the same
- * JSON Schema shape — a silently different shape passes its own round-trip and fails the
+ * JSON Schema shape: a silently different shape passes its own round-trip and fails the
  * byte-equality assertion, which is the point of running all three.
  */
 
@@ -34,7 +34,7 @@ interface Case {
   readonly arktype?: EncodableStandardSchema;
   /** Values every listed vendor accepts. */
   readonly values: readonly unknown[];
-  /** Values `encode` must refuse — the validator half, which the bytes never see. */
+  /** Values `encode` must refuse: the validator half, which the bytes never see. */
   readonly invalid?: readonly unknown[];
 }
 
@@ -436,7 +436,7 @@ const cases: readonly Case[] = [
   {
     // valibot is left out: `looseObject` emits no `additionalProperties` at all, which
     // shorn reads as a closed object, so an extra property throws rather than riding
-    // along. Same source intent, different bytes per vendor — see "known gaps".
+    // along. Same source intent, different bytes per vendor: see "known gaps".
     name: "loose object: declared fields plus an any-typed catchall",
     zod: z.looseObject({ a: z.string() }),
     values: [{ a: "x" }, { a: "x", b: 1 }, { a: "x", b: [null, { c: true }] }],
@@ -1024,13 +1024,13 @@ describe("refusals are the same from every vendor", () => {
 
 /**
  * Known gaps, pinned with `it.fails` so the suite stays green today and turns red the
- * moment one is fixed — at which point flip the test to a normal `it`. Each one is a
+ * moment one is fixed: at which point flip the test to a normal `it`. Each one is a
  * disagreement between vendors over a shape shorn otherwise supports.
  */
 describe("known gaps", () => {
   it("compiles an arktype array of unknown, which carries no `items`", () => {
     // `type("unknown[]")` emits a bare `{type:"array"}`. JSON Schema leaves the items
-    // unconstrained there, which is what `any` already means to shorn — zod and valibot
+    // unconstrained there, which is what `any` already means to shorn: zod and valibot
     // both write `items: {}` and compile. Refusing it makes `unknown[]` vendor-specific.
     const codec = compile(type("unknown[]") as unknown as EncodableStandardSchema);
     expect(codec.decode(codec.encode([1, "x"] as never))).toEqual([1, "x"]);
@@ -1048,7 +1048,7 @@ describe("known gaps", () => {
     // Same bytes, different signature: zod refs its definition from the use site while
     // valibot inlines one unrolling there and refs from inside it. `toWireShape` folds
     // only a *root* that duplicates a definition, so a recursive type reached through a
-    // wrapper keeps two spellings — and `fingerprinted()` then rejects bytes it can
+    // wrapper keeps two spellings, and `fingerprinted()` then rejects bytes it can
     // decode, which is the false positive it exists to not produce.
     const zodCodec = compile(z.object({ roots: z.array(zodTree) }));
     const valibotCodec = compile(val(v.object({ roots: v.array(valibotTree) })));

@@ -63,7 +63,7 @@ function token(index, salt) {
  * the fixture was quietly deciding a compressed-size comparison that the formats
  * should have decided. Measured: under Brotli the constant-stride fixture puts
  * msgpackr's shared records ahead, and a jittered one puts shorn ahead, with no
- * change to any codec — so the jitter is the honest fixture, not a thumb on the
+ * change to any codec, so the jitter is the honest fixture, not a thumb on the
  * scale. Measured 2026-08-09.
  *
  * `Math.abs` because `token`'s final XOR yields a signed int, so its base36 form
@@ -206,7 +206,7 @@ function createGenericCodecs() {
   // msgpackr's third mode, and the one that was missing from every published table
   // here. It writes all string content into contiguous blocks and decodes it in one
   // `TextDecoder` call instead of one per string, which makes it the fastest decoder
-  // measured on document-shaped data — faster than the shared records this suite had
+  // measured on document-shaped data: faster than the shared records this suite had
   // been treating as msgpackr's best case. Comparing against two of three modes and
   // calling the result "vs msgpackr" was incomplete.
   const msgpackBundled = new Packr({ useRecords: true, structures: [], bundleStrings: true });
@@ -219,7 +219,7 @@ function createGenericCodecs() {
  * The schemaless subset, for a fixture the schema codecs cannot express.
  *
  * SchemaPack has no optional field at all, and Avro and Protobuf would need a union or
- * a presence flag per optional — which is a different wire shape, so the row would
+ * a presence flag per optional, which is a different wire shape, so the row would
  * compare shorn against a schema nobody would write. Dropping them is honest; quietly
  * flattening the fixture until they fit would not be, because the optional fields are
  * the thing being measured.
@@ -545,7 +545,7 @@ function benchmarkValidatedPerson() {
       decode: (bytes) => personJsonSchema.parse(JSON.parse(textDecoder.decode(bytes))),
     },
   ];
-  return benchmarkFixture("Person — validated end-to-end", "person", person, candidates);
+  return benchmarkFixture("Person: validated end-to-end", "person", person, candidates);
 }
 
 console.log("Schema-guided serialization benchmark");
@@ -568,25 +568,25 @@ console.log("Higher ops/s is better. Payload bytes exclude the schema/shared str
 
 const results = {
   person: benchmarkFixture(
-    "Person — raw codec",
+    "Person: raw codec",
     "person",
     person,
     makeImplementations(person, Person, avroPerson, ProtoPerson, schemaPackPerson),
   ),
   unicodePerson: benchmarkFixture(
-    "Unicode person — raw codec",
+    "Unicode person: raw codec",
     "person",
     unicodePerson,
     makeImplementations(unicodePerson, Person, avroPerson, ProtoPerson, schemaPackPerson),
   ),
   event: benchmarkFixture(
-    "Nested event — raw codec",
+    "Nested event: raw codec",
     "event",
     event,
     makeImplementations(event, Event, avroEvent, ProtoEvent, schemaPackEvent),
   ),
   batch: benchmarkFixture(
-    `${batchSize.toLocaleString("en-US")}-event batch (${highEntropy ? "high entropy" : "repetitive"}) — raw codec`,
+    `${batchSize.toLocaleString("en-US")}-event batch (${highEntropy ? "high entropy" : "repetitive"}), raw codec`,
     "batch",
     batch,
     makeImplementations(batch, Batch, avroBatch, ProtoBatch, schemaPackBatch, true),
@@ -595,10 +595,10 @@ const results = {
   // all-required record, the shape the generated codecs are best at. Running shorn
   // through msgpackr's own benchmark on a real document found decode 2.1x behind their
   // shared records, and this suite could not see it. `documentSection` has optional
-  // fields and heterogeneous elements, and the payload is 87% string bytes — content
+  // fields and heterogeneous elements, and the payload is 87% string bytes: content
   // shorn does not shrink and cannot decode faster than the platform.
   document: benchmarkFixture(
-    "Document — raw codec, schemaless comparison only",
+    "Document: raw codec, schemaless comparison only",
     "document",
     documentValue,
     makeSchemalessImplementations(documentValue, Document),

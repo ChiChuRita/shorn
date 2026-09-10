@@ -94,7 +94,7 @@ describe("Standard Schema adapter", () => {
     });
 
     it("refuses an uppercase uuid rather than returning a different string", () => {
-      // Valid to the validator, which accepts either case — and still refused,
+      // Valid to the validator, which accepts either case, and still refused,
       // because 16 bytes cannot remember which case they were written in.
       expect(z.uuid().safeParse(uuid.toUpperCase()).success).toBe(true);
       expect(() => compile(z.uuid()).encode(uuid.toUpperCase())).toThrow(/Expected a lowercase UUID/);
@@ -238,8 +238,8 @@ describe("Standard Schema adapter", () => {
       for (let level = 0; level < 70; level++) deep = [deep];
       expect(() => Any.encode(deep)).toThrow(/nests deeper than/);
 
-      // The payload, not the schema, chooses the depth here — which is what makes a
-      // limit necessary at all — so a hostile one must land on a DecodeError rather
+      // The payload, not the schema, chooses the depth here, which is what makes a
+      // limit necessary at all, so a hostile one must land on a DecodeError rather
       // than on the engine's stack limit.
       expect(() => Any.decode(new Uint8Array(200).fill(6))).toThrow(DecodeError);
 
@@ -328,7 +328,7 @@ describe("Standard Schema adapter", () => {
 
     it("names an unmatched discriminant without serializing it", () => {
       // The message quotes the discriminant as JSON, and `JSON.stringify` throws on a
-      // BigInt, on a cycle, and out of a `toJSON` the caller wrote — so a value no branch
+      // BigInt, on a cycle, and out of a `toJSON` the caller wrote, so a value no branch
       // declares was reported as that TypeError instead of as this EncodeError.
       // Through `unchecked`, because that is where the wire half answers for itself: with
       // the validator in front, zod refuses the discriminant before shorn sees it.
@@ -374,7 +374,7 @@ describe("Standard Schema adapter", () => {
       for (const value of rows) {
         expect(Row.decode(Row.encode(value))).toEqual(value);
       }
-      // Fixed part bare, then a count for the rest — so an empty rest costs one byte.
+      // Fixed part bare, then a count for the rest, so an empty rest costs one byte.
       expect(Row.encode(["a"])).toHaveLength(3);
       // And the rest's element budget is the array's, not a second copy of it.
       expect(() => Row.decode(new Uint8Array([1, 97, 200, 1]))).toThrow(/remaining input/);
@@ -402,7 +402,7 @@ describe("Standard Schema adapter", () => {
 
     it("refuses an extra key that repeats a declared field", () => {
       // Otherwise it would overwrite the field decoded moments earlier, and the two
-      // payloads — value in the field, value in the tail — would decode alike.
+      // payloads, value in the field, value in the tail, would decode alike.
       const Loose = compile(z.looseObject({ a: z.string() }));
       expect(() => Loose.decode(Uint8Array.from([1, 120, 1, 1, 97, 1, 49]))).toThrow(
         /repeats a declared field/,
@@ -429,7 +429,7 @@ describe("Standard Schema adapter", () => {
         expect(error.message).toBe("String contains an unpaired surrogate at note");
       }
 
-      // One level down this named `o` — the enclosing field, which points a caller at the
+      // One level down this named `o`: the enclosing field, which points a caller at the
       // wrong value rather than at none. An extras key is a direct child of the object.
       const deep = safeEncode(z.object({ o: Open }), { o: { id: "ok", note: "bad\ud800" } });
       expect(deep.success).toBe(false);
@@ -489,7 +489,7 @@ describe("Standard Schema adapter", () => {
 
     it("drops a nullable marker over a shape that already holds null", () => {
       // Tag 0 of a dynamic value is already `null`, so the marker would be a byte meaning
-      // nothing — and refusing to add it surfaced as "already decodes to null", which read
+      // nothing, and refusing to add it surfaced as "already decodes to null", which read
       // as an accusation about the caller's `.nullable()` rather than about this compiler's.
       const Any = compile(z.any().nullable());
       for (const value of [null, 1, "x", { a: 1 }]) {
@@ -504,7 +504,7 @@ describe("Standard Schema adapter", () => {
         expect(Nothing.decode(Nothing.encode(null))).toBeNull();
       }
 
-      // The nested case never threw — `Schema.nullable()` collapses a repeated marker — but
+      // The nested case never threw, `Schema.nullable()` collapses a repeated marker, but
       // it collapsed below the signature, so these two wrote identical bytes under
       // different fingerprints and rejected each other's payloads.
       const nested = z.union([z.literal(null), z.literal("a")]).nullable();
@@ -713,7 +713,7 @@ describe("Standard Schema adapter", () => {
   it("refuses an extra property only where the schema left nowhere to put it", () => {
     // An open object has somewhere: `additionalProperties` names the value type, so
     // the extras are written after the declared fields. ArkType emits no
-    // `additionalProperties` at all, which is a closed object with no tail — the one
+    // `additionalProperties` at all, which is a closed object with no tail: the one
     // case where an extra can only be dropped, so it is refused instead.
     expect(() => compile(arkSchema).encode({ ...value, extra: true } as never)).toThrow(
       /Unknown object property "extra"/,
@@ -882,7 +882,7 @@ describe("Standard Schema adapter", () => {
 
     it("tells absent from null over a nullable type union", () => {
       // The union already holds null, so `.nullable()` on top would give null two
-      // spellings — `.optional()` is the wrapper that still says something new.
+      // spellings: `.optional()` is the wrapper that still says something new.
       const Value = compile(z.object({ v: z.union([z.string(), z.number(), z.null()]).optional() }));
       expect(Value.decode(Value.encode({ v: null }))).toEqual({ v: null });
       expect(Value.decode(Value.encode({}))).toEqual({});
@@ -894,7 +894,7 @@ describe("Standard Schema adapter", () => {
 
   describe("a validator that throws instead of returning issues", () => {
     // `z.int().refine((v) => { … })` whose body throws is all it takes, and the raw error
-    // escaped all four entry points — a `RangeError` out of functions documented to throw
+    // escaped all four entry points: a `RangeError` out of functions documented to throw
     // only `EncodeError` or `DecodeError`, so narrowing on the class fell through it.
     const thrower = (thrown: unknown, async = false): EncodableStandardSchema<number, number> =>
       ({
@@ -944,8 +944,8 @@ describe("Standard Schema adapter", () => {
       );
       // `z.object({ n: z.int().refine(async (v) => { throw … }) })` reaches this same path
       // and was how it was found, but it is not asserted here: zod leaves a *second*
-      // rejected promise floating that nobody can await — reproducible by calling its
-      // `~standard.validate` directly with no shorn in the picture — so the case would add
+      // rejected promise floating that nobody can await: reproducible by calling its
+      // `~standard.validate` directly with no shorn in the picture, so the case would add
       // a permanent unhandled rejection to the suite to test code the stub above covers.
     });
 
@@ -1019,7 +1019,7 @@ describe("Standard Schema adapter", () => {
 
     it("compiles a nullable marker over a definition that already holds null", () => {
       // `R | null` where `R` is itself a recursive `R | null`: legal, and a `.nullable()`
-      // the caller really did write. It did not compile at all — `nullableOf` cannot see
+      // the caller really did write. It did not compile at all: `nullableOf` cannot see
       // through a back-edge while the cycle is open, so it wrapped a marker that
       // `Schema.nullable()` then refused, blaming the caller for this compiler's byte.
       // The redundant marker comes off where the definition table exists, which is also
@@ -1041,7 +1041,7 @@ describe("Standard Schema adapter", () => {
     it("derives one fingerprint whichever validator wrote the schema", () => {
       // zod points the cycle at the root; valibot inlines the root and emits an identical
       // copy under `$defs`. The two forms differ by an unrolling and must not differ by a
-      // fingerprint — validator choice is outside the wire shape.
+      // fingerprint: validator choice is outside the wire shape.
       const VNode: v.GenericSchema<{ value: string; children: unknown[] }> = v.object({
         value: v.string(),
         children: v.array(v.lazy(() => VNode)),
@@ -1117,7 +1117,7 @@ describe("Standard Schema adapter", () => {
     it("keeps the field path through the recursion", () => {
       // A type error, so this covers the path a validator issue takes; the case below
       // covers the one only the writer refuses. The regex matches the suffix the walk
-      // appends rather than the vendor's own issue path, which shorn dot-joins — zod
+      // appends rather than the vendor's own issue path, which shorn dot-joins: zod
       // writes `children.0.value` there, which this deliberately does not match.
       const error = safeEncode(Node, {
         value: "r",
@@ -1131,7 +1131,7 @@ describe("Standard Schema adapter", () => {
       // The back-edge is the one walk that runs once per level of the payload, so a drift
       // here truncates rather than vanishes: stubbing its delegation out after one step
       // reported `children[1]`, which reads like an answer. A lone surrogate is the value
-      // that reaches the writer at all — a type error carries a validator issue that
+      // that reaches the writer at all: a type error carries a validator issue that
       // already names the field, so the message would say `value` either way.
       const result = safeEncode(Node, {
         value: "r",
@@ -1165,7 +1165,7 @@ describe("Standard Schema adapter", () => {
     it("names the failing field through a compiled codec", () => {
       // A lone surrogate is a well-formed JS string, so the validator passes it and
       // only the writer refuses it. Without the delegation this wrapper swallowed
-      // the walk and every compiled codec — nearly every codec — lost its path.
+      // the walk and every compiled codec, nearly every codec, lost its path.
       const Note = compile(z.object({ user: z.object({ note: z.string() }) }));
       const error = thrown(() => Note.encode({ user: { note: "\ud800" } })) as EncodeError;
       expect(error.message).toBe("String contains an unpaired surrogate at user.note");

@@ -1,6 +1,6 @@
 // The demo: one Zod schema, a real WebSocket, three codecs, bytes counted at the socket.
 //
-// Not in the `pnpm examples` loop on purpose — it opens listening sockets and takes a
+// Not in the `pnpm examples` loop on purpose: it opens listening sockets and takes a
 // few seconds. Run it on its own with `pnpm demo`.
 //
 // Why bytes are read off the socket instead of from `encode().length`: an encoder can
@@ -169,7 +169,7 @@ async function stream(wire: Wire): Promise<Result> {
 }
 
 title("live WebSocket · one schema, three codecs");
-note("z.discriminatedUnion(\"kind\", [cursor, chat, join, leave]) — your validator's schema, unchanged");
+note("z.discriminatedUnion(\"kind\", [cursor, chat, join, leave]), your validator's schema, unchanged");
 note(`${MESSAGES} messages per codec over a real ws:// connection, validated on arrival`);
 console.log();
 
@@ -197,7 +197,7 @@ win(`${MESSAGES * WIRES.length} messages decoded and validated, every one deep-e
 const shorn = results.find((result) => result.label === "shorn")!;
 const framing = shorn.bytes - shorn.payload;
 note(
-  `of shorn's ${shorn.bytes.toLocaleString()} B, ${framing.toLocaleString()} B is WebSocket framing — ` +
+  `of shorn's ${shorn.bytes.toLocaleString()} B, ${framing.toLocaleString()} B is WebSocket framing: ` +
     `${(framing / MESSAGES).toFixed(1)} B per message, paid by every codec here`,
 );
 

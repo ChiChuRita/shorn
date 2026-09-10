@@ -8,7 +8,7 @@ import { below, mulberry32, pick, randomString } from "./generate.js";
  * aimed at the compile seam instead.
  *
  * That suite builds wire schemas directly, so it never exercises the JSON Schema
- * translation in `standard.ts` — and that translation is where the doubled
+ * translation in `standard.ts`, and that translation is where the doubled
  * `nullable()` aliasing bug actually lived, found only because someone wrote that
  * one case out by hand. Generating vendor schemas covers the seam the same way.
  */
@@ -91,8 +91,8 @@ function zodGen(rng: Rng, depth: number): ZodGen {
 
   switch (below(rng, 3)) {
     case 0: {
-      // Doubled nullability is deliberate and legal — zod nests `anyOf` and the wire
-      // side must collapse it — but nullable over a bare null literal is refused at
+      // Doubled nullability is deliberate and legal: zod nests `anyOf` and the wire
+      // side must collapse it, but nullable over a bare null literal is refused at
       // construction, so drawing one would fail the generator rather than the library.
       let inner = zodGen(rng, depth - 1);
       for (let attempt = 0; attempt < 8 && inner.yieldsNull; attempt++) inner = zodGen(rng, depth - 1);
@@ -120,7 +120,7 @@ function zodGen(rng: Rng, depth: number): ZodGen {
       const fields = keys.map((key) => ({
         key,
         gen: zodGen(rng, depth - 1),
-        // Optionality only exists on an object property — JSON Schema expresses it as
+        // Optionality only exists on an object property: JSON Schema expresses it as
         // absence from `required`, and there is no standalone `undefined` node.
         optional: rng() < 0.4,
       }));
@@ -167,8 +167,8 @@ function zodGen(rng: Rng, depth: number): ZodGen {
 const KEY_POOL = ["id", "name", "a", "z", "kind", "über", "zzz", "_"] as const;
 
 /**
- * Every draw is meant to be compilable — the generator mirrors the constraints
- * `standard.ts` enforces — so a refusal is a failure, not a case to skip. Measured
+ * Every draw is meant to be compilable: the generator mirrors the constraints
+ * `standard.ts` enforces, so a refusal is a failure, not a case to skip. Measured
  * at 20,000 draws before this was tightened: 100% compiled. A `try`/`continue`
  * here would let a regression that refused every schema report a green suite.
  */

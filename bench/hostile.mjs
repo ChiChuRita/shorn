@@ -5,11 +5,11 @@
  * does not send. Three things decide whether a decoder is safe to point at the
  * open internet, and none of them appear in a throughput table:
  *
- *   1. Amplification — how much heap N bytes of input can force before the decoder
+ *   1. Amplification: how much heap N bytes of input can force before the decoder
  *      notices the input cannot satisfy what it declared.
- *   2. Rejection cost — how fast malformed input is refused. A decoder that is slow
+ *   2. Rejection cost: how fast malformed input is refused. A decoder that is slow
  *      to say no is a DoS vector even though it never returns a wrong answer.
- *   3. Scaling — decode time per byte must stay flat. Anything super-linear turns a
+ *   3. Scaling: decode time per byte must stay flat. Anything super-linear turns a
  *      large-but-legal payload into an outage.
  *
  * Run: node --expose-gc bench/hostile.mjs
@@ -86,7 +86,7 @@ const amplification = AMPLIFICATION.map(({ name, schema, payload }) => {
     "reject in": `${(nanos / 1000).toFixed(1)} us`,
   };
 });
-console.log("\nAmplification — smallest payload that declares the largest structure");
+console.log("\nAmplification: smallest payload that declares the largest structure");
 console.table(amplification);
 
 // The comparison that gives the numbers above a scale: a schemaless parser has no
@@ -96,7 +96,7 @@ const jsonStart = process.hrtime.bigint();
 const parsed = JSON.parse(hostileJson);
 const jsonNanos = Number(process.hrtime.bigint() - jsonStart);
 console.log(
-  `\nFor scale — JSON.parse on ${(hostileJson.length / 1024).toFixed(0)} KB of nested empty ` +
+  `\nFor scale: JSON.parse on ${(hostileJson.length / 1024).toFixed(0)} KB of nested empty ` +
     `arrays: ${parsed.length.toLocaleString()} objects allocated in ` +
     `${(jsonNanos / 1e6).toFixed(1)} ms. A schemaless parser has no declared count to ` +
     `check, so it allocates first and discovers the shape after.`,
@@ -147,7 +147,7 @@ const rejection = MALFORMED.map(([label, bytes]) => {
     "ops/s": Math.round(opsPerSecond(run)).toLocaleString(),
   };
 });
-console.log("\nRejection cost — refusing must not be dearer than accepting");
+console.log("\nRejection cost: refusing must not be dearer than accepting");
 console.table(rejection);
 
 // ---------------------------------------------------------------------------
@@ -178,7 +178,7 @@ const scaling = [10, 100, 1_000, 10_000, 100_000].flatMap((count) => {
     };
   });
 });
-console.log("\nScaling — ns per input byte across four orders of magnitude");
+console.log("\nScaling: ns per input byte across four orders of magnitude");
 console.table(scaling);
 
 // ---------------------------------------------------------------------------
@@ -215,7 +215,7 @@ const content = CONTENT.map(([label, schema, value]) => {
     "decode ns/byte": (decodeNanos / bytes.length).toFixed(2),
   };
 });
-console.log("\nAttacker-controlled content — the shapes that hit the slow paths");
+console.log("\nAttacker-controlled content: the shapes that hit the slow paths");
 console.table(content);
 
 console.log(`\nBenchmark sink: ${readSink()}`);

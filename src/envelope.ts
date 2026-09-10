@@ -46,8 +46,8 @@ export class FingerprintedSchema<T> extends Schema<T> {
   private readonly prefix: Uint8Array;
 
   /**
-   * The prefix bytes, so a caller can carry them out of band instead — a Kafka header,
-   * a column, a filename — and keep the payload bare.
+   * The prefix bytes, so a caller can carry them out of band instead: a Kafka header,
+   * a column, a filename, and keep the payload bare.
    *
    * A fresh copy on every read: a stray write into the encoder's own array would make
    * this a non-canonical encoder that still round-trips against itself. Read it once
@@ -75,7 +75,7 @@ export class FingerprintedSchema<T> extends Schema<T> {
     this._yieldsNull = inner._yieldsNull;
     this._yieldsUndefined = inner._yieldsUndefined;
     // Carried up so async validation composes with the envelope: `encodeAsync` awaits
-    // `_source`, then frames through `_structural` — this same envelope over the inner
+    // `_source`, then frames through `_structural`: this same envelope over the inner
     // codec's structural half. Eager rather than lazy, since neither the extra object
     // nor a getter's per-read branch is measurable. Recursion stops at depth two.
     if (inner._source !== undefined && inner._structural !== undefined) {
@@ -98,7 +98,7 @@ export class FingerprintedSchema<T> extends Schema<T> {
     const expected = this.prefix;
     const start = reader.position;
     // A byte loop, not `reader.bytes(n)`: that allocates a fresh subarray per decode,
-    // measured at ~24ns — more than the whole envelope costs.
+    // measured at ~24ns: more than the whole envelope costs.
     for (let index = 0; index < expected.length; index++) {
       if (reader.byte() !== expected[index]) {
         throw new DecodeError(

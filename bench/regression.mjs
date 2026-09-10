@@ -11,7 +11,7 @@
  *
  * Tolerances are per-metric because the noise is: bundle bytes are deterministic
  * and gated at 1%, wall-clock throughput on a laptop with a browser open is not
- * and is gated at 25%. Improvements are reported, never failed — but a large one
+ * and is gated at 25%. Improvements are reported, never failed, but a large one
  * is worth re-recording, or the next real regression hides inside the slack.
  */
 import { spawnSync } from "node:child_process";
@@ -35,7 +35,7 @@ const metrics = [];
  *   smaller is (nanoseconds, bytes). Decides which side of the tolerance fails.
  * @param floor Below this magnitude the percentage is meaningless and the metric
  *   passes. Retained heap after a clean run is a few KB of GC jitter that bounces
- *   between 2 and 6 — a ratio gate on that fails at random, and a gate that fails
+ *   between 2 and 6: a ratio gate on that fails at random, and a gate that fails
  *   at random gets ignored, taking the real regressions with it. The signal worth
  *   catching is a leak, which is megabytes; the floor is where that starts.
  */
@@ -53,7 +53,7 @@ function record(group, name, measurement, unit, direction, tolerance, floor = 0)
 const skip = (group) => only !== undefined && only !== group;
 
 // ---------------------------------------------------------------------------
-// Fixtures — the shapes the README and docs quote.
+// Fixtures: the shapes the README and docs quote.
 // ---------------------------------------------------------------------------
 
 const { person, event, batch, document } = fixtures;
@@ -119,7 +119,7 @@ if (!skip("throughput")) {
 }
 
 // ---------------------------------------------------------------------------
-// Hostile input — rejection cost and the allocation ceiling
+// Hostile input: rejection cost and the allocation ceiling
 // ---------------------------------------------------------------------------
 
 if (!skip("hostile")) {
@@ -172,7 +172,7 @@ if (!skip("hostile")) {
         rejected = error instanceof DecodeError;
       }
       if (!rejected) {
-        console.error(`FATAL: ${name} was not rejected — the allocation budget is gone.`);
+        console.error(`FATAL: ${name} was not rejected, the allocation budget is gone.`);
         process.exit(2);
       }
       samples.push(Math.max(0, process.memoryUsage().heapUsed - before));
@@ -182,7 +182,7 @@ if (!skip("hostile")) {
 }
 
 // ---------------------------------------------------------------------------
-// Payload size — deterministic, so gated at zero tolerance
+// Payload size: deterministic, so gated at zero tolerance
 // ---------------------------------------------------------------------------
 
 if (!skip("size")) {
@@ -200,7 +200,7 @@ if (!skip("size")) {
 }
 
 // ---------------------------------------------------------------------------
-// Bundle cost — what a browser actually downloads
+// Bundle cost: what a browser actually downloads
 // ---------------------------------------------------------------------------
 
 if (!skip("bundle")) {
@@ -230,7 +230,7 @@ if (!skip("bundle")) {
 }
 
 // ---------------------------------------------------------------------------
-// Startup — import through first encode, in a cold process
+// Startup: import through first encode, in a cold process
 // ---------------------------------------------------------------------------
 
 if (!skip("startup")) {
@@ -262,7 +262,7 @@ if (!skip("startup")) {
 }
 
 // ---------------------------------------------------------------------------
-// Memory — heap retained across a sustained encode/decode loop
+// Memory: heap retained across a sustained encode/decode loop
 // ---------------------------------------------------------------------------
 
 if (!skip("memory")) {
@@ -334,14 +334,14 @@ let recordedOn;
 try {
   ({ metrics: baseline, recordedOn } = JSON.parse(readFileSync(BASELINE_PATH, "utf8")));
 } catch {
-  console.error("No bench/baseline.json — record one with `pnpm regress:update`.");
+  console.error("No bench/baseline.json: record one with `pnpm regress:update`.");
   process.exit(2);
 }
 const here = `${process.platform}-${process.arch}`;
 if (recordedOn?.platform && recordedOn.platform !== here) {
   console.log(
     `Baseline was recorded on ${recordedOn.platform} (${recordedOn.node}); running on ${here}. ` +
-      `Wall-clock rows are advisory across machines — size and bundle rows are not.`,
+      `Wall-clock rows are advisory across machines: size and bundle rows are not.`,
   );
 }
 
@@ -352,7 +352,7 @@ const rows = metrics.map((metric) => {
   const previous = baseline[metric.key];
   if (previous === undefined) {
     missing.push(metric.key);
-    return { metric: metric.key, baseline: "new", current: metric.value, delta: "—", status: "NEW" };
+    return { metric: metric.key, baseline: "new", current: metric.value, delta: "-", status: "NEW" };
   }
   const score = (value) => {
     const ratio = previous.value === 0 ? 1 : value / previous.value;

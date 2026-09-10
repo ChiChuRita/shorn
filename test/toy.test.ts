@@ -10,8 +10,8 @@ import {
 } from "../docs/src/components/toy.js";
 
 // The landing-page playground evaluates pasted text and reports two byte counts. Both
-// halves can silently lie — a stripped declaration that drops a character still parses,
-// and a size comparison is unfalsifiable by eye — so it gets one check here.
+// halves can silently lie: a stripped declaration that drops a character still parses,
+// and a size comparison is unfalsifiable by eye, so it gets one check here.
 describe("landing playground", () => {
   const codec = { encode, decode };
 

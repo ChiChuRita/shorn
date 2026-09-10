@@ -71,4 +71,4 @@ assert.equal(verify(b64url(Buffer.concat([tagFor(foreign), foreign]))), null);
 win(`${cookie.length} chars against ${jwt.length} for a JWT carrying the same four claims`);
 win("decode() validates on the way in, so the handler gets a checked session, not a parsed one");
 note(`the tag dominates now: ${codec.encode(session).length} B of claims under a ${TAG_BYTES} B HMAC`);
-note("no `alg` field means no alg-confusion bug — the shape is fixed at compile time");
+note("no `alg` field means no alg-confusion bug: the shape is fixed at compile time");

@@ -27,7 +27,7 @@ const bare2 = compile(AccountV2);
 row("one account entry", bare1.encode(account).length, jsonSize(account));
 
 // Enum members are stored in sorted order, so adding "enterprise" renumbers the rest.
-// Old bytes still decode — into the wrong account.
+// Old bytes still decode, into the wrong account.
 const misread = bare2.decode(bare1.encode(account)) as Account;
 assert.deepEqual(misread, { plan: "free", seats: 12, trialEndsAt: 1_767_225_600 });
 pain(`unfingerprinted, every cached "pro" account reads back as "${misread.plan}" after the deploy`);
@@ -46,7 +46,7 @@ function read(key: string): Account {
     try {
       return wire2.decode(cached) as Account;
     } catch {
-      cache.delete(key); // written by an older shape — a miss, not data
+      cache.delete(key); // written by an older shape: a miss, not data
     }
   }
   refills++;
@@ -71,5 +71,5 @@ const jsonBytes = accounts.reduce((total, a) => total + jsonSize(a), 0);
 row("10 000 entries", shornBytes / 1024, jsonBytes / 1024, "KiB");
 
 const entry = wire2.encode(account).length;
-note(`4 fingerprint bytes are ${Math.round((4 / entry) * 100)}% of a ${entry}-byte entry — the price of not serving wrong data`);
+note(`4 fingerprint bytes are ${Math.round((4 / entry) * 100)}% of a ${entry}-byte entry: the price of not serving wrong data`);
 note("values are already Uint8Array, so node-redis/ioredis take them without a Buffer.from copy");

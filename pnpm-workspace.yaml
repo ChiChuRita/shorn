@@ -1,12 +1,12 @@
 # The library itself lives at the repo root, and `docs` depends on it as
 # `shorn: workspace:*`. So `.` has to be listed as a workspace package, not left
-# implicit as the workspace root, or that dependency resolves to the registry —
+# implicit as the workspace root, or that dependency resolves to the registry,
 # where `shorn` is not published. Do not remove it.
 packages:
   - "."
   - "docs"
 # Benchmark competitors ship native extracts; running their install scripts is what
-# makes the comparison a fair one. `protobufjs` is denied on purpose — its script
+# makes the comparison a fair one. `protobufjs` is denied on purpose: its script
 # only fetches a CLI the benchmarks never call.
 allowBuilds:
   cbor-extract: true

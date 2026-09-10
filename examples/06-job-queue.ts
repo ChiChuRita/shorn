@@ -30,7 +30,7 @@ row("one job", queued.length, jsonSize(job));
 
 // A worker that only knows the new shape drops everything already in the queue.
 assert.throws(() => v2.decode(queued));
-pain("adding one optional field changes the fingerprint — every in-flight v1 job dead-letters");
+pain("adding one optional field changes the fingerprint: every in-flight v1 job dead-letters");
 
 // The fix: keep the old codec, dispatch on the prefix, upgrade to today's type.
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -57,7 +57,7 @@ const v3 = fingerprinted(compile(ThumbnailV1.extend({ quality: z.int().nonnegati
 assert.throws(() => consume(v3.encode({ ...job, quality: 80 })), /No codec for wire/);
 
 // Corruption inside the payload is a different problem: a flipped byte in a varint is
-// still a valid varint, so the job decodes — as a different job.
+// still a valid varint, so the job decodes, as a different job.
 const corrupt = Uint8Array.from(queued);
 corrupt[corrupt.length - 1] = 0x7f;
 const misread = consume(corrupt);
@@ -65,5 +65,5 @@ assert.notDeepEqual(misread, consume(queued));
 pain(`a single flipped byte turns width ${job.width} into ${misread.width} and nothing throws`);
 
 note("a fingerprint is a shape check, not a version: v2 must keep v1's codec to drain the queue");
-note("put the 4 bytes in a queue header instead and the payload stays bare — .fingerprint exposes them");
+note("put the 4 bytes in a queue header instead and the payload stays bare: .fingerprint exposes them");
 pain("no automatic evolution: each wire change is a registry entry plus an upgrade function, by hand");

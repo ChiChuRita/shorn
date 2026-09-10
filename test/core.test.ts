@@ -114,7 +114,7 @@ describe("shorn core", () => {
   it("refuses a value JavaScript declines to coerce like every other leaf", () => {
     // A Symbol, and the general case a caller's getter produces: an object whose
     // coercion throws. Both used to escape as the coercion's own error rather than an
-    // EncodeError — `m.uint()` compared the value, `m.int()` interpolated it into the
+    // EncodeError: `m.uint()` compared the value, `m.int()` interpolated it into the
     // message meant to explain the refusal.
     const uncoercible = {
       [Symbol.toPrimitive]() {
@@ -210,7 +210,7 @@ describe("shorn core", () => {
     // The length varint is reserved before the UTF-8 length is known, so a string whose
     // bytes need a wider varint than its code-unit count suggested has its payload
     // shifted up a byte to make room. Placing the offset so the reserve ends exactly on
-    // the buffer's last byte is what proves the shift has somewhere to go — a store past
+    // the buffer's last byte is what proves the shift has somewhere to go: a store past
     // a Uint8Array is dropped rather than thrown, so one byte short truncated the string
     // in silence. 48 CJK characters is the shortest value that reaches it.
     const encoder = new TextEncoder();
@@ -288,7 +288,7 @@ describe("shorn core", () => {
   });
 
   it("bounds the slots a fixed-count array of zero-width elements can allocate", () => {
-    // A fixed count comes from the schema, so no input-length budget bounds it — that
+    // A fixed count comes from the schema, so no input-length budget bounds it: that
     // is the documented exemption, and one level of it still stands. Nesting a second
     // one inside multiplies, and three levels of a million turned an *empty* payload
     // into 10^18 slots and a fatal OOM, with no outer collection for a caller to cap.
@@ -312,7 +312,7 @@ describe("shorn core", () => {
       500_000,
     );
 
-    // Under the ceiling is still legal, and so is any element that costs a byte —
+    // Under the ceiling is still legal, and so is any element that costs a byte , 
     // that one the remaining-input check has always covered.
     expect(m.array(m.array(m.literal("x"), 900), 1000).decode(new Uint8Array(0))).toHaveLength(1000);
     expect(() => m.array(m.uint(), 1_000_000).decode(new Uint8Array(0))).toThrow(DecodeError);
@@ -354,7 +354,7 @@ describe("shorn core", () => {
     // The rule the numeric leaves already follow, in the two shapes that quote a value
     // the schema does not constrain to a primitive. `String` throws on a null-prototype
     // object and out of a `toString` the caller wrote, so the sentence meant to explain
-    // the refusal replaced it with a TypeError — and the caller was told about their
+    // the refusal replaced it with a TypeError, and the caller was told about their
     // getter instead of about their field.
     const hostile = [
       Object.create(null) as never,
@@ -832,7 +832,7 @@ describe("shorn core", () => {
 
     it("names the field holding a value that cannot be coerced or printed", () => {
       // The walk re-encodes each child and keeps the first that throws, so it finds this
-      // one like any other — but only because the leaf refuses with an EncodeError now.
+      // one like any other, but only because the leaf refuses with an EncodeError now.
       // `withPath` decorates nothing else, so a raw TypeError arrived with no path at all.
       const schema = m.object({ n: m.uint(), s: m.int() });
       const failure = (encode: () => unknown): EncodeError => {
@@ -877,7 +877,7 @@ describe("shorn core", () => {
       // Found by the generated corpus in `compile-property.test.ts`. The decoder built
       // its record as `{}`, so an optional the payload does not carry was inherited
       // from `Object.prototype` instead of absent: `toString` came back as a function.
-      // `toEqual` cannot see it — an inherited member is not an own key — which is why
+      // `toEqual` cannot see it, an inherited member is not an own key, which is why
       // the existing round-trip properties passed straight through it.
       const schema = m.object({
         toString: m.string().optional(),
@@ -891,7 +891,7 @@ describe("shorn core", () => {
       expect(decoded.toString).toBeUndefined();
       expect(decoded.constructor).toBeUndefined();
       // `in` walks the whole chain, so it can only report false if nothing in that
-      // chain carries the key — which is to say, only if the record has a null
+      // chain carries the key, which is to say, only if the record has a null
       // prototype. That is what this used to assert, and the prototype it cost made
       // the decoded value throw on `String()`, lose `hasOwnProperty` and fail
       // `instanceof Object`. Shadowing with an own `undefined` keeps the record

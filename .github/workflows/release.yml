@@ -1,7 +1,7 @@
 name: Release
 
 # A pushed tag is the release. `npm version <bump>` writes package.json, commits and
-# cuts the tag in one step, so `git push --follow-tags` is the whole ceremony — there
+# cuts the tag in one step, so `git push --follow-tags` is the whole ceremony. There
 # is no version PR to merge and no changeset to remember, because this repo publishes
 # exactly one package and dropped changesets in 2c5d586.
 on:
@@ -51,7 +51,7 @@ jobs:
       - run: pnpm check
 
       # The tag says which version this is meant to be. If package.json disagrees, the
-      # tag was cut by hand instead of by `npm version` and something is wrong — better
+      # tag was cut by hand instead of by `npm version` and something is wrong, so better
       # to stop here than to publish a version nobody asked for.
       - name: Tag must match package.json
         if: startsWith(github.ref, 'refs/tags/v')

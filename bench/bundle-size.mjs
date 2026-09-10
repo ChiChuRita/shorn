@@ -18,7 +18,7 @@ async function measure(contents) {
 
 /**
  * Two shorn rows, because one row cannot answer the question honestly. Every other
- * codec here is schemaless and validates nothing, so `m` — the wire codec alone —
+ * codec here is schemaless and validates nothing, so `m`, the wire codec alone,
  * is the comparable surface. `compile` is that plus the Standard Schema adapter, which
  * buys validation none of the other rows perform; it belongs in the table, but as a
  * different row rather than as shorn's price for doing the same work.

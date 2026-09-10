@@ -1,6 +1,6 @@
 // Binary RPC over a socket: request id, method, and either a result or an error.
 //
-// Shows that the envelope needs no second serializer — `m.tuple` takes a compiled
+// Shows that the envelope needs no second serializer: `m.tuple` takes a compiled
 // codec as an element, so id and payload share one byte stream.
 import assert from "node:assert/strict";
 import { z } from "zod";
@@ -92,5 +92,5 @@ assert.throws(() => serve(hit.request.subarray(0, 2)));
 win(`m.tuple([m.uint(), compile(Schema)]) carries id + payload in one stream, no glue serializer`);
 win(`small calls pay best: a request is ${hit.request.length} B against 62 B of JSON-RPC`);
 pain("errors get their own codec here; a discriminated union on an `ok` literal would hold result-or-error in one");
-pain(`only ${(listJson / list.reply.length).toFixed(2)}× on 50 rows — every 19.99 costs 8 float64 bytes, 5 JSON chars`);
+pain(`only ${(listJson / list.reply.length).toFixed(2)}× on 50 rows: every 19.99 costs 8 float64 bytes, 5 JSON chars`);
 note("tuple element types infer end to end: `list.result.orders[0][2]` is the enum, not string");

@@ -26,7 +26,7 @@ export const event = m.object({
 export const batch = m.array(event);
 
 /**
- * A document, as opposed to a record — the shape class every fixture above misses.
+ * A document, as opposed to a record: the shape class every fixture above misses.
  *
  * The four above are small, flat, all-required and short-stringed, which is exactly
  * what the generated record codecs are best at. Running shorn through msgpackr's own

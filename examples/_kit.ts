@@ -1,5 +1,5 @@
 // Shared reporting for the examples. Every number printed comes from a real encode
-// in that example — nothing here estimates.
+// in that example: nothing here estimates.
 import { gzipSync } from "node:zlib";
 
 export const jsonSize = (value: unknown): number => Buffer.byteLength(JSON.stringify(value));

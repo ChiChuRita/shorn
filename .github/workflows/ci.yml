@@ -37,7 +37,7 @@ jobs:
   engines-floor:
     # `engines` says Node 20, and a floor CI cannot exercise is a claim rather than
     # a fact. pnpm 11 needs Node 22.13 to install, so the build runs on 22 and the
-    # *built artifact* is then exercised on the floor itself — which is the only
+    # *built artifact* is then exercised on the floor itself, which is the only
     # thing `engines` actually promises a consumer.
     name: Engines floor (built artifact on Node 20)
     runs-on: ubuntu-latest

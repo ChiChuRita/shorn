@@ -105,7 +105,7 @@ const corpus: readonly Corpus[] = [
     schema: m.object({ inner: m.object({ deep: m.array(m.uint()) }), flag: m.boolean() }),
     values: [{ inner: { deep: [1, 2] }, flag: true }],
   },
-  // Reached through `compile`, because these three have no `m` builder — and they
+  // Reached through `compile`, because these three have no `m` builder, and they
   // are the shapes that most need to be here. A uuid reads a fixed 16 bytes, and
   // the other two are the only decoders that take a count, a key or a type tag
   // from the payload rather than from the schema.
@@ -523,7 +523,7 @@ describe("fuzz: input and entry-point contracts", () => {
     // The non-Uint8Array contract pinned above for the sync entry point, applied to
     // every entry point. `decodeAsync` built its own Reader and skipped the brand
     // check, so these leaked a raw TypeError from the DataView constructor. Parity
-    // across entry points is the assertion — a case-by-case test would not have
+    // across entry points is the assertion: a case-by-case test would not have
     // caught a second path drifting from the first.
     for (const wrongType of [null, undefined, 42, "bytes", {}, [1, 2, 3], new ArrayBuffer(4)]) {
       expect(() => decode(schema, wrongType as never)).toThrow(DecodeError);
@@ -559,7 +559,7 @@ describe("fuzz: the encoder never escapes its contract", () => {
   it("keeps the encode failure when the path walk re-reads a value that throws", () => {
     // `encodePath` re-reads the caller's value to name the field that failed, so a
     // getter throwing only on the second read used to escape from the walk and
-    // replace the EncodeError with its own — the caller was told "second read"
+    // replace the EncodeError with its own: the caller was told "second read"
     // instead of which field was wrong.
     let reads = 0;
     const schema = m.object({ a: m.string(), b: m.string() });
@@ -690,7 +690,7 @@ describe("fuzz: allocation is bounded by input length, not by schema shape", () 
 
   it("allocates from the schema, not the input, for a fixed-count zero-width array", () => {
     // The one hole in the budget above, pinned rather than claimed shut. A fixed
-    // count is exempt from the zero-width refusal because it comes from the schema —
+    // count is exempt from the zero-width refusal because it comes from the schema , 
     // but `_minWidth` is then 0, so a *variable* container repeats that free
     // allocation once per byte and the "never more elements than bytes" invariant
     // stops holding. 101 bytes below yield 100,000 elements; the same schema with
@@ -699,7 +699,7 @@ describe("fuzz: allocation is bounded by input length, not by schema shape", () 
     // ponytail: known ceiling, reachable only from a schema that declares a large
     // fixed array of a constant. The fix is a per-decode slot budget on Reader,
     // starting at max(MAX_COLLECTION_LENGTH, input length) and charged by every
-    // array and record — not taken here because it touches the hot decode path.
+    // array and record, not taken here because it touches the hot decode path.
     const schema = compile(
       z.array(z.object({ n: z.int(), pad: z.array(z.literal("x")).length(1000) })),
     );

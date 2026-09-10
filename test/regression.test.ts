@@ -21,7 +21,7 @@ import { mulberry32, schemaGen } from "./generate.js";
  * A refactor that is byte-identical leaves every value here untouched; one that is
  * not names precisely what moved.
  *
- * When a change is intentional, update the constant in the same commit — the
+ * When a change is intentional, update the constant in the same commit: the
  * diff is then the wire-format change, reviewable on its own.
  */
 
@@ -164,8 +164,8 @@ describe("payload size is pinned per documented schema", () => {
 });
 
 describe("encode and decode agree about what a Uint8Array is", () => {
-  // `decode` deliberately accepts bytes minted in another realm — a node:vm
-  // context, an iframe, a worker — because `instanceof` is realm-scoped and the
+  // `decode` deliberately accepts bytes minted in another realm: a node:vm
+  // context, an iframe, a worker, because `instanceof` is realm-scoped and the
   // bytes are structurally identical. `m.bytes()` encode used a bare `instanceof`,
   // so the same array could be read out of a payload and not written back into one.
   const foreign = runInNewContext("Uint8Array.from([1, 2, 3, 255])") as Uint8Array;
