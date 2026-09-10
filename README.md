@@ -98,31 +98,27 @@ const codec = compile(schema, structure);
 
 ## Scope
 
-shorn encodes strings, booleans, integers, floats, literals, enums, nullable
-values, arrays, tuples, records, recursive schemas, dynamic values (`z.any()`),
-and objects, closed or open, with optional fields. Unions work when shorn can
-tell the branches apart without guessing: either every branch carries its own
-literal tag, or no two branches share a JSON type. `Date`, `bigint`, `Map`, and
-`Set` each have a wire form of their own.
+Strings, booleans, integers, floats, literals, enums, nullable values, arrays,
+tuples, records, recursive schemas, `z.any()`, and objects, closed or open, with
+optional fields. Unions need a literal tag in every branch, or branches that
+share no JSON type. `Date`, `bigint`, `Map`, and `Set` are supported natively.
 
-It does not support unions whose branches overlap, streaming, or automatic
-schema migration. `undefined`, symbols, `RegExp`, and class instances have no
-wire form, so convert those before encoding.
+Not supported: overlapping unions, streaming, and schema migration.
+`undefined`, symbols, `RegExp`, and class instances have no wire form, so
+convert those first.
 
-The size saving comes from the schema, not from a compressor, so it costs no
-CPU. Compared with JSON encoded to bytes, shorn is up to 6.2× faster to encode
-and 13.7× faster to decode. The low-level `m` API bundles to 6.44 KB gzip;
-`compile` with validation is 11.55 KB (esbuild-minified browser bundles, schema
-declarations excluded).
+Against JSON bytes, encoding is up to 6.2× faster and decoding up to 13.7×,
+with no compressor involved. The `m` API is 6.44 KB gzip; `compile` with
+validation is 11.55 KB.
 
 ## Documentation
 
-Start with [getting started](https://shorn.dev/getting-started/introduction/)
-and the [API reference](https://shorn.dev/api/overview/). The docs also cover
-the [byte layout](https://shorn.dev/wire-format/layout/),
+[Getting started](https://shorn.dev/getting-started/introduction/),
+[API reference](https://shorn.dev/api/overview/),
+[byte layout](https://shorn.dev/wire-format/layout/),
 [supported types](https://shorn.dev/schemas/supported-types/),
 [rejected shapes](https://shorn.dev/schemas/rejected-shapes/),
-[fingerprinting](https://shorn.dev/versioning/fingerprinting/), and
+[fingerprinting](https://shorn.dev/versioning/fingerprinting/),
 [performance](https://shorn.dev/performance/throughput/).
 
 MIT licensed.
