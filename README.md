@@ -24,7 +24,9 @@ No schema file, no code generation, no second copy of your types to keep in sync
 npm install @chichurita/shorn zod
 ```
 
-Works in Node, Bun, Deno, browsers, and workers.
+Works in Node 20 or newer, Bun, Deno, browsers, and workers. ESM only:
+`require("@chichurita/shorn")` reaches the ESM build from Node 20.19 and
+22.12 on, and older versions need `await import()`.
 
 ## Encode a value
 
