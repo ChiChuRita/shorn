@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3
+
+**Same bytes, same code.** README only: the `require()` resolution note and the paragraph on what a fingerprint covers are gone from the README. Both still live in the docs, under [installation](https://shorn.dev/getting-started/installation/) and [fingerprinting](https://shorn.dev/versioning/fingerprinting/).
+
 ## 0.7.2
 
 **Same bytes, same code.** `dist/` is identical to 0.7.1; this release exists so the package page on npm shows the current README.
