@@ -1,0 +1,44 @@
+name: GitHub Release
+
+# Mirrors the CHANGELOG.md entry for a pushed tag onto the repository's Releases page,
+# so the repo shows a latest release and people watching for releases are notified.
+# Kept apart from release.yml on purpose: the npm publish job stays at
+# `contents: read`, and a failure here can never block or taint the publish.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create the GitHub release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The entry is the text between "## X.Y.Z" and the next "## " heading. A tag
+      # without an entry fails here rather than publishing an empty release: the
+      # changelog is written before the bump, so a missing one means a step was skipped.
+      - name: Extract the changelog entry
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v heading="## $VERSION" '
+            $0 == heading { on = 1; next }
+            /^## / && on { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no entry for $VERSION"
+            exit 1
+          fi
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --verify-tag

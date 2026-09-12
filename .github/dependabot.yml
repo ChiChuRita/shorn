@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # The workflows pin every action to a commit SHA. This keeps those pins moving and
+  # rewrites the "# vX.Y.Z" comment beside each one.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -26,21 +26,36 @@ jobs:
     name: Publish to npm
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to commit SHAs, not major tags. Everything that runs in this job runs
+      # one step before a publish signed with its OIDC identity, so a moved upstream
+      # tag here would mean an artifact under this package's name with valid
+      # provenance. Dependabot bumps the SHA and the version comment together.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
-      # Trusted publishing landed in npm 11.5.1. Node 24 ships a new enough npm today,
-      # but pinning the floor here means a runner image change cannot quietly turn this
-      # into an unauthenticated publish attempt.
-      - name: Ensure npm supports trusted publishing
-        run: npm install -g npm@latest
+      # Trusted publishing landed in npm 11.5.1. Node 24 bundles a newer npm, so this
+      # asserts rather than installs: `npm install -g npm@latest` would fetch and run
+      # unpinned registry code right before the publish, for the same reason the
+      # actions above are pinned. If a runner image ever ships an older npm, this
+      # fails loudly instead of quietly attempting an unauthenticated publish.
+      - name: npm must support trusted publishing
+        run: |
+          NPM="$(npm --version)"
+          node -e '
+            const [a, b, c] = process.argv[1].split(".").map(Number);
+            if (a < 11 || (a === 11 && (b < 5 || (b === 5 && c < 1)))) {
+              console.error(`npm ${process.argv[1]} predates trusted publishing (needs 11.5.1)`);
+              process.exit(1);
+            }
+          ' "$NPM"
+          echo "npm $NPM"
 
       - run: pnpm install --frozen-lockfile
 
