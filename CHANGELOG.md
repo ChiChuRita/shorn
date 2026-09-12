@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.2
+
+**Same bytes, same code.** `dist/` is identical to 0.7.1; this release exists so the package page on npm shows the current README.
+
+### README
+
+Rewritten in plainer English and shortened since 0.7.1, and the sentence on `require()` is back: there is no CommonJS build, `require("@chichurita/shorn")` reaches the ESM build from Node 20.19 and 22.12 on, and older versions need `await import()`. The `exports` map has offered the `require` condition since 0.1.0; the README stopped saying when it works.
+
+### Behind the release
+
+The publish workflow now runs every action from a pinned commit SHA and asserts the bundled npm supports trusted publishing instead of installing `npm@latest` right before publishing. CI additionally runs the suite against the latest Zod, Valibot and ArkType on every push, so a validator changing its JSON Schema output, as Zod 4.5 did, turns `main` red before it reaches a user. From this release on, each tag also appears on the GitHub Releases page with its changelog entry.
+
 ## 0.7.1
 
 **Same bytes.** Every payload written by 0.7.0 decodes unchanged and no fingerprint moves. One schema shape that failed to compile now compiles.
