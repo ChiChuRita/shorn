@@ -24,9 +24,7 @@ No schema file, no code generation, no second copy of your types to keep in sync
 npm install @chichurita/shorn zod
 ```
 
-Works in Node 20 or newer, Bun, Deno, browsers, and workers. ESM only:
-`require("@chichurita/shorn")` reaches the ESM build from Node 20.19 and
-22.12 on, and older versions need `await import()`.
+Works in Node 20 or newer, Bun, Deno, browsers, and workers.
 
 ## Encode a value
 
@@ -73,10 +71,6 @@ const PersonWire = fingerprinted(compile(Person), { bytes: 4 });
 const bytes = PersonWire.encode(person); // 4-byte fingerprint + payload
 PersonWire.decode(bytes);                // rejects a different wire shape
 ```
-
-The fingerprint identifies the wire shape only. Validation rules such as
-`.min()` or `.email()` are not part of it. When a schema changes, keep the old
-codec around for as long as old payloads exist.
 
 ## Use another validator
 
