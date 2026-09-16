@@ -1,7 +1,9 @@
 ---
-title: Quick Start
+title: Quick start
 description: Encode, decode, reuse a compiled codec, and add a wire identifier to payloads you store.
 ---
+
+This page takes one Zod schema from a first encode to a codec you can store payloads with. Every snippet below builds on these imports.
 
 ```ts
 import { z } from "zod";
@@ -19,11 +21,13 @@ const bytes = encode(Person, person);
 const back = decode(Person, bytes); // typed and validated
 ```
 
-The payload is eight bytes. Field names and type tags never leave the schema. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) labels each of those eight bytes, and [Byte Layout](/wire-format/layout/) covers every wire type.
+The payload is eight bytes. Field names and type tags never leave the schema. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) labels each of those eight bytes, and [Byte layout](/wire-format/layout/) covers every wire type.
 
-Zod and ArkType schemas are passed as they are. Valibot needs one extra argument, the converted structure. See [Valibot](/validators/valibot/).
+Pass Zod and ArkType schemas as they are. Valibot needs one extra argument, the converted structure. See [Valibot](/validators/valibot/).
 
 ## Reuse a codec object
+
+`compile` returns the same cached plan as a codec object:
 
 ```ts
 const PersonWire = compile(Person);
@@ -45,7 +49,7 @@ const stored = StoredPerson.encode(person);
 StoredPerson.decode(stored); // rejects a different wire shape
 ```
 
-A fingerprint identifies the wire shape only. It does not change when you add a validation rule such as `.max()`. Read [Wire Fingerprints](/versioning/fingerprinting/) before storing data.
+A fingerprint identifies the wire shape only. It does not change when you add a validation rule such as `.max()`. Read [Wire fingerprints](/versioning/fingerprinting/) before storing data.
 
 ## Handle expected failures
 

@@ -3,15 +3,17 @@ title: Throughput
 description: Encode and decode benchmarks against JSON and schema-based binary codecs.
 ---
 
-shorn is faster than byte-producing JSON in every fixture measured. Against the binary codecs it leads on record-shaped data. It does **not** lead on document-shaped data: a payload made of many separate strings is decoded faster by msgpackr's `bundleStrings` mode, whatever alphabet those strings use.
+shorn is faster than byte-producing JSON in every fixture measured. Against the binary codecs it leads on record-shaped data. It does not lead on document-shaped data: a payload made of many separate strings is decoded faster by msgpackr's `bundleStrings` mode, whatever alphabet those strings use.
 
-## Methodology
+## How the numbers were measured
 
-Tests ran on Node v24.18.0, an Apple M4 Pro, and macOS 26.6.2 arm64. Every table on this page comes from one run of `pnpm bench`, the small-fixture suite. Results from different runs or machines are not comparable, so they are never mixed in one table. Small-fixture results are the median of seven samples of about 180 ms each, after warm-up. The [100,000-event](/performance/size/#fixtures) results, published under [payload size](/performance/size/), use three single-operation samples, because one operation already processes the whole value. Every codec has to round-trip to the same logical value.
+Tests ran on Node v24.18.0, an Apple M4 Pro, and macOS 26.6.2 arm64. Every table on this page comes from one run of `pnpm bench`, the small-fixture suite. Results from different runs or machines are not comparable, so they are never mixed in one table.
+
+Small-fixture results are the median of seven samples of about 180 ms each, after warm-up. The [100,000-event](/performance/size/#fixtures) results, published under [payload size](/performance/size/), use three single-operation samples, because one operation already processes the whole value. Every codec has to round-trip to the same logical value.
 
 Schema construction is excluded here and measured separately as [cold setup](/performance/footprint/). Raw tests use each codec's normal API with SchemaPack validation disabled. Protobuf.js includes `fromObject` and `toObject` so that it exposes the same string-enum API as the others.
 
-Object schemas that qualify use generated encode and decode functions. A strict Content Security Policy falls back to the interpreted path with identical bytes and results. See [Compilation and Caching](/core-concepts/compile-and-caching/#generated-encoders) for which schemas take which path.
+Object schemas that qualify use generated encode and decode functions. A strict Content Security Policy falls back to the interpreted path with identical bytes and results. See [Compilation and caching](/core-concepts/compile-and-caching/#generated-encoders) for which schemas take which path.
 
 ## Against JSON
 
@@ -45,7 +47,9 @@ msgpackr has three modes. This table compares against one of them. `bundleString
 | 100 events | dec | **121.3K** | 44.2K | 45.8K | 89.6K |
 
 :::caution[Narrow margins are noise]
-The codecs share one benchmark process, so small margins move between runs. Two rows here are that narrow: **Unicode person encode**, where shorn is 6% over msgpackr records, and **Unicode person decode**, where Avro is 5% over shorn. Treat both as ties. **Person encode** used to be a margin of that width against Avro and is not one in this run, at 3.6× over it. A margin that moves that far between recordings is itself a reason to distrust any single number here. The decode columns on the Person, nested and batch fixtures are the margins with real room in them. Benchmark representative production data before deciding.
+The codecs share one benchmark process, so small margins move between runs. Two rows here are that narrow: Unicode person encode, where shorn is 6% over msgpackr records, and Unicode person decode, where Avro is 5% over shorn. Treat both as ties.
+
+Person encode used to be a margin of that width against Avro and is not one in this run, at 3.6× over it. A margin that moves that far between recordings is itself a reason to distrust any single number here. The decode columns on the Person, nested and batch fixtures are the margins with real room in them. Benchmark representative production data before deciding.
 :::
 
 ### Documents: where msgpackr decodes faster
@@ -81,9 +85,9 @@ Validation is most of the end-to-end cost, and it narrows the field. On Person, 
 
 On the Person fixture the raw codec runs at 23.07M encodes/s and 66.26M decodes/s. Adding Zod brings those down to 8.49M and 11.92M.
 
-Between services you own, `unchecked(compile(schema))` writes the same bytes at the raw-codec speed, giving up every refinement on both sides in exchange. See [Skipping Validation](/core-concepts/validation/#skipping-validation).
+Between services you own, `unchecked(compile(schema))` writes the same bytes at the raw-codec speed, giving up every refinement on both sides in exchange. See [Skipping validation](/core-concepts/validation/#skipping-validation).
 
-## Reproducing
+## Reproduce these numbers
 
 ```sh
 pnpm bench

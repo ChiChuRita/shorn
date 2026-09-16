@@ -44,24 +44,15 @@ const bytes = encode(Person, person); // Uint8Array(8)
 const back = decode(Person, bytes);   // typed and validated
 ```
 
-shorn runs your validator before it writes the bytes, and again after it reads
-them back. The same schema written in Zod, Valibot, or ArkType produces the
-same bytes.
+shorn runs your validator before it writes the bytes, and again after it reads them back. The same schema written in Zod, Valibot, or ArkType produces the same bytes.
 
 ## Where the bytes go
 
-JSON spends most of its bytes on things both sides already know: field names,
-quotes, brackets, and commas. Your schema carries all of that, so shorn leaves
-it out and writes only the values. An enum member becomes a small index instead
-of a string. The picture above shows the result, and
-[how it works](https://shorn.dev/core-concepts/how-it-works/#where-the-bytes-go)
-walks through the eight bytes one at a time.
+JSON spends most of its bytes on things both sides already know: field names, quotes, brackets, and commas. Your schema holds all of that, so shorn leaves it out and writes only the values. An enum member becomes a small index instead of a string. The picture above shows the result, and [how it works](https://shorn.dev/core-concepts/how-it-works/#where-the-bytes-go) walks through the eight bytes one at a time.
 
 ## Store and queue safely
 
-A bare payload does not say which schema wrote it. If the bytes will sit in a
-database, a queue, or a file, or cross a deployment boundary, add a fingerprint
-so that a mismatch is caught instead of decoded into a wrong value:
+A bare payload does not say which schema wrote it. If the bytes will sit in a database, a queue, or a file, or cross a deployment boundary, add a fingerprint. shorn then rejects a mismatch instead of decoding it into a wrong value:
 
 ```ts
 import { compile, fingerprinted } from "@chichurita/shorn";
@@ -74,15 +65,9 @@ PersonWire.decode(bytes);                // rejects a different wire shape
 
 ## Use another validator
 
-Zod 4.2 or newer and ArkType 2.1.28 or newer work as they are: pass the schema.
-Valibot 1.x keeps its JSON Schema conversion in a separate package, so pass
-`toStandardJsonSchema(schema)` as the last argument. Under the hood, shorn
-reads validation through [Standard Schema](https://standardschema.dev/schema)
-and structure through
-[Standard JSON Schema](https://standardschema.dev/json-schema).
+Zod 4.2 or newer and ArkType 2.1.28 or newer work as they are: pass the schema. Valibot 1.x keeps its JSON Schema conversion in a separate package, so pass `toStandardJsonSchema(schema)` as the last argument. shorn reads validation through [Standard Schema](https://standardschema.dev/schema) and structure through [Standard JSON Schema](https://standardschema.dev/json-schema).
 
-Valibot's wrapper takes no options, so for `Date`, `bigint`, `Map` and `Set`
-use the raw converter together with `valibotOverride`:
+Valibot's wrapper takes no options, so for `Date`, `bigint`, `Map` and `Set` use the raw converter together with `valibotOverride`:
 
 ```ts
 import { toJsonSchema } from "@valibot/to-json-schema";
@@ -94,27 +79,14 @@ const codec = compile(schema, structure);
 
 ## Scope
 
-Strings, booleans, integers, floats, literals, enums, nullable values, arrays,
-tuples, records, recursive schemas, `z.any()`, and objects, closed or open, with
-optional fields. Unions need a literal tag in every branch, or branches that
-share no JSON type. `Date`, `bigint`, `Map`, and `Set` are supported natively.
+shorn encodes strings, booleans, integers, floats, literals, enums, nullable values, arrays, tuples, records, recursive schemas, `z.any()`, and objects, closed or open, with optional fields. Unions need a literal tag in every branch, or branches that share no JSON type. `Date`, `bigint`, `Map`, and `Set` are supported natively.
 
-Not supported: overlapping unions, streaming, and schema migration.
-`undefined`, symbols, `RegExp`, and class instances have no wire form, so
-convert those first.
+Not supported: overlapping unions, streaming, and schema migration. `undefined`, symbols, `RegExp`, and class instances have no wire form, so convert those first.
 
-Against JSON bytes, encoding is up to 6.7× faster and decoding up to 13.0×,
-with no compressor involved. The `m` API is 6.45 KB gzip; `compile` with
-validation is 11.52 KB.
+Against JSON bytes, encoding is up to 6.7× faster and decoding up to 13.0×, with no compressor involved. The `m` API is 6.45 KB gzip; `compile` with validation is 11.52 KB.
 
 ## Documentation
 
-[Getting started](https://shorn.dev/getting-started/introduction/),
-[API reference](https://shorn.dev/api/overview/),
-[byte layout](https://shorn.dev/wire-format/layout/),
-[supported types](https://shorn.dev/schemas/supported-types/),
-[rejected shapes](https://shorn.dev/schemas/rejected-shapes/),
-[fingerprinting](https://shorn.dev/versioning/fingerprinting/),
-[performance](https://shorn.dev/performance/throughput/).
+[Getting started](https://shorn.dev/getting-started/introduction/), [API reference](https://shorn.dev/api/overview/), [byte layout](https://shorn.dev/wire-format/layout/), [supported types](https://shorn.dev/schemas/supported-types/), [rejected shapes](https://shorn.dev/schemas/rejected-shapes/), [fingerprinting](https://shorn.dev/versioning/fingerprinting/), [performance](https://shorn.dev/performance/throughput/).
 
 MIT licensed.

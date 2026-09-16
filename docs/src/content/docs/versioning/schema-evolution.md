@@ -1,5 +1,5 @@
 ---
-title: Schema Changes
+title: Schema changes
 description: shorn does not resolve schema changes. Keep old codecs and pick one by wire fingerprint or by an application version.
 ---
 
@@ -7,7 +7,7 @@ shorn does not do schema evolution. A positional payload has to be decoded with 
 
 ## Changes that alter the wire shape
 
-Keep every historical codec and dispatch on the fingerprint. Four bytes are recommended for persistent data.
+Keep every historical codec and dispatch on the fingerprint. Use four bytes for persistent data.
 
 ```ts
 const PREFIX_BYTES = 4;
@@ -61,4 +61,4 @@ If you need automatic, cross-language schema evolution rather than an explicit m
 
 ## Format stability
 
-Compatible shorn releases do not change the encoding of existing wire shapes. New wire types can be added without changing existing fingerprints. Any change to the bytes an existing schema produces is treated as wire-breaking however small it is, and is called out in the changelog. While the version is below 1.0 such a change can ship in a minor release, so read the changelog before upgrading if you have payloads in storage or in a queue.
+Compatible shorn releases do not change the encoding of existing wire shapes. New wire types can be added without changing existing fingerprints. Any change to the bytes an existing schema produces counts as wire-breaking, however small, and the changelog calls it out. While the version is below 1.0 such a change can ship in a minor release, so read the changelog before upgrading if you have payloads in storage or in a queue.

@@ -23,11 +23,11 @@ const bytes = encode(Person, person, structure); // 8 bytes
 const decoded = decode(Person, bytes, structure);
 ```
 
-That extra `structure` argument is the only difference from Zod and ArkType. All three produce the same eight bytes and the same fingerprint. Add `v.minValue(0)` wherever a value cannot be negative: a signed integer uses ZigZag encoding and needs an extra byte at half the value an unsigned one would. [Supported Types](/schemas/supported-types/) maps every Valibot shape to its bytes.
+That extra `structure` argument is the only difference from Zod and ArkType. All three produce the same eight bytes and the same fingerprint. Add `v.minValue(0)` wherever a value cannot be negative: a signed integer uses ZigZag encoding and needs an extra byte at half the value an unsigned one would. [Supported types](/schemas/supported-types/) maps every Valibot shape to its bytes.
 
 ## Convert once
 
-The plan is cached by the identity of **both** the schema object and the structure object. A new structure on every call rebuilds the plan, and `toStandardJsonSchema` does real work of its own, so an inline call pays twice.
+The plan is cached by the identity of both the schema object and the structure object. A new structure on every call rebuilds the plan, and `toStandardJsonSchema` does real work of its own, so an inline call pays twice.
 
 ```ts
 // Cached.
@@ -80,7 +80,7 @@ You pass the converter in rather than shorn importing it, for two reasons. shorn
 
 Without the override, Valibot's converter refuses all four before shorn sees anything. shorn keeps the reason and appends what to do:
 
-```
+```text
 The "date" schema cannot be converted to JSON Schema. (shorn has no wire form
 for this value; convert it at the edge, see Rejected Shapes)
 ```

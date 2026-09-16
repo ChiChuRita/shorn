@@ -1,7 +1,9 @@
 ---
-title: API Overview
+title: API overview
 description: The whole public surface on one page.
 ---
+
+This page lists every export in one block, then says which entry point fits which situation.
 
 ```ts
 // Encode and decode
@@ -41,7 +43,7 @@ DecodeError; // .offset, .issues
 | Untrusted input | `safeEncode` / `safeDecode` |
 | Async refinement | `encodeAsync` / `decodeAsync` |
 | A codec object to pass around | `compile` |
-| **Stored, queued, version-crossing** | **`fingerprinted(compile(schema), { bytes: 4 })`** |
+| Stored, queued, version-crossing | `fingerprinted(compile(schema), { bytes: 4 })` |
 | Trusted producer you own, both ends | `unchecked(compile(schema))` |
 | You own the output buffer: frames, batches | `encodeInto(codec, value, target, offset)` |
 | Valibot with `Date`, `bigint`, `Set` or `Map` | `compile(schema, toJsonSchema(schema, { overrideSchema: valibotOverride(toJsonSchema) }))` |

@@ -1,5 +1,5 @@
 ---
-title: Payload Size
+title: Payload size
 description: Smallest raw payload in every measured fixture, smallest gzip in both large profiles, second under Brotli in both.
 ---
 
@@ -54,7 +54,7 @@ The Unicode row shows where the savings come from. shorn removes field names, ta
 
 ## Compressed, 100,000 events
 
-Roughly 4.3 MB of shorn bytes against 16.5 MB of JSON, a batch large enough that compression is a real decision rather than a rounding error.
+4.28 MB of shorn bytes against 16.5 MB of JSON, a batch large enough that compression is a real decision rather than a rounding error.
 
 ### Repetitive data
 
@@ -68,7 +68,9 @@ Roughly 4.3 MB of shorn bytes against 16.5 MB of JSON, a batch large enough that
 | Protobuf.js | 5,826,966 | 1,402,471 | 1,054,692 |
 | JSON | 16,498,152 | 1,769,924 | 1,731,672 |
 
-shorn is smallest raw and under gzip, and second under Brotli. **SchemaPack is 12% smaller under Brotli** while being 100,000 bytes larger raw, for a reason specific to this fixture. `id`, `timestamp` and `memory` are counters. SchemaPack's fixed-width big-endian integers leave their high bytes unchanged across thousands of records, and the compressor's LZ77 stage matches those as long runs. shorn's varints spend 40% fewer bytes on the same counter, but lead with the byte that changes on every record. Density and compressor-friendliness pull in opposite directions, and shorn is on the density side by design.
+shorn is smallest raw and under gzip, and second under Brotli. SchemaPack is 12% smaller under Brotli while being 100,000 bytes larger raw, for a reason specific to this fixture.
+
+`id`, `timestamp` and `memory` are counters. SchemaPack's fixed-width big-endian integers leave their high bytes unchanged across thousands of records, and the compressor's LZ77 stage matches those as long runs. shorn's varints spend 40% fewer bytes on the same counter, but lead with the byte that changes on every record. Density and compressor-friendliness pull in opposite directions, and shorn is on the density side by design.
 
 Compression CPU for the shorn payload: gzip 47.77 ms, gunzip 4.71 ms, Brotli q6 45.72 ms, unbrotli 6.20 ms.
 
@@ -88,17 +90,19 @@ shorn is smallest raw and under gzip, and second under Brotli. Against JSON it i
 
 Compression CPU: gzip 101.22 ms, gunzip 9.76 ms, Brotli q6 103.34 ms, unbrotli 13.78 ms.
 
-**The caveat:** shorn is not smallest under every compressor. Under Brotli, SchemaPack wins on repetitive data and msgpackr's bundled strings wins on high-entropy data. shorn is smallest raw and smallest under gzip in both profiles.
+One caveat: shorn is not smallest under every compressor. Under Brotli, SchemaPack wins on repetitive data and msgpackr's bundled strings wins on high-entropy data. shorn is smallest raw and smallest under gzip in both profiles.
 
 ## Cutting bytes further
 
-- **Declare non-negative integers.** ZigZag doubles the magnitude, so a signed `int` crosses every varint boundary at half the value.
-- **Use enums, not free strings**, for closed sets: one varint index instead of a length plus the text.
-- **Prefer literals** where a field is constant: zero bytes.
-- **Declare a timestamp as a timestamp.** `z.iso.datetime()` and `z.date()` are both 6 bytes, against about 25 for a plain string that happens to hold a date; see [rich types](/schemas/rich-types/).
-- **Choose framing deliberately.** Use a 4-byte fingerprint for persistent data. Pinned RPC can stay bare, and a fingerprint carried in a header does not need to be repeated in the payload.
+Five schema choices shrink payloads further:
 
-## Reproducing
+- **Declare non-negative integers**: ZigZag doubles the magnitude, so a signed `int` crosses every varint boundary at half the value.
+- **Use enums, not free strings, for closed sets**: one varint index instead of a length plus the text.
+- **Prefer literals where a field is constant**: zero bytes.
+- **Declare a timestamp as a timestamp**: `z.iso.datetime()` and `z.date()` are both 6 bytes, against about 25 for a plain string that happens to hold a date; see [rich types](/schemas/rich-types/).
+- **Choose framing deliberately**: use a 4-byte fingerprint for persistent data. Pinned RPC can stay bare, and a fingerprint carried in a header does not need to be repeated in the payload.
+
+## Reproduce these numbers
 
 ```sh
 pnpm bench          # small fixtures

@@ -1,9 +1,9 @@
 ---
-title: Supported Types
+title: Supported types
 description: Every schema shape shorn can encode, with the spelling in each validator and the byte cost.
 ---
 
-shorn supports the shapes that sit in two sets at once: what JSON Schema can describe, and what a format without type tags can encode. Everything else is on [Rejected Shapes](/schemas/rejected-shapes/).
+shorn supports the shapes that sit in two sets at once: what JSON Schema can describe, and what a format without type tags can encode. Everything else is on [Rejected shapes](/schemas/rejected-shapes/).
 
 ## Primitives
 
@@ -26,11 +26,13 @@ A varint is a variable-length integer: small values take one byte, larger values
 
 Enum members do not have to be strings. `z.enum({ Ok: 200, Missing: 404 })` writes a one-byte index instead of the eight bytes each number would otherwise cost. Members are indexed in canonical order: by value for an all-string enum, and by JSON text for anything else, because `<` cannot order mixed types consistently.
 
-A `uuid` is stored as the 16 bytes it stands for, not the 36 characters it is written as. Bytes have no case, so shorn accepts lowercase UUIDs only. An uppercase one is refused rather than handed back as a different string than the one you gave it. RFC 4122 says to generate lowercase.
+A `uuid` is stored as the 16 bytes it stands for, not the 36 characters it is written as. Bytes have no case, so shorn accepts lowercase UUIDs only. An uppercase one is refused rather than returned as a different string than the one you gave it. RFC 4122 says to generate lowercase.
 
-`uuid` and `date-time` are the only two string formats shorn packs. Every other format is stored as text. A `date-time` becomes the 6 bytes of the instant it names. Epoch milliseconds cannot remember how many fractional digits the string had or how its offset was written, so only the `toISOString()` spelling is accepted and every other spelling is refused. ArkType has no `format: "date-time"` spelling: its `"string.date.iso"` converts to a pattern, so it stays an ordinary string.
+`uuid` and `date-time` are the only two string formats shorn packs. Every other format is stored as text. A `date-time` becomes the 6 bytes of the instant it names.
 
-A `Date` is those same 6 bytes, decoded back to a `Date`. A `bigint` is a varint header holding the byte count and sign of the magnitude, followed by the magnitude itself in little-endian order, so it has no practical width limit. See [Date, BigInt, Map, Set](/schemas/rich-types/) for the spellings in each validator, the Valibot recipe, and the `x-shorn` keyword all four travel on.
+Epoch milliseconds cannot remember how many fractional digits the string had or how its offset was written, so only the `toISOString()` spelling is accepted and every other spelling is refused. ArkType has no `format: "date-time"` spelling: its `"string.date.iso"` converts to a pattern, so it stays an ordinary string.
+
+A `Date` is those same 6 bytes, decoded back to a `Date`. A `bigint` is a varint header holding the byte count and sign of the magnitude, followed by the magnitude itself in little-endian order, so it has no practical width limit. See [Date, BigInt, Map, Set](/schemas/rich-types/) for the spellings in each validator, the Valibot recipe, and the `x-shorn` keyword behind all four.
 
 ## Collections
 
@@ -45,9 +47,11 @@ A `Date` is those same 6 bytes, decoded back to a `Date`. A `bigint` is a varint
 
 An array writes its element count on the wire. A tuple gets its count from the schema. That difference is why a tuple may contain zero-width elements and an array may not.
 
-A **Set** writes exactly what an array of the same elements writes, and a **Map** exactly what an array of `[key, value]` tuples writes, both in iteration order. They differ in what they decode to and in their [fingerprint](/versioning/fingerprinting/), so a payload written as one is never read back as the other. Neither may hold a zero-width element, and the decoder refuses a duplicate element or key instead of silently merging it. ArkType's `Set` and `Map` keywords carry no element type and are [refused](/schemas/rejected-shapes/#arktypes-set-and-map).
+A Set writes exactly what an array of the same elements writes, and a Map exactly what an array of `[key, value]` tuples writes, both in iteration order. They differ in what they decode to and in their [fingerprint](/versioning/fingerprinting/), so a payload written as one is never read back as the other. Neither may hold a zero-width element, and the decoder refuses a duplicate element or key instead of silently merging it. ArkType's `Set` and `Map` keywords carry no element type and are [refused](/schemas/rejected-shapes/#arktypes-set-and-map).
 
-An array whose `minItems` equals its `maxItems` is a third case. The schema fixes the count, so the count is not written and the element may be zero-width, just as in a tuple. The count is still checked against the remaining input before anything is allocated. When the element is zero-width there is no input to check against, so instead the total number of slots such a schema can fill from an empty payload is capped at 1,000,000 across all nesting. See [Hostile Input](/hostile-input/).
+An array whose `minItems` equals its `maxItems` is a third case. The schema fixes the count, so the count is not written and the element may be zero-width, as in a tuple. The count is still checked against the remaining input before anything is allocated.
+
+When the element is zero-width there is no input to check against, so instead the total number of slots such a schema can fill from an empty payload is capped at 1,000,000 across all nesting. See [Hostile input](/hostile-input/).
 
 ## Discriminated unions
 
@@ -55,7 +59,7 @@ An array whose `minItems` equals its `maxItems` is a third case. The schema fixe
 
 Every branch must be an object with one property that is a distinct `const` in each branch. That property, the discriminant, costs nothing on the wire: it is a literal inside its branch, and literals encode to zero bytes. So the index is the only byte added, and it replaces the field a self-describing format would write out in full.
 
-Branches are ordered by discriminant value, so declaration order does not reach the wire. Adding a branch shifts the indices of the branches that sort after it. See [Schema Changes](/versioning/schema-evolution/).
+Branches are ordered by discriminant value, so declaration order does not reach the wire. Adding a branch shifts the indices of the branches that sort after it. See [Schema changes](/versioning/schema-evolution/).
 
 ## Type-disjoint unions
 
@@ -88,7 +92,9 @@ const Node = z.object({
 
 A recursive schema adds nothing to the wire. The cycle lives in the schema, so a tree costs exactly what its levels would cost written out by hand: the array count at each level, and the fields of each node.
 
-Recursion needs a way to stop, and that exit is what keeps the payload finite: a nullable back edge, an optional field, or an array that can be empty. A cycle without one, such as `{ next: Node }` with no `null` and no `?`, describes no finite value, and reports a depth error the first time it is used. Nesting is capped at **256 levels** on both sides, because here the depth comes from the payload rather than the schema. A linked list longer than that wants an array. Recursion is for trees.
+Recursion needs a way to stop, and that exit is what keeps the payload finite: a nullable back edge, an optional field, or an array that can be empty. A cycle without one, such as `{ next: Node }` with no `null` and no `?`, describes no finite value, and reports a depth error the first time it is used.
+
+Nesting is capped at 256 levels on both sides, because here the depth comes from the payload rather than the schema. A linked list longer than that wants an array. Recursion is for trees.
 
 A definition that is reached twice but never through itself is not recursive. It is inlined, and encodes and fingerprints exactly as it would written out in full.
 
@@ -123,9 +129,11 @@ z.object({ id: z.uuid(), attributes: z.record(z.string(), z.string()) });
 z.object({ id: z.uuid(), payload: z.any() });
 ```
 
-A record's keys go on the wire in ascending UTF-16 code unit order, and the decoder refuses any other order, which also rules out a repeated key. A dynamic value can hold `null`, a boolean, a number, a string, an array, or a plain object, nested up to 64 levels. A `Date` or a `Map` under `z.any()` is refused rather than written as the empty object it looks like. See [Byte Layout](/wire-format/layout/#dynamic-values) for the tag table.
+A record's keys go on the wire in ascending UTF-16 code unit order, and the decoder refuses any other order, which also rules out a repeated key. A dynamic value can hold `null`, a boolean, a number, a string, an array, or a plain object, nested up to 64 levels. A `Date` or a `Map` under `z.any()` is refused rather than written as the empty object it looks like. See [Byte layout](/wire-format/layout/#dynamic-values) for the tag table.
 
-An **open object** combines the two. The declared fields are written bare in their positional slots, then everything else follows as a record. `z.looseObject` leaves the type of the extras open, so their values carry a tag. `.catchall(T)` declares the type, so only their keys are on the wire. An open object costs one byte even when it has no extras. A closed object costs nothing. A key in the tail that repeats a declared field is refused on decode, because it would overwrite a field decoded a moment earlier.
+An open object combines the two. The declared fields are written bare in their positional slots, then everything else follows as a record.
+
+`z.looseObject` leaves the type of the extras open, so their values carry a tag. `.catchall(T)` declares the type, so only their keys are on the wire. An open object costs one byte even when it has no extras. A closed object costs nothing. A key in the tail that repeats a declared field is refused on decode, because it would overwrite a field decoded a moment earlier.
 
 ## Objects
 
@@ -165,4 +173,4 @@ These have no JSON Schema form, so no validator can select them. They are reacha
 | Raw bytes | `m.bytes()` | varint length + contents |
 | 32-bit float | `m.float32()` | 4 |
 
-`m.date()`, `m.bigint()`, `m.set()` and `m.map()` are not on this list. They travel on shorn's own `x-shorn` keyword, so a validator does select them. See [Date, BigInt, Map, Set](/schemas/rich-types/). There is no `m` builder for a `date-time` string, which `compile()` reaches through the format alone.
+`m.date()`, `m.bigint()`, `m.set()` and `m.map()` are not on this list. They have a JSON Schema form through shorn's own `x-shorn` keyword, so a validator does select them. See [Date, BigInt, Map, Set](/schemas/rich-types/). There is no `m` builder for a `date-time` string, which `compile()` reaches through the format alone.

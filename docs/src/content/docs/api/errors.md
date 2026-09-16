@@ -3,6 +3,8 @@ title: Errors
 description: EncodeError, DecodeError, and what every message you can hit means.
 ---
 
+shorn throws two error classes. `EncodeError` covers everything that fails on the way in, including a schema shorn cannot encode. `DecodeError` covers everything that fails on the way out. This page lists every message and its cause.
+
 ```ts
 class EncodeError extends Error {
   readonly path?: string
@@ -17,7 +19,7 @@ class DecodeError extends Error {
 | Error | Thrown when |
 | --- | --- |
 | `EncodeError` | validation failed on the way in, or the schema cannot be encoded |
-| `DecodeError` | the bytes are malformed, **or** validation failed on the way out |
+| `DecodeError` | the bytes are malformed, or validation failed on the way out |
 
 `DecodeError.offset` is the byte position the decoder had reached. For a validation failure it equals the payload length, because structural decoding has to consume every byte before validation runs.
 
@@ -61,7 +63,7 @@ Errors that wrap another error set `cause`: a validation failure rethrown as a `
 
 ## Schema-construction errors
 
-All of these are `EncodeError` instances thrown when the codec is built. See [Rejected Shapes](/schemas/rejected-shapes/) for what to do about each one.
+All of these are `EncodeError` instances thrown when the codec is built. See [Rejected shapes](/schemas/rejected-shapes/) for what to do about each one.
 
 | Message | Cause |
 | --- | --- |
@@ -97,27 +99,27 @@ All of these are `EncodeError` instances thrown when the codec is built. See [Re
 
 ### Values with no wire form
 
-```
+```text
 <the vendor's own message> (shorn has no wire form for this value; convert it at
 the edge, see Rejected Shapes)
 ```
 
-This suffix is added when a **validator's own** conversion throws, so the reason stays the validator's and the remedy is shorn's. In practice that means Valibot's converter (`v.undefined()`, a `v.transform`, and `v.date()`, `v.bigint()`, `v.set()` or `v.map()` without the [`valibotOverride` recipe](/validators/valibot/#rich-types)), and an ArkType constraint shorn has no hook for, such as the predicate behind `"string.date"`.
+shorn adds this suffix when a validator's own conversion throws, so the reason stays the validator's and the remedy is shorn's. In practice that means Valibot's converter (`v.undefined()`, a `v.transform`, and `v.date()`, `v.bigint()`, `v.set()` or `v.map()` without the [`valibotOverride` recipe](/validators/valibot/#rich-types)), and an ArkType constraint shorn has no hook for, such as the predicate behind `"string.date"`.
 
 A refusal that is shorn's own carries no suffix, because it already says what to do. Zod's refusals are all in that group: `undefined cannot be represented in JSON Schema` and its siblings come from shorn's conversion hook, not from Zod.
 
 `Date`, `bigint`, `Map`, `Set` and `date-time` strings are [supported](/schemas/rich-types/). What has no wire form is `undefined`, `void`, `nan`, symbols, functions, `custom` types and transforms.
 
-### Async
+### Async validation on a sync entry point
 
-```
+```text
 This Standard Schema validates asynchronously; use encodeAsync/decodeAsync,
 which accept either this schema or a codec built from it.
 ```
 
 Every codec that reaches this error can follow the remedy, fingerprinted ones included. A codec with no validator at all gets a different message:
 
-```
+```text
 This codec has no validator to await; async validation needs a codec from
 compile(), optionally wrapped by fingerprinted()
 ```
@@ -184,8 +186,10 @@ All of these are `DecodeError` with an `offset`.
 | `Unknown union branch X` | a branch index past the last branch, discriminated or type-disjoint |
 | `Extra property "x" repeats a declared field` | an open object's tail naming a key the schema declares |
 
-Handle a fingerprint mismatch explicitly. A fingerprint is a short wire-shape identifier, not a complete schema version; see [Wire Fingerprints](/versioning/fingerprinting/).
+Handle a fingerprint mismatch explicitly. A fingerprint is a short wire-shape identifier, not a complete schema version; see [Wire fingerprints](/versioning/fingerprinting/).
 
 ## One error that is not a `DecodeError`
 
-A deeply nested schema overflows the JavaScript stack and throws `RangeError` rather than an `EncodeError` or a `DecodeError`. Measured on Node 22, that happens at about **1,400** levels of nested objects through `compile()` and **1,600** through `m`, so it is reached while the codec is built, not while a payload is read. It takes a hostile **schema**, not merely hostile bytes. Limit schema depth if schemas come from untrusted input. See [Hostile Input](/hostile-input/).
+A deeply nested schema overflows the JavaScript stack and throws `RangeError` rather than an `EncodeError` or a `DecodeError`. Measured on Node 22, that happens at about 1,400 levels of nested objects through `compile()` and 1,600 through `m`, so it is reached while the codec is built, not while a payload is read.
+
+It takes a hostile schema, not merely hostile bytes. Limit schema depth if schemas come from untrusted input. See [Hostile input](/hostile-input/).

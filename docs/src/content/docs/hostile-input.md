@@ -1,11 +1,11 @@
 ---
-title: Hostile Input
+title: Hostile input
 description: Decoder checks, allocation limits, and security boundaries for untrusted payloads.
 ---
 
 A decoder with no type tags relies on the schema to interpret every byte. That makes bounds and length checks essential when payloads come from somewhere you do not trust.
 
-## What is checked
+## What the decoder checks
 
 | Check | Behavior |
 | --- | --- |
@@ -26,17 +26,17 @@ A decoder with no type tags relies on the schema to interpret every byte. That m
 | Union branch index past the last branch | `DecodeError` |
 | Open-object extra repeating a declared field | `DecodeError` |
 
-The hard limits are **1,000,000** elements per collection, Sets and Maps included, and **64 MiB** for a string, a byte array, or a BigInt magnitude. These are backstops. The input-length check below is the main defense against over-allocation.
+The hard limits are 1,000,000 elements per collection, Sets and Maps included, and 64 MiB for a string, a byte array, or a BigInt magnitude. These are backstops. The input-length check below is the main defense against over-allocation.
 
 ## Allocation is bounded by input length, not schema shape
 
 A naive decoder can allocate far more memory than the payload size suggests. A seven-byte payload can declare an array of one million elements, and nested arrays multiply that.
 
-Every schema carries a **`_minWidth`**, the fewest bytes one value of that schema can occupy. Before allocating an array, the decoder multiplies that width by the declared count and checks that at least that much input remains. `_minWidth` is computed when the codec is built, so the runtime check costs one multiplication per decoded array.
+Every schema has a `_minWidth`, the fewest bytes one value of that schema can occupy. Before allocating an array, the decoder multiplies that width by the declared count and checks that at least that much input remains. `_minWidth` is computed when the codec is built, so the runtime check costs one multiplication per decoded array.
 
 A recursive schema's back edge counts as one byte, because every way out of a cycle (an optional field, a nullable marker, an array count, a union index) costs at least one byte.
 
-This is why **arrays of zero-width elements are rejected when the codec is built**. Literals, empty tuples, and empty objects use no bytes, so the decoder could not check the declared count against the payload length. A tuple may still contain them, because its length comes from the schema. A Set and a Map follow the array's rule, since neither has a fixed-count form.
+This is why shorn rejects arrays of zero-width elements when the codec is built. Literals, empty tuples, and empty objects use no bytes, so the decoder could not check the declared count against the payload length. A tuple may still contain them, because its length comes from the schema. A Set and a Map follow the array's rule, since neither has a fixed-count form.
 
 ### Fixed-count arrays
 
@@ -46,10 +46,12 @@ A variable-length container around a fixed one is still yours to bound, because 
 
 ## Security boundaries
 
-- **No security audit or coverage-guided fuzzing.** Property-based and mutation tests are not a substitute for either.
-- **No depth limit from the schema.** A deeply nested schema exhausts the JavaScript stack while the codec is built and throws `RangeError`, at about **1,400** levels through `compile()` and **1,600** through `m`, measured on Node 22 and not re-measured since. That takes a hostile schema, not hostile bytes, and a `RangeError` is recoverable. Limit depth if schemas come from untrusted input. Depth chosen by the payload is capped: 64 levels for a dynamic value, 256 for a recursive schema.
-- **Not a sandbox.** Validation code runs with the same privileges as your application.
-- **Not authentication or encryption.** Fingerprints are unkeyed, and payloads are readable by anyone with the schema.
+Four things shorn does not defend against:
+
+- **No security audit or coverage-guided fuzzing**: property-based and mutation tests are not a substitute for either.
+- **No depth limit from the schema**: a deeply nested schema exhausts the JavaScript stack while the codec is built and throws `RangeError`, at about 1,400 levels through `compile()` and 1,600 through `m`, measured on Node 22 and not re-measured since. That takes a hostile schema, not hostile bytes, and a `RangeError` is recoverable. Limit depth if schemas come from untrusted input. Depth chosen by the payload is capped: 64 levels for a dynamic value, 256 for a recursive schema.
+- **Not a sandbox**: validation code runs with the same privileges as your application.
+- **Not authentication or encryption**: fingerprints are unkeyed, and payloads are readable by anyone with the schema.
 
 ## Practical guidance
 
@@ -60,7 +62,7 @@ const result = safeDecode(Person, bytes);
 if (!result.success) return new Response("Bad request", { status: 400 });
 ```
 
-**Use a 4-byte wire fingerprint for stored and queued payloads.** It is not a security feature and cannot tell apart schema changes that only touch validation; see [Wire Fingerprints](/versioning/fingerprinting/). Do not treat it as authentication. Sign or encrypt if you need authenticity.
+**Use a 4-byte wire fingerprint for stored and queued payloads.** It is not a security feature and cannot tell apart schema changes that only touch validation; see [Wire fingerprints](/versioning/fingerprinting/). Do not treat it as authentication. Sign or encrypt if you need authenticity.
 
 **Cap payload size at the transport.** The 64 MiB limit is a backstop, not a policy.
 

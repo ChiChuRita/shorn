@@ -3,7 +3,9 @@ title: Introduction
 description: shorn is compact binary serialization for Zod, Valibot, and ArkType. It reads the schema you already validate with and writes payloads without field names or type tags.
 ---
 
-shorn turns the validation schema you already have into a binary format. It reads two things from that schema: [Standard Schema](https://standardschema.dev/schema) for validation, and [Standard JSON Schema](https://standardschema.dev/json-schema) for structure. Both are small shared interfaces that Zod, Valibot, and ArkType already implement, so shorn needs no adapter for any of them, and none for whatever validator implements the two next. Because your validator already describes every field and its type, there is no separate schema file to write, no code to generate, and no second copy of your types to keep in sync.
+shorn turns the validation schema you already have into a binary format. It reads two things from that schema: [Standard Schema](https://standardschema.dev/schema) for validation, and [Standard JSON Schema](https://standardschema.dev/json-schema) for structure.
+
+Both are small shared interfaces that Zod, Valibot, and ArkType already implement, so shorn needs no adapter for any of them, nor for the next validator that implements the two. Because your validator already describes every field and its type, there is no separate schema file to write, no code to generate, and no second copy of your types to keep in sync.
 
 ```ts
 import { z } from "zod";
@@ -30,21 +32,21 @@ In every case:
 
 ## When it fits
 
-shorn is a good fit when all of these are true: both ends of the wire are TypeScript or JavaScript, your application already validates its data, both ends can share one schema, and payload size or serialization cost actually matters to you. If any of those is false, [Comparisons](/comparisons/) says what to use instead.
+shorn is a good fit when all of these are true: both ends of the wire are TypeScript or JavaScript, your application already validates its data, both ends can share one schema, and payload size or serialization cost matters to you. If any of those is false, [Comparisons](/comparisons/) says what to use instead.
 
-## Limits
+## What shorn does not do
 
-Some of these are design decisions rather than gaps that will be filled later:
+Some of these are design decisions rather than gaps a later release will fill:
 
-- **No streaming**, random access, or zero-copy views.
-- **No cross-language decoder.** TypeScript and JavaScript only.
-- **Some values have no wire form.** `Date`, `bigint`, `Map`, `Set` and `date-time` strings are [supported natively](/schemas/rich-types/). `undefined`, symbols, `RegExp`, class instances and one-way transforms are not, so convert those before encoding.
-- **Not confidential.** The bytes are compact, not secret. Encrypt them when secrecy matters.
-- **No universal speed guarantee.** Results depend on your schema, your data, the runtime, and compression. See [Throughput](/performance/throughput/) and measure your own workload.
-- **No schema evolution.** A payload can only be decoded by the exact wire shape that wrote it. [`fingerprinted()`](/versioning/fingerprinting/) puts a short identifier for the wire shape in front of the payload, so most mismatches are caught rather than misread, but nothing migrates old payloads for you.
+- **No streaming**: nor random access or zero-copy views.
+- **No cross-language decoder**: TypeScript and JavaScript only.
+- **Some values have no wire form**: `Date`, `bigint`, `Map`, `Set` and `date-time` strings are [supported natively](/schemas/rich-types/). `undefined`, symbols, `RegExp`, class instances and one-way transforms are not, so convert those before encoding.
+- **Not confidential**: the bytes are compact, not secret. Encrypt them when secrecy matters.
+- **No universal speed guarantee**: results depend on your schema, your data, the runtime, and compression. See [Throughput](/performance/throughput/) and measure your own workload.
+- **No schema evolution**: only the exact wire shape that wrote a payload can decode it. [`fingerprinted()`](/versioning/fingerprinting/) puts a short identifier for the wire shape in front of the payload, so it catches most mismatches instead of misreading them, but nothing migrates old payloads for you.
 
 ## Where to go next
 
-If you are still deciding, read [Comparisons](/comparisons/) first. Otherwise: [Installation](/getting-started/installation/), then [Quick Start](/getting-started/quick-start/), then [How It Works](/core-concepts/how-it-works/) for the model behind the bytes.
+If you are still deciding, read [Comparisons](/comparisons/) first. Otherwise: [Installation](/getting-started/installation/), then [Quick start](/getting-started/quick-start/), then [How it works](/core-concepts/how-it-works/) for the model behind the bytes.
 
-From there, [Using Payloads](/getting-started/using-payloads/) covers sending and storing them, and [Wire Fingerprints](/versioning/fingerprinting/) is worth reading before you store any.
+From there, [Using payloads](/getting-started/using-payloads/) covers sending and storing them, and [Wire fingerprints](/versioning/fingerprinting/) is worth reading before you store any.

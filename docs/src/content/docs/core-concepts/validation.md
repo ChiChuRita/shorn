@@ -3,7 +3,7 @@ title: Validation
 description: Your library validates on encode and again on decode. Throwing, result-returning, and async variants, and how each one works with a codec.
 ---
 
-shorn runs your schema in **both** directions. Encode validates before writing any bytes. Decode validates the value it has just read before returning it.
+shorn runs your schema in both directions. Encode validates before writing any bytes. Decode validates the value it has just read before returning it.
 
 ```ts
 const bytes = encode(Person, person); // validates, then writes
@@ -15,6 +15,8 @@ The two checks are not redundant. The wire format knows a field is a string. Onl
 A failure on the way in is an `EncodeError`. A failure on the way out is a `DecodeError`, the same class that malformed bytes produce. See [Errors](/api/errors/).
 
 ## Results instead of exceptions
+
+The safe variants return a result object instead of throwing:
 
 ```ts
 const result = safeDecode(Person, bytes);
@@ -46,7 +48,7 @@ const bytes = await encodeAsync(PersonWire, person); // 4-byte fingerprint + pay
 const back = await decodeAsync(PersonWire, bytes);   // checks the prefix, then awaits
 ```
 
-A codec with no validator to await, such as an `m` schema or a `compile()` codec wrapped in `nullable()` or `optional()`, is refused rather than quietly run synchronously.
+shorn refuses a codec with no validator to await, such as an `m` schema or a `compile()` codec wrapped in `nullable()` or `optional()`, rather than quietly running it synchronously.
 
 ## Skipping validation
 
@@ -63,12 +65,12 @@ The bytes do not change, so a validated decoder reads what an unchecked encoder 
 
 What you give up:
 
-- **Refinements, in both directions.** A negative age, a malformed email, a string over its maximum: all of them encode and decode fine as long as the wire type can carry them.
-- **Transforms, not only checks.** The validator does not run at all, so `z.string().trim()` or `z.coerce` no longer changes the value. It goes out exactly as you handed it over.
-- **Protection against rule changes.** Bytes written against a schema that differs only in its refinements now decode silently. `fingerprinted()` still catches a *structural* difference, but a fingerprint has never covered refinements.
+- **Refinements, in both directions**: a negative age, a malformed email, a string over its maximum: all of them encode and decode fine as long as the wire type can carry them.
+- **Transforms, not only checks**: the validator does not run at all, so `z.string().trim()` or `z.coerce` no longer changes the value. It goes out exactly as you passed it in.
+- **Protection against rule changes**: bytes written against a schema that differs only in its refinements now decode silently. `fingerprinted()` still catches a *structural* difference, but a fingerprint has never covered refinements.
 
-What you keep: every structural check. Bounds on each read, the length limits, the refusal of trailing bytes. Malformed input still throws `DecodeError` rather than escaping as a wrong value. See [Hostile Input](/hostile-input/).
+What you keep: every structural check. Bounds on each read, the length limits, the refusal of trailing bytes. Malformed input still throws `DecodeError` rather than escaping as a wrong value. See [Hostile input](/hostile-input/).
 
 Keep the validated codec at any boundary you do not own. `unchecked()` is for the hop between your own processes, not for the edge.
 
-Every entry point uses the same structural decode path and reports the same errors for malformed input. [API Overview](/api/overview/) has a table of which one to reach for.
+Every entry point uses the same structural decode path and reports the same errors for malformed input. [API overview](/api/overview/) has a table of which one to reach for.

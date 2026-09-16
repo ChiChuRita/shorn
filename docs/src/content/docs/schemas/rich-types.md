@@ -20,7 +20,7 @@ const codec = compile(Event);
 codec.decode(codec.encode(value)); // a Date, a bigint, a Set and a Map back
 ```
 
-JSON Schema has no keyword for any of these, so shorn adds one, `x-shorn`, and asks each validator to write it during conversion. See [the extension keyword](#the-x-shorn-keyword).
+JSON Schema has no keyword for any of these, so shorn adds one, `x-shorn`, which each validator's converter writes through a hook shorn supplies. See [the extension keyword](#the-x-shorn-keyword).
 
 ## What each validator spells
 
@@ -51,7 +51,7 @@ m.set(m.string()).encode(new Set(["a", "b"]));            // [2, 1, 97, 1, 98]
 m.map(m.string(), m.uint()).encode(new Map([["x", 1]]));  // [1, 1, 120, 1]
 ```
 
-[Byte Layout](/wire-format/layout/#dates) walks through each one, the canonical rules, and what the decoder refuses.
+[Byte layout](/wire-format/layout/#dates) walks through each one, the canonical rules, and what the decoder refuses.
 
 A Set writes exactly the bytes an array of the same elements writes, and a Map exactly what an array of `[key, value]` tuples writes. They differ in what they decode to and in their [fingerprint](/versioning/fingerprinting/), so a payload written as one is never read back as the other.
 
@@ -74,12 +74,14 @@ When.encode({ at: "2026-09-03T12:00:00.000000Z" });   // refused: six fractional
 
 > Expected a canonical ISO-8601 date-time (the toISOString() spelling), received X
 
-This is the [UUID rule](/schemas/supported-types/#primitives) again. Epoch milliseconds cannot remember a fractional-digit count or an offset, so exactly one spelling survives the round trip, and normalizing the others would break `decode(encode(x)) === x`, the property [canonical bytes](/core-concepts/canonical-bytes/) rest on. Call `toISOString()` at the edge. It is what `JSON.stringify` already does to a Date.
+This is the [UUID rule](/schemas/supported-types/#primitives) again. Epoch milliseconds cannot remember a fractional-digit count or an offset, so exactly one spelling survives the round trip, and normalizing the others would break `decode(encode(x)) === x`, the property [canonical bytes](/core-concepts/canonical-bytes/) rest on.
+
+Call `toISOString()` at the edge. It is what `JSON.stringify` already does to a Date.
 
 ArkType has no `format: "date-time"` spelling. Its `"string.date.iso"` converts to a pattern, so it stays an ordinary string.
 
 :::caution[Wire-breaking in 0.7.0 for existing date-time schemas]
-Before 0.7.0 a `date-time` string traveled as text. A schema holding one now writes different bytes and derives a different fingerprint, so payloads written by earlier versions cannot be read. Keep the old codec while old payloads exist; see [Schema Changes](/versioning/schema-evolution/).
+Before 0.7.0 a `date-time` string was written as text. A schema holding one now writes different bytes and derives a different fingerprint, so payloads written by earlier versions cannot be read. Keep the old codec while old payloads exist; see [Schema changes](/versioning/schema-evolution/).
 :::
 
 ## Valibot
@@ -117,7 +119,7 @@ const structure = {
 
 A node with the keyword needs no `type`, because there is no JSON type to name. Any other value is refused with `Unsupported x-shorn kind X`. This keyword is what each validator hook writes, so a document produced by `valibotOverride` and one written by hand compile to the same codec.
 
-## Limits
+## Where the four are still refused
 
 **ArkType's `Set` and `Map`.** In ArkType both are keywords, and neither carries an element type, so there is nothing to say how the members should be encoded. They are refused rather than encoded as empty containers:
 
@@ -156,7 +158,7 @@ Zod's message names the type and is kept as it is: `undefined cannot be represen
 > \<the vendor's message\> (shorn has no wire form for this value; convert it at
 the edge, see Rejected Shapes)
 
-For a **transform**, `z.codec()` declares both directions in the schema itself:
+For a transform, `z.codec()` declares both directions in the schema itself:
 
 ```ts
 const Rich = z.object({

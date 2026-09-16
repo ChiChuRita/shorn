@@ -18,7 +18,9 @@ An esbuild-minified browser bundle for each codec API as imported. Validation li
 | shorn `compile` (validating) | 37.36 KB | 11.52 KB |
 | protobufjs/light | 88.35 KB | 25.93 KB |
 
-**`@msgpack/msgpack` is the smallest measured gzipped. shorn's wire codec is 9% larger gzipped**, 525 bytes, though 37 bytes smaller minified. What that 525 bytes buys is native `Date`, `bigint`, `Set` and `Map` on the `m` namespace, which no other row carries. What those four builders cost on their own was not measured in this run, so no figure for them is published here. `compile` is 78% larger than `m` gzipped because it validates on encode and decode, which no other row does, and it sits about 1.1 KB over msgpackr and 0.7 KB over cbor-x, which validate nothing. Compare the row that matches what you ship.
+`@msgpack/msgpack` is the smallest measured gzipped. shorn's wire codec is 9% larger gzipped, 525 bytes, though 37 bytes smaller minified. What that 525 bytes buys is native `Date`, `bigint`, `Set` and `Map` on the `m` namespace, which no other row has. What those four builders cost on their own was not measured in this run, so no figure for them is published here.
+
+`compile` is 78% larger than `m` gzipped because it validates on encode and decode, which no other row does, and it sits about 1.1 KB over msgpackr and 0.7 KB over cbor-x, which validate nothing. Compare the row that matches what you ship.
 
 `avsc` needs a browser `stream` polyfill and SchemaPack needs a `buffer` polyfill, so neither has a comparable zero-polyfill result.
 
@@ -51,11 +53,11 @@ Schema and codec construction plus the first Person encode.
 | Avro / avsc | 65.19 µs |
 | Protobuf.js reflection | 181.42 µs |
 
-shorn starts faster than Avro but slower than SchemaPack. **Most of shorn's time is Zod building the schema**, which an application that uses Zod already pays. That is usually negligible in a long-lived server. It can matter in a serverless function that handles one request, so define schemas at module scope and let warm invocations reuse them.
+shorn starts faster than Avro but slower than SchemaPack. Most of shorn's time is Zod building the schema, which an application that uses Zod already pays. A long-lived server pays it once. It can matter in a serverless function that handles one request, so define schemas at module scope and let warm invocations reuse them.
 
-## Memory
+## Retained memory
 
-Steady-state retained memory after repeated forced GC in isolated processes, for [100,000 decoded events](/performance/size/#fixtures). This does **not** measure transient peak allocation.
+Steady-state retained memory after repeated forced GC in isolated processes, for [100,000 decoded events](/performance/size/#fixtures). This does not measure transient peak allocation.
 
 | Codec | Payload | Encode retained | Decoded value | RSS increase |
 | --- | ---: | ---: | ---: | ---: |
@@ -65,7 +67,9 @@ Steady-state retained memory after repeated forced GC in isolated processes, for
 | msgpackr records | 4.76 MiB | 17.02 MiB | 32.35 MiB | **59.73 MiB** |
 | JSON | 15.58 MiB | 15.58 MiB | **23.94 MiB** | 76.11 MiB |
 
-**Encoding a 4.04 MiB payload retains 4.13 MiB.** The encoded output is an exact-size copy, so keeping it does not keep a larger backing buffer alive, and internal buffers larger than 64 KiB are released. Decoded memory is fourth of the five: only SchemaPack retains more. RSS lands below JSON, SchemaPack and Avro, and above msgpackr records alone. Avro's RSS was under shorn's in earlier recordings and is 1.09 MiB over it here, which is close enough to call a tie rather than a win either way.
+**Encoding a 4.04 MiB payload retains 4.13 MiB.** The encoded output is an exact-size copy, so keeping it does not keep a larger backing buffer alive, and internal buffers larger than 64 KiB are released.
+
+Decoded memory is fourth of the five: only SchemaPack retains more. RSS is below JSON, SchemaPack and Avro, and above msgpackr records alone. Avro's RSS was under shorn's in earlier recordings and is 1.09 MiB over it here, which is close enough to call a tie rather than a win either way.
 
 ## Runtime portability
 
@@ -73,14 +77,14 @@ shorn targets `es2022` with esbuild's `neutral` platform setting. It is ESM only
 
 Two fast paths are used when the runtime happens to offer them. Both are found by looking up a global, never by importing:
 
-- **Decoding** prefers `Buffer.prototype.utf8Slice` over `TextDecoder`. Without it (browsers, workers, Deno without the Node shim), `TextDecoder` is used instead. `pnpm bench:strings` measures how much that path saves; it is not part of this run, so no figure for it is published here.
-- **Encoding** checks for unpaired surrogates with `String.prototype.isWellFormed`. Without it (Safari below 16.4, Firefox below 119), a `\p{Surrogate}` regex is used instead.
+- **Decoding**: uses `Buffer.prototype.utf8Slice` when present and `TextDecoder` otherwise (browsers, workers, Deno without the Node shim). `pnpm bench:strings` measures how much that path saves; it is not part of this run, so no figure for it is published here.
+- **Encoding**: checks for unpaired surrogates with `String.prototype.isWellFormed` when present and a `\p{Surrogate}` regex otherwise (Safari below 16.4, Firefox below 119).
 
 Either way the bytes, the API, and the rejection of malformed input are identical. Only the speed changes.
 
 This run is Node only. The full comparison and a smoke test have also been run under Bun, and rankings vary by runtime. Browser bundle size is measured, but browser execution is not part of the benchmark matrix.
 
-## Reproducing
+## Reproduce these numbers
 
 ```sh
 pnpm bench:bundle   # bundle sizes per import set

@@ -20,7 +20,7 @@ const bytes = encode(Person, person); // 8 bytes
 const decoded = decode(Person, bytes);
 ```
 
-An equivalent Zod schema produces the same bytes and the same fingerprint. Use `"number.integer >= 0"` wherever a value cannot be negative: a signed integer uses ZigZag encoding and needs an extra byte at half the value an unsigned one would. [Supported Types](/schemas/supported-types/) maps every ArkType shape to its bytes.
+An equivalent Zod schema produces the same bytes and the same fingerprint. Use `"number.integer >= 0"` wherever a value cannot be negative: a signed integer uses ZigZag encoding and needs an extra byte at half the value an unsigned one would. [Supported types](/schemas/supported-types/) maps every ArkType shape to its bytes.
 
 ## Extra properties
 
@@ -45,11 +45,11 @@ const Event = type({ when: "Date", id: "bigint" });
 const codec = compile(Event); // 6 bytes for the Date
 ```
 
-JSON Schema has no keyword for either, so shorn asks ArkType's converter to write shorn's own [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword) keyword for them. An equivalent Zod schema produces the same bytes and the same fingerprint.
+JSON Schema has no keyword for either, so shorn's conversion hook writes its own [`x-shorn`](/schemas/rich-types/#the-x-shorn-keyword) keyword for them during ArkType's conversion. An equivalent Zod schema produces the same bytes and the same fingerprint.
 
-`Set` and `Map` are **refused**:
+`Set` and `Map` are refused:
 
-```
+```text
 ArkType's Set carries no element type, so there is nothing to encode its
 members as; convert it at the edge
 ```
@@ -60,6 +60,6 @@ ArkType has no `format: "date-time"` spelling either. `"string.date.iso"` conver
 
 A morph is refused when its input and output produce different wire shapes, because shorn needs both sides to agree on the bytes. Standard Schema has no reverse operation, so shorn cannot run a morph backwards; see [Date, BigInt, Map, Set](/schemas/rich-types/).
 
-## Version note
+## Minimum version
 
-2.1.28 is the minimum. Earlier versions lack Standard JSON Schema, so `encode` throws *"provides validation but not structure"*. On those versions, pass the `structure` argument.
+2.1.28 is the minimum. Earlier versions lack Standard JSON Schema, so `encode` throws `provides validation but not structure`. On those versions, pass the `structure` argument.

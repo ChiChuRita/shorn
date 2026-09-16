@@ -5,7 +5,9 @@ description: Signatures and behavior for encode, decode, the safe and async vari
 
 Each function has two overloads. One takes a schema that implements both Standard interfaces. The other takes a Standard Schema plus a `structure` that describes the same shape.
 
-`structure` is either a **Standard JSON Schema implementation** (`toStandardJsonSchema(schema)` for Valibot) or a plain **JSON Schema document**, typed as `JsonSchemaDocument`. One document describes one shape, so it serves as both the input and the output side. That is why a schema with a default or a transform needs the two-method form instead. A plain object counts as a document when it has `$schema`, `$ref`, `type`, `anyOf`, `oneOf`, `const`, `enum`, `properties` or `x-shorn`. Anything else is refused, so a validator passed twice by mistake does not read as an empty schema and appear to work.
+`structure` is either a Standard JSON Schema implementation (`toStandardJsonSchema(schema)` for Valibot) or a plain JSON Schema document, typed as `JsonSchemaDocument`. One document describes one shape, so it serves as both the input and the output side. That is why a schema with a default or a transform needs the two-method form instead.
+
+A plain object counts as a document when it has `$schema`, `$ref`, `type`, `anyOf`, `oneOf`, `const`, `enum`, `properties` or `x-shorn`. Anything else is refused, so a validator passed twice by mistake does not read as an empty schema and appear to work.
 
 ```ts
 const structure = {
@@ -28,7 +30,7 @@ encode<S extends StandardSchemaV1>(schema: S, value: InferOutput<S>, structure: 
 
 Validates, then writes bytes. Throws `EncodeError` if validation fails or the schema cannot be encoded.
 
-The returned `Uint8Array` is an **exact-size copy**, not a view into a reused buffer, so you can keep it as long as you like. The wire plan is cached per schema object.
+The returned `Uint8Array` is an exact-size copy, not a view into a reused buffer, so you can keep it as long as you like. The wire plan is cached per schema object.
 
 ## `decode`
 
@@ -37,7 +39,7 @@ decode<S extends EncodableStandardSchema>(schema: S, bytes: Uint8Array): InferOu
 decode<S extends StandardSchemaV1>(schema: S, bytes: Uint8Array, structure: StandardJSONSchemaV1 | JsonSchemaDocument): InferOutput<S>;
 ```
 
-Reads the structure, then validates. Throws `DecodeError` for malformed bytes **and** for a validation failure on the way out.
+Reads the structure, then validates. Throws `DecodeError` for malformed bytes and for a validation failure on the way out.
 
 Bytes left over after a complete value are an error. Input that is not a `Uint8Array` produces a `DecodeError` rather than a raw `TypeError`. An array from another realm, such as `node:vm`, an iframe, or jsdom, is accepted through a tag check when `instanceof` fails.
 
@@ -47,7 +49,7 @@ Bytes left over after a complete value are an error. Input that is not a `Uint8A
 encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, offset?: number): number;
 ```
 
-Encodes into a buffer you own and returns the offset just past the last byte written, so consecutive calls pack a frame:
+Encodes into a buffer you own and returns the offset one past the last byte written, so consecutive calls pack a frame:
 
 ```ts
 const frame = new Uint8Array(65_536);
@@ -56,9 +58,11 @@ for (const event of events) end = encodeInto(codec, event, frame, end);
 socket.send(frame.subarray(0, end));
 ```
 
-The bytes are exactly what `codec.encode(value)` would return. What you save is the output array and the copy into the frame that would follow it, which together are about half the cost of a small encode: on the Person fixture, 48 ns down to 23 ns, and a 100-message frame in 40% of the time. For a message you hand straight to `send()`, `encode()` is simpler and no slower.
+The bytes are exactly what `codec.encode(value)` would return. What you save is the output array and the copy into the frame that would follow it, which together are about half the cost of a small encode: on the Person fixture, 48 ns down to 23 ns, and a 100-message frame in 40% of the time. For a message that goes straight to `send()`, `encode()` is simpler and no slower.
 
-Takes any codec: from `compile()`, `fingerprinted()`, `unchecked()`, or `m`. Throws `EncodeError` when the value does not fit, when `offset` is outside `target`, or when `target` is not a `Uint8Array`, and names the failing field just as `encode()` does. After a too-small target, the bytes from `offset` onward are unspecified. Decoding needs no counterpart: `decode()` takes any `Uint8Array` view, so hand it `frame.subarray(start, end)`.
+Takes any codec: from `compile()`, `fingerprinted()`, `unchecked()`, or `m`. Throws `EncodeError` when the value does not fit, when `offset` is outside `target`, or when `target` is not a `Uint8Array`, and names the failing field as `encode()` does. After a too-small target, the bytes from `offset` onward are unspecified.
+
+Decoding needs no counterpart: `decode()` takes any `Uint8Array` view, so pass it `frame.subarray(start, end)`.
 
 ## `safeEncode` / `safeDecode`
 
@@ -80,9 +84,9 @@ encodeAsync<T>(codec: Schema<T>, value: T): Promise<Uint8Array>;
 decodeAsync<T>(codec: Schema<T>, bytes: Uint8Array): Promise<T>;
 ```
 
-For schemas with **asynchronous** refinements. Both accept either a Standard Schema or a codec built from one, including a `fingerprinted()` codec. The prefix is written and checked on the async path exactly as on the sync one. There are no safe async variants.
+For schemas with asynchronous refinements. Both accept either a Standard Schema or a codec built from one, including a `fingerprinted()` codec. The prefix is written and checked on the async path exactly as on the sync one. There are no safe async variants.
 
-Calling `encode`/`decode` on an async schema throws. So does passing a codec that has no validator to await: an `m` schema, or a `compile()` codec wrapped in `nullable()`/`optional()`. See [Validation](/core-concepts/validation/#async-validation) and [Errors](/api/errors/#async).
+Calling `encode`/`decode` on an async schema throws. So does passing a codec that has no validator to await: an `m` schema, or a `compile()` codec wrapped in `nullable()`/`optional()`. See [Validation](/core-concepts/validation/#async-validation) and [Errors](/api/errors/#async-validation-on-a-sync-entry-point).
 
 ## `compile`
 
@@ -91,7 +95,7 @@ compile<S extends EncodableStandardSchema>(schema: S): Schema<InferOutput<S>>;
 compile<S extends StandardSchemaV1>(schema: S, structure: StandardJSONSchemaV1 | JsonSchemaDocument): Schema<InferOutput<S>>;
 ```
 
-Returns the cached wire plan as a codec with `.encode()` and `.decode()`. **No build step:** it works in memory and writes nothing to disk. Calling it again with the same schema and structure objects returns the **same** cached instance. See [Compilation and Caching](/core-concepts/compile-and-caching/).
+Returns the cached wire plan as a codec with `.encode()` and `.decode()`. There is no build step: it works in memory and writes nothing to disk. Calling it again with the same schema and structure objects returns the same cached instance. See [Compilation and caching](/core-concepts/compile-and-caching/).
 
 ## `unchecked`
 
@@ -103,7 +107,7 @@ unchecked<S extends StandardSchemaV1>(schema: S, structure: StandardJSONSchemaV1
 
 The same codec with the validator removed: identical bytes on the wire, and no refinements run on either side. It is cached alongside the codec it came from, so calling it per message is a lookup, not a rebuild. It accepts a `fingerprinted()` codec and keeps the envelope, prefix check included.
 
-Throws `EncodeError` for a codec that has no validator to remove. [Skipping Validation](/core-concepts/validation/#skipping-validation) covers when this is safe and what you give up.
+Throws `EncodeError` for a codec that has no validator to remove. [Skipping validation](/core-concepts/validation/#skipping-validation) covers when this is safe and what you give up.
 
 ## `valibotOverride`
 
@@ -142,7 +146,7 @@ codec.fingerprintHex;  // "7236d1", the Map key for dispatch
 
 `fingerprint` returns a copy so that a caller cannot change the codec's internal bytes. Use `fingerprintHex` as a `Map` key.
 
-Throws `EncodeError` for a codec without a signature, and for `bytes` outside 1 to 4. The default is 3 bytes. Use 4 for persistent data. See [Wire Fingerprints](/versioning/fingerprinting/).
+Throws `EncodeError` for a codec without a signature, and for `bytes` outside 1 to 4. The default is 3 bytes. Use 4 for persistent data. See [Wire fingerprints](/versioning/fingerprinting/).
 
 ## `Schema<T>`
 
@@ -156,4 +160,4 @@ abstract class Schema<T> {
 }
 ```
 
-`signature` exists only at the type level on the base class, so users who never import `fingerprinted()` pay no runtime cost for it. `_encode`, `_decode`, and `_minWidth` are internal and may change in a minor release. See [m Builders](/api/m/).
+`signature` exists only at the type level on the base class, so users who never import `fingerprinted()` pay no runtime cost for it. `_encode`, `_decode`, and `_minWidth` are internal and may change in a minor release. See [m builders](/api/m/).

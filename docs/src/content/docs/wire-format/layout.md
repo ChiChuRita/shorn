@@ -1,5 +1,5 @@
 ---
-title: Byte Layout
+title: Byte layout
 description: Every wire type, byte by byte, with the rules that make the encoding canonical.
 # Every wire type was a peer `##`, so the right-rail table of contents was a
 # twenty-two item column that grouped nothing and overflowed the rail. The types
@@ -39,7 +39,7 @@ Unsigned integers are base-128 varints: seven bits of value per byte, least sign
 | `127` | `[127]` |
 | `128` | `[128, 1]` |
 
-Signed integers are **ZigZag** encoded first, which maps `0, -1, 1, -2, 2` to `0, 1, 2, 3, 4`, and then written as the same varint.
+Signed integers are ZigZag encoded first, which maps `0, -1, 1, -2, 2` to `0, 1, 2, 3, 4`, and then written as the same varint.
 
 | Value | Bytes |
 | --- | --- |
@@ -55,9 +55,9 @@ ZigZag doubles the magnitude, so a signed integer crosses every size boundary at
 
 ### Floats
 
-`z.number()` is little-endian IEEE-754 **float64**, always 8 bytes, with no varint compaction.
+`z.number()` is little-endian IEEE-754 float64, always 8 bytes, with no varint compaction.
 
-```
+```text
 1.5 -> [0, 0, 0, 0, 0, 0, 248, 63]
 ```
 
@@ -67,13 +67,13 @@ ZigZag doubles the magnitude, so a signed integer crosses every size boundary at
 
 A `Date` is its epoch milliseconds as a ZigZag varint, exactly what an `int` writes. That is six bytes for any date this century, fewer near 1970, and exact, since a `Date` holds nothing finer than a millisecond.
 
-```
+```text
 new Date("2026-09-03T12:00:00.000Z") -> [128, 136, 159, 242, 140, 104]
 ```
 
-An **Invalid Date** is refused at encode: its time value is `NaN`, which no integer holds. On the way back, a millisecond count outside ±8.64e15 names no `Date` at all, since that is where the spec's TimeClip puts the end of the range, so the decoder refuses it rather than returning an Invalid Date.
+An Invalid Date is refused at encode: its time value is `NaN`, which no integer holds. On the way back, a millisecond count outside ±8.64e15 names no `Date` at all, since that is where the spec's TimeClip puts the end of the range, so the decoder refuses it rather than returning an Invalid Date.
 
-A **`format: "date-time"` string** takes the same six bytes and decodes back to text, the `toISOString()` spelling of that instant. Only that spelling encodes. Epoch milliseconds cannot remember a fractional-digit count or an offset, so anything else is refused rather than normalized, exactly as an uppercase UUID is. See [Rejected Shapes](/schemas/rejected-shapes/#non-canonical-date-time-strings).
+A `format: "date-time"` string takes the same six bytes and decodes back to text, the `toISOString()` spelling of that instant. Only that spelling encodes. Epoch milliseconds cannot remember a fractional-digit count or an offset, so anything else is refused rather than normalized, exactly as an uppercase UUID is. See [Rejected shapes](/schemas/rejected-shapes/#non-canonical-date-time-strings).
 
 ### BigInts
 
@@ -99,14 +99,16 @@ One byte, `[1]` or `[0]`. Anything else is a `DecodeError`.
 
 ### Strings and bytes
 
-A varint **byte** length, then the contents. Strings are UTF-8. `m.bytes()` is raw.
+A varint length in bytes, then the contents. Strings are UTF-8. `m.bytes()` is raw.
 
-```
+```text
 "ab"               -> [2, 97, 98]
 Uint8Array([9, 9]) -> [2, 9, 9]
 ```
 
-UTF-8 decoding is strict: an invalid sequence is a `DecodeError`, not a `U+FFFD` replacement character. On Node the faster `Buffer.prototype.utf8Slice` substitutes instead of failing, so any result containing `U+FFFD` is decoded a second time strictly for a definitive answer. A string that legitimately contains `U+FFFD` round-trips. A malformed payload throws.
+UTF-8 decoding is strict: an invalid sequence is a `DecodeError`, not a `U+FFFD` replacement character. On Node the faster `Buffer.prototype.utf8Slice` substitutes instead of failing, so any result containing `U+FFFD` is decoded a second time strictly for a definitive answer.
+
+A string that legitimately contains `U+FFFD` round-trips. A malformed payload throws.
 
 **String content stays where its field is.** Writing every string into one contiguous region, as msgpackr's `bundleStrings` does, would buy about 32% of decode on document-shaped payloads. But it would change the bytes of every existing shape, still not overtake `bundleStrings`, and keep the whole region alive in memory for as long as any field decoded from it. If it is ever offered it will be an opt-in wrapper alongside [`fingerprinted()`](/versioning/fingerprinting/).
 
@@ -114,22 +116,22 @@ UTF-8 decoding is strict: an invalid sequence is a `DecodeError`, not a `U+FFFD`
 
 Zero bytes. The schema already knows the value.
 
-```
+```text
 m.literal("x") with "x" -> []
 ```
 
 ### Enums
 
-The index of the value in **sorted** order, as a varint. Members are deduplicated and sorted first, so declaration order does not matter.
+The index of the value in sorted order, as a varint. Members are deduplicated and sorted first, so declaration order does not matter.
 
-```
+```text
 m.enum(["M", "F", "X"])  // sorted to ["F", "M", "X"]
 "X" -> [2]
 ```
 
 Members do not have to be strings. An all-string enum sorts by value. Any other enum sorts by each member's JSON text, because `<` cannot order mixed types consistently. Either way a member costs one byte until there are 128 of them: a numeric enum is an index, not a number.
 
-An index past the last member is a `DecodeError`. Adding a member shifts every index at or after it; see [Wire Fingerprints](/versioning/fingerprinting/).
+An index past the last member is a `DecodeError`. Adding a member shifts every index at or after it; see [Wire fingerprints](/versioning/fingerprinting/).
 
 ## Collections
 
@@ -137,15 +139,15 @@ An index past the last member is a `DecodeError`. Adding a member shifts every i
 
 A varint element count, then the elements back to back. Order is never changed.
 
-```
+```text
 [1, 2, 3] -> [3, 1, 2, 3]
 ```
 
-The decoder refuses a count larger than the remaining input could satisfy, before allocating. See [Hostile Input](/hostile-input/).
+The decoder refuses a count larger than the remaining input could satisfy, before allocating. See [Hostile input](/hostile-input/).
 
 When the schema fixes the count (`minItems` equal to `maxItems`), the varint is left out and the array is written like a tuple. The count is still checked against the remaining input, because a schema may have been fetched rather than written by hand.
 
-```
+```text
 z.array(z.uint32()).length(3) with [1, 2, 3] -> [1, 2, 3]
 ```
 
@@ -153,15 +155,15 @@ z.array(z.uint32()).length(3) with [1, 2, 3] -> [1, 2, 3]
 
 Elements only. The length comes from the schema.
 
-```
+```text
 m.tuple([m.uint(), m.boolean()]) with [7, true] -> [7, 1]
 ```
 
 Because the length is not on the wire, a tuple *may* contain zero-width elements where an array may not.
 
-A **rest** element is the part whose count is not in the schema, so it is written the way an array would be: the fixed items bare, then a varint count and the remainder.
+A rest element is the part whose count is not in the schema, so it is written the way an array would be: the fixed items bare, then a varint count and the remainder.
 
-```
+```text
 z.tuple([z.string()], z.int()) with ["a", 1, 2] -> [1, 97, 2, 2, 4]
                                                    └─ "a" ┘  │  └─ 1, 2 as ZigZag
                                                              └─ two rest elements
@@ -169,15 +171,15 @@ z.tuple([z.string()], z.int()) with ["a", 1, 2] -> [1, 97, 2, 2, 4]
 
 ### Sets
 
-A varint element count, then the elements in **iteration order**. Byte-identical to an array of the same elements.
+A varint element count, then the elements in iteration order. Byte-identical to an array of the same elements.
 
-```
+```text
 m.set(m.string()) with new Set(["a", "b"]) -> [2, 1, 97, 1, 98]
 ```
 
 A Set and an array therefore cost the same and write the same payload. What separates them is what they decode to, and their [fingerprint](/versioning/fingerprinting/): the signature token is `{ set: T }` rather than `{ array: T }`, on purpose, so a payload written as one is never read back as the other.
 
-A **duplicate element** is refused on decode. `new Set` would merge the pair, and the value would then re-encode to one element for a payload that declared two, breaking the one-value-one-encoding rule every other shape keeps. Only a primitive can trip this, since every decoded object is a fresh reference.
+A duplicate element is refused on decode. `new Set` would merge the pair, and the value would then re-encode to one element for a payload that declared two, breaking the one-value-one-encoding rule every other shape keeps. Only a primitive can trip this, since every decoded object is a fresh reference.
 
 There is no fixed-count form, so the element must occupy at least one byte, and the count is checked against the remaining input before anything is allocated, exactly as an array's is.
 
@@ -194,16 +196,16 @@ new Map([["x", 1], ["y", 300]]) -> [2, 1, 120, 1, 1, 121, 172, 2]
                                     └─ two entries
 ```
 
-Unlike a record, a Map does not sort its keys or refuse an order. Its keys are not restricted to strings, so there is no single order to canonicalize to. A **duplicate key** is refused on decode for the Set's reason. An entry must occupy at least one byte, counting key and value together.
+Unlike a record, a Map does not sort its keys or refuse an order. Its keys are not restricted to strings, so there is no single order to canonicalize to. A duplicate key is refused on decode for the Set's reason. An entry must occupy at least one byte, counting key and value together.
 
 ## Objects and records
 
 ### Objects
 
-1. A **presence bitmap** for the optional fields, `ceil(n / 8)` bytes. Left out entirely when there are none.
+1. A presence bitmap for the optional fields, `ceil(n / 8)` bytes. Left out entirely when there are none.
 2. The field values in canonical key order, skipping absent optionals.
 
-A field's bit is its rank **among the optional fields**, low bit first.
+A field's bit is its rank among the optional fields, low bit first.
 
 ```ts
 m.object({ a: m.uint().optional(), b: m.uint() })
@@ -214,14 +216,14 @@ m.object({ a: m.uint().optional(), b: m.uint() })
 
 Nine optional fields make the bitmap two bytes:
 
-```
+```text
 9 optional, all absent           -> [0, 0]
 9 optional, all present, each 1  -> [255, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 ```
 
 Field order is the rank of the field name in ascending UTF-16 code unit order. The encoder applies it. It is never declared.
 
-**The bitmap width is fixed by the schema.** A ninth optional field adds a byte, so earlier payloads need their original codec. See [Schema Changes](/versioning/schema-evolution/).
+**The bitmap width is fixed by the schema.** A ninth optional field adds a byte, so earlier payloads need their original codec. See [Schema changes](/versioning/schema-evolution/).
 
 ### Records (keys the schema does not name)
 
@@ -236,7 +238,7 @@ z.record(z.string(), z.int())
                   └─ two entries
 ```
 
-Keys are the one thing here that costs what it does in JSON, because they are data rather than schema. They are written in ascending UTF-16 code unit order, and the decoder **refuses** a payload whose keys arrive in any other order, which also rules out a repeated key. Sorting on the way in instead would let two payloads decode to the same record.
+Keys are the one thing here that costs what it does in JSON, because they are data rather than schema. They are written in ascending UTF-16 code unit order, and the decoder refuses a payload whose keys arrive in any other order, which also rules out a repeated key. Sorting on the way in instead would let two payloads decode to the same record.
 
 ### Open objects
 
@@ -260,7 +262,7 @@ An object with nothing extra still pays the one-byte count. That is what an open
 
 One marker byte, then the value if there is one.
 
-```
+```text
 null -> [0]
 5    -> [1, 5]
 ```
@@ -282,7 +284,7 @@ z.discriminatedUnion("kind", [
                            └─ branch index; `kind` itself writes nothing
 ```
 
-The index is the only byte added, and it usually replaces one. The discriminant is a literal inside its branch, and a literal writes nothing. A tagged format pays for both the tag and the field. shorn pays for neither, only the index.
+The index is the only byte added, and it stands in for the discriminant field. The discriminant is a literal inside its branch, and a literal writes nothing. A tagged format pays for both the tag and the field. shorn pays for neither, only the index.
 
 Branches are ordered by their discriminant value, so reordering the schema does not move the wire. An index past the last branch is a `DecodeError`. Adding a branch shifts every index at or after it, exactly as adding an enum member does.
 
@@ -299,7 +301,7 @@ z.union([z.string(), z.number()])
 42   -> [0, 0, 0, 0, 0, 0, 0, 69, 64]
 ```
 
-Branches are ordered by **type name** (`array`, `boolean`, `null`, `number`, `object`, `string`), so declaration order does not reach the wire, exactly as with a discriminant. The decoder cannot tell the two union forms apart and does not need to. Both read an index and then the branch.
+Branches are ordered by type name (`array`, `boolean`, `null`, `number`, `object`, `string`), so declaration order does not reach the wire, exactly as with a discriminant. The decoder cannot tell the two union forms apart and does not need to. Both read an index and then the branch.
 
 `integer` is not a name on that list. It folds into `number`, because nothing about a value says which of the two it was declared as. A union that would need to tell them apart is refused rather than given an index it cannot assign.
 
@@ -317,9 +319,11 @@ const Node = z.object({ value: z.string(), get children() { return z.array(Node)
                                                                        └─ one child, inline
 ```
 
-The recursion is bounded by whatever lets it stop: an empty array here, a `null` back edge in a linked list. Depth is capped at 256 levels on both sides, since a recursive schema takes its nesting from the payload rather than from the schema; see [Hostile Input](/hostile-input/).
+The recursion is bounded by whatever lets it stop: an empty array here, a `null` back edge in a linked list. Depth is capped at 256 levels on both sides, since a recursive schema takes its nesting from the payload rather than from the schema; see [Hostile input](/hostile-input/).
 
-A `$ref` reached twice but never through itself is not a cycle. It is inlined, so a shared definition writes and fingerprints exactly as it would written out in full. The exception is a copy of a *recursive* definition, which is folded back onto that definition instead. Same bytes either way. The fold is what keeps one recursive type on one fingerprint across validators that spell it differently.
+A `$ref` reached twice but never through itself is not a cycle. It is inlined, so a shared definition writes and fingerprints exactly as it would written out in full.
+
+The exception is a copy of a *recursive* definition, which is folded back onto that definition instead. Same bytes either way. The fold is what keeps one recursive type on one fingerprint across validators that spell it differently.
 
 ### Dynamic values
 
@@ -336,7 +340,7 @@ Where a schema declines to describe a value (`z.any()`, `z.unknown()`, an empty 
 | 6 | array | varint count + values |
 | 7 | object | varint count + key/value pairs, as a record |
 
-```
+```text
 null    -> [0]
 true    -> [2]
 5       -> [3, 10]

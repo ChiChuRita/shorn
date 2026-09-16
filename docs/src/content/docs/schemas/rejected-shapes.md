@@ -1,5 +1,5 @@
 ---
-title: Rejected Shapes
+title: Rejected shapes
 description: Every shape shorn refuses, the error it throws, and what to do instead.
 ---
 
@@ -134,7 +134,7 @@ Same reason as [uppercase UUIDs](#uppercase-uuids). Call `toISOString()` at the 
 
 > Duplicate Map key
 
-Refused on **decode**. `new Set` would merge the pair, so the value would re-encode shorter than the payload it came from, and one value would have two encodings. No encoder shorn ships writes such a payload. A hand-made or corrupted one can.
+Refused on decode. `new Set` would merge the pair, so the value would re-encode shorter than the payload it came from, and one value would have two encodings. No encoder shorn ships writes such a payload. A hand-made or corrupted one can.
 
 ## Zero-width `Set` elements and `Map` entries
 
@@ -156,7 +156,9 @@ An enum whose members are not all strings orders them by their JSON text, becaus
 
 Encoding `-0` against an enum that *does* list `0` is refused too, at encode time rather than at build: it would go out as the `0` member's index and come back as `0`. `m.literal(0).encode(-0)` is refused for the same reason.
 
-The same four values as a **single literal** are not caught, because the validator's JSON Schema has already lost them. `z.literal(NaN)` and both infinities arrive as `{ type: "number", const: null }`, and `z.literal(-0)` as `{ const: 0 }`. The first three build a codec that refuses every value it is given and decodes to `null`. `-0` round-trips to `0`. Do not use a non-finite number or `-0` as a literal.
+The same four values as a single literal are not caught, because the validator's JSON Schema has already lost them. `z.literal(NaN)` and both infinities arrive as `{ type: "number", const: null }`, and `z.literal(-0)` as `{ const: 0 }`.
+
+The first three build a codec that refuses every value it is given and decodes to `null`. `-0` round-trips to `0`. Do not use a non-finite number or `-0` as a literal.
 
 ## Arrays of zero-width elements
 
@@ -166,7 +168,7 @@ z.array(z.tuple([]));
 z.array(z.object({}));
 ```
 
-An array element must be able to use at least one byte. Otherwise a tiny payload could declare a million elements without providing any element data, and the decoder could not bound the allocation. A **tuple** may contain zero-width elements because its length comes from the schema.
+An array element must be able to use at least one byte. Otherwise a tiny payload could declare a million elements without providing any element data, and the decoder could not bound the allocation. A tuple may contain zero-width elements because its length comes from the schema.
 
 An array whose count the schema fixes may too, for the same reason, but only up to 1,000,000 slots in total, counted through nesting and through any zero-width object or tuple in between. Past that the same message refuses it. A fixed count needs no payload at all to satisfy, so nothing but the schema can bound it.
 
@@ -175,7 +177,7 @@ z.array(z.literal("x")).length(1_000_000);                     // fine: a millio
 z.array(z.array(z.literal("x")).length(1000)).length(1000);     // refused: a million and one
 ```
 
-See [Hostile Input](/hostile-input/).
+See [Hostile input](/hostile-input/).
 
 If you need a count of a constant, encode the count: `z.int().nonnegative()`.
 
@@ -195,7 +197,7 @@ Two markers for the same value would make `[0]` and `[1, 0]` decode to the same 
 
 Drop the redundant wrapper. Mixing the two once is supported and means something: `m.string().optional().nullable()` tells absent apart from null.
 
-A **validator schema** that spells the same thing twice does not hit this error. `z.any().nullable()`, `z.null().nullable()` and `z.literal(null).nullable()` all compile, because `compile()` sees the inner shape already holds `null` and drops the wrapper. This error is about a marker you stacked yourself, on an `m` schema or on a codec `compile()` already returned.
+A validator schema that spells the same thing twice does not hit this error. `z.any().nullable()`, `z.null().nullable()` and `z.literal(null).nullable()` all compile, because `compile()` sees the inner shape already holds `null` and drops the wrapper. This error is about a marker you stacked yourself, on an `m` schema or on a codec `compile()` already returned.
 
 ## Missing structural interface
 

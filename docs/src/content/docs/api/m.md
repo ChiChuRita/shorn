@@ -1,5 +1,5 @@
 ---
-title: m Builders
+title: m builders
 description: Reference for the low-level wire builders, Reader and Writer, and Infer.
 ---
 
@@ -40,7 +40,7 @@ It is an escape hatch, not a replacement for your validator. `m` checks only wha
 m.date(): Schema<Date>;
 ```
 
-Writes the `Date`'s epoch milliseconds as a ZigZag varint, exactly what `m.int()` writes. An **Invalid Date** is an `EncodeError`, because its time value is `NaN`. So is any other value, including a plain millisecond number. On decode, a count outside ±8.64e15 is a `DecodeError`, because that is where a `Date`'s range ends and no `Date` corresponds to it.
+Writes the `Date`'s epoch milliseconds as a ZigZag varint, exactly what `m.int()` writes. An Invalid Date is an `EncodeError`, because its time value is `NaN`. So is any other value, including a plain millisecond number. On decode, a count outside ±8.64e15 is a `DecodeError`, because that is where a `Date`'s range ends and no `Date` corresponds to it.
 
 A `Date` from another realm, such as `node:vm`, an iframe or a worker, is accepted through a tag check when `instanceof` fails.
 
@@ -50,7 +50,7 @@ A `Date` from another realm, such as `node:vm`, an iframe or a worker, is accept
 m.bigint(): Schema<bigint>;
 ```
 
-Any width up to a 64 MiB magnitude, the same ceiling `m.bytes()` has. Zero is one byte. The encoding is canonical on both sides: a header of `1`, which would mean negative zero, and a magnitude with a zero high byte are both refused on decode as `Non-canonical bigint`. See [Byte Layout](/wire-format/layout/#bigints) for the table.
+Any width up to a 64 MiB magnitude, the same ceiling `m.bytes()` has. Zero is one byte. The encoding is canonical on both sides: a header of `1`, which would mean negative zero, and a magnitude with a zero high byte are both refused on decode as `Non-canonical bigint`. See [Byte layout](/wire-format/layout/#bigints) for the table.
 
 ## `m.literal(value)`
 
@@ -66,7 +66,7 @@ A literal uses zero bytes. Literals cannot be array elements, because the decode
 m.enum<const T extends readonly [EnumValue, ...EnumValue[]]>(values: T): Schema<T[number]>;
 ```
 
-A varint index into the **sorted, deduplicated** member list, so declaration order has no effect on the bytes. At least one member is required. An index past the last member is a `DecodeError`.
+A varint index into the sorted, deduplicated member list, so declaration order has no effect on the bytes. At least one member is required. An index past the last member is a `DecodeError`.
 
 Members may be any scalar (string, number, boolean, or null), so `m.enum([200, 404])` is a one-byte index rather than two floats. An all-string enum sorts by value. Any other enum sorts by each member's JSON text, because `<` cannot order mixed types consistently. An enum that lists `null` cannot be wrapped in `nullable()`, since that would give null two encodings.
 
@@ -78,7 +78,9 @@ m.array<T>(item: Schema<T>, length?: number): Schema<T[]>;
 
 Writes a varint count, then the elements in order. Building the codec fails if `item` can occupy zero bytes. Arrays are limited to 1,000,000 elements, and an impossible count is rejected before anything is allocated.
 
-Pass `length` for a fixed-size array. The count then comes from the schema and is not written, and the element may be zero-width, exactly as in a tuple. `compile` selects this form when `minItems` equals `maxItems`. A value whose length disagrees is an `EncodeError`. With a zero-width element nothing in the payload bounds the allocation, so construction fails if the total number of slots the schema can fill from an empty payload, multiplied through nesting, passes 1,000,000. See [Hostile Input](/hostile-input/).
+Pass `length` for a fixed-size array. The count then comes from the schema and is not written, and the element may be zero-width, exactly as in a tuple. `compile` selects this form when `minItems` equals `maxItems`. A value whose length disagrees is an `EncodeError`.
+
+With a zero-width element nothing in the payload bounds the allocation, so construction fails if the total number of slots the schema can fill from an empty payload, multiplied through nesting, passes 1,000,000. See [Hostile input](/hostile-input/).
 
 ## `m.set(item)`
 
@@ -90,11 +92,11 @@ A varint count, then the elements in iteration order. Byte-identical to `m.array
 
 Construction fails if `item` can occupy zero bytes, as `m.array` does, and there is no fixed-count form to exempt it:
 
-```
+```text
 Set elements must occupy at least one byte
 ```
 
-Sets are limited to 1,000,000 elements, and an impossible count is rejected before allocation. A **duplicate element** in the payload is a `DecodeError`, because merging it would give one value two encodings.
+Sets are limited to 1,000,000 elements, and an impossible count is rejected before allocation. A duplicate element in the payload is a `DecodeError`, because merging it would give one value two encodings.
 
 ## `m.map(key, value)`
 
@@ -104,7 +106,7 @@ m.map<K, V>(key: Schema<K>, value: Schema<V>): Schema<Map<K, V>>;
 
 A varint count, then each key followed by its value, in iteration order. Byte-identical to `m.array(m.tuple([key, value]))`. The key may be any schema.
 
-An entry must occupy at least one byte, counting **key and value together**. So `m.map(m.literal("x"), m.string())` builds, and `m.map(m.literal("x"), m.literal("y"))` throws `Map entries must occupy at least one byte`. Same 1,000,000 ceiling as a Set, and a **duplicate key** is a `DecodeError` for the same reason.
+An entry must occupy at least one byte, counting key and value together. So `m.map(m.literal("x"), m.string())` builds, and `m.map(m.literal("x"), m.literal("y"))` throws `Map entries must occupy at least one byte`. Same 1,000,000 ceiling as a Set, and a duplicate key is a `DecodeError` for the same reason.
 
 ## `m.tuple(items)`
 
@@ -112,7 +114,7 @@ An entry must occupy at least one byte, counting **key and value together**. So 
 m.tuple<const S extends readonly Schema<unknown>[]>(items: S): Schema<TupleOutput<S>>;
 ```
 
-Elements only. The length comes from the schema and positions are never reordered. A tuple **may** contain zero-width elements, unlike `m.array`.
+Elements only. The length comes from the schema and positions are never reordered. A tuple may contain zero-width elements, unlike `m.array`.
 
 ## `m.object(shape)`
 
@@ -142,7 +144,7 @@ m.object({
 
 A second marker for a value the schema can already produce would give that value two encodings. `[0]` and `[1, 0]` would both decode to `undefined`. shorn refuses this in one of two ways.
 
-**Repeating the same wrapper does nothing.** It returns the identical object, so this is safe in generic code that does not know what it was handed:
+**Repeating the same wrapper does nothing.** It returns the identical object, so this is safe in generic code that does not know what it received:
 
 ```ts
 const a = m.string().optional();
@@ -206,11 +208,11 @@ class Pair extends Schema<[number, number]> {
 
 Set `_minWidth` if the schema may be used as an array element. It is what lets `m.array` reject an impossible count before allocating. A schema with width 0 cannot be an array element.
 
-`reader.bytes(n)` returns a **view over the input**, not a copy. It aliases the caller's `Uint8Array`, so anything you hand out of a custom codec must be copied first with `new Uint8Array(reader.bytes(n))`, which is what `m.bytes()` does. If you only need the values, read them with `byte()` instead and skip the view entirely.
+`reader.bytes(n)` returns a view over the input, not a copy. It aliases the caller's `Uint8Array`, so copy anything a custom codec returns first with `new Uint8Array(reader.bytes(n))`, which is what `m.bytes()` does. If you only need the values, read them with `byte()` instead and skip the view entirely.
 
 This surface is unstable: `_encode`, `_decode`, and `_minWidth` can change in a minor release.
 
-## Types
+## Exported types
 
 ```ts
 type Infer<S extends Schema<unknown>> = S["_output"];
