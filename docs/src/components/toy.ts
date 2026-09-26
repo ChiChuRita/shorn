@@ -106,3 +106,82 @@ export function measure(z: unknown, codec: Codec, schemaSrc: string, payloadSrc:
     roundTrips: again.length === bytes.length && again.every((b, i) => b === bytes[i]),
   };
 }
+
+/**
+ * What a highlighted run is inked as. Named for the colour role rather than the grammar,
+ * because the docs' theme (github-dark) collapses many grammar scopes onto one colour:
+ * numbers, `true`, a `const` binding, and a JSON key are all the same blue there.
+ */
+export type TokenKind = "plain" | "keyword" | "string" | "constant" | "function" | "comment";
+export interface Token {
+  text: string;
+  kind: TokenKind;
+}
+
+// One alternation per language, tried in order at each position. Groups, for TS: comment,
+// string, number, keyword, call (an identifier followed by `(`), literal, identifier,
+// operator. A call is tested before a literal because Shiki inks `z.null()` as a call.
+const TS_RULES =
+  /(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$))|("(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?|`(?:[^`\\]|\\[\s\S])*`?)|(\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?n?\b)|\b(const|let|var|export|import|from|as|new|return|typeof|function)\b|([A-Za-z_$][\w$]*)(?=\s*\()|\b(true|false|null|undefined)\b|([A-Za-z_$][\w$]*)|(=>|\.\.\.|[=!<>|&?+\-*%]+)/g;
+
+// For JSON: a string, then whether a colon follows it (which makes it a key), a number,
+// a literal.
+const JSON_RULES =
+  /("(?:[^"\\\n]|\\.)*"?)(\s*:)?|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|\b(true|false|null)\b/g;
+
+/**
+ * Split source into coloured runs for the playground's editors, matching the colours
+ * Shiki's github-dark gives the same text in the docs.
+ *
+ * Not Shiki itself: the TypeScript grammar alone is several hundred KB, for two small
+ * text boxes that only ever hold a Zod schema and a record. This covers what those hold
+ * and degrades to plain text for anything it does not. Lossless: the runs concatenate
+ * back to `src` exactly, which is what lets them sit under the text box glyph for glyph.
+ */
+export function tokenize(src: string, lang: "ts" | "json"): Token[] {
+  const out: Token[] = [];
+  const push = (text: string, kind: TokenKind) => {
+    if (text === "") return;
+    const last = out[out.length - 1];
+    if (last?.kind === kind) last.text += text;
+    else out.push({ text, kind });
+  };
+
+  const rules = lang === "ts" ? TS_RULES : JSON_RULES;
+  rules.lastIndex = 0;
+  let at = 0;
+  // The last keyword seen, so the name after `const` can be inked as a binding.
+  let binding = false;
+  for (let m = rules.exec(src); m; m = rules.exec(src)) {
+    push(src.slice(at, m.index), "plain");
+    at = m.index + m[0].length;
+    if (lang === "json") {
+      if (m[1] !== undefined) {
+        push(m[1], m[2] === undefined ? "string" : "constant");
+        push(m[2] ?? "", "plain");
+      } else push(m[0], "constant");
+      continue;
+    }
+    const [, comment, string, number, keyword, call, literal, ident] = m;
+    const kind: TokenKind =
+      comment !== undefined
+        ? "comment"
+        : string !== undefined
+          ? "string"
+          : number !== undefined || literal !== undefined
+            ? "constant"
+            : keyword !== undefined
+              ? "keyword"
+              : call !== undefined
+                ? "function"
+                : ident !== undefined
+                  ? binding
+                    ? "constant"
+                    : "plain"
+                  : "keyword";
+    binding = keyword === "const" || keyword === "let" || keyword === "var";
+    push(m[0], kind);
+  }
+  push(src.slice(at), "plain");
+  return out;
+}
