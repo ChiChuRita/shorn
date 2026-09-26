@@ -61,16 +61,17 @@ export function canonicalEnumOrder(values: readonly EnumValue[]): EnumValue[] {
  * and not written back.
  */
 function isUint8Array(value: unknown): value is Uint8Array {
-  return value instanceof Uint8Array || hasTag(value, "[object Uint8Array]");
+  return value instanceof Uint8Array || tagOf(value) === "Uint8Array";
 }
 
 /**
  * The realm-tolerant half of a type test, for the reason above: a Date, Set or Map
  * from another realm fails `instanceof` too. Callers try `instanceof` first, so a
- * same-realm value never reaches the `toString` call.
+ * same-realm value never reaches the `toString` call. The tag's name rather than the
+ * whole `[object …]` string, so `decode` can say what it was handed instead of bytes.
  */
-function hasTag(value: unknown, tag: string): boolean {
-  return Object.prototype.toString.call(value) === tag;
+function tagOf(value: unknown): string {
+  return Object.prototype.toString.call(value).slice(8, -1);
 }
 
 /**
@@ -84,11 +85,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isSet(value: unknown): value is Set<unknown> {
-  return value instanceof Set || hasTag(value, "[object Set]");
+  return value instanceof Set || tagOf(value) === "Set";
 }
 
 function isMap(value: unknown): value is Map<unknown, unknown> {
-  return value instanceof Map || hasTag(value, "[object Map]");
+  return value instanceof Map || tagOf(value) === "Map";
 }
 
 const textEncoder = new TextEncoder();
@@ -990,7 +991,21 @@ export abstract class Schema<T> {
    */
   decode(value: Uint8Array): T {
     if (!isUint8Array(value)) {
-      throw new DecodeError(`Expected a Uint8Array, received ${typeof value}`, 0);
+      // An object goes by its tag, not `typeof`, which called an ArrayBuffer, a DataView
+      // and `null` all "object". An ArrayBuffer is what `Response.arrayBuffer()` and a
+      // WebSocket with `binaryType = "arraybuffer"` hand over, and `MessageEvent.data` is
+      // `any`, so no type error stops one on the way here. Refused rather than wrapped:
+      // taking one would be new API. The remedy lives in `api/errors.md`, not here: a
+      // "wrap it in new Uint8Array(…)" clause for buffers and views measured 51 gzip
+      // bytes on the m-only bundle against 14 for the name alone. The cheapest remedy,
+      // 24 bytes, appends a shorter clause to every object, and then misleads for a Blob
+      // or a Promise.
+      throw new DecodeError(
+        `Expected a Uint8Array, received ${
+          value === null ? value : typeof value === "object" ? tagOf(value) : typeof value
+        }`,
+        0,
+      );
     }
     // Not pooled, though `Writer` is. Reusing one Reader across decodes was measured at
     // -35% on a person decode: the `try`/`finally` a pool needs to return it blocks V8
@@ -1400,7 +1415,7 @@ export class DateSchema extends Schema<Date> {
     if (
       !(
         value instanceof Date ||
-        (hasTag(value, "[object Date]") && typeof (value as Date).getTime === "function")
+        (tagOf(value) === "Date" && typeof (value as Date).getTime === "function")
       )
     ) {
       throw new EncodeError(`Expected a Date, received ${text(value)}`);
