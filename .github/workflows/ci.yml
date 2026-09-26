@@ -5,12 +5,18 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Weekly, so "Vendors at latest" meets a vendor release within days rather than on the
+  # next push, however long that is. Off the hour, when scheduled runs queue longest.
+  schedule:
+    - cron: "23 5 * * 1"
 
 permissions:
   contents: read
 
+# Keyed by event as well as ref: a scheduled run is on main, so without the event name it
+# would cancel a push run in progress there, or be cancelled by one.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 # Actions are pinned to commit SHAs. A major tag like @v4 moves, and a compromised
