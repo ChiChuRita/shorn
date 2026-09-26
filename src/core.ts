@@ -605,7 +605,9 @@ export function encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, of
   } finally {
     // A target larger than the pool keeps, or a buffer grown past one, is let go for
     // `reset`'s reason: a one-off frame must not stay pinned to a module-level Writer.
-    if (open.buffer !== target || target.length > MAX_RETAINED_BUFFER_BYTES) {
+    // Measured by its ArrayBuffer, not its own length: a 16-byte view of a 256 MB buffer
+    // held all 256 MB here until the next call brought a different target.
+    if (open.buffer !== target || target.buffer.byteLength > MAX_RETAINED_BUFFER_BYTES) {
       open.buffer = new Uint8Array(0);
       open.view = undefined;
     }
