@@ -122,7 +122,9 @@ This Standard Schema validates asynchronously; use encodeAsync/decodeAsync,
 which accept either this schema or a codec built from it.
 ```
 
-Every codec that reaches this error can follow the remedy, fingerprinted ones included. A codec with no validator at all gets a different message:
+Every codec that reaches this error can follow the remedy, fingerprinted ones included. The message can also mean a Zod refinement threw: Zod answers with a Promise whenever one does, so a synchronous schema lands here too. `encodeAsync` then reports the refinement's own error, with the original as `cause`.
+
+A codec with no validator at all gets a different message:
 
 ```text
 This codec has no validator to await; async validation needs a codec from
