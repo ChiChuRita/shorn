@@ -563,11 +563,11 @@ interface OpenWriter {
  * Encodes into a buffer the caller owns and returns the offset just past the last byte
  * written, so consecutive calls pack a frame: `end = encodeInto(codec, next, frame, end)`.
  * The bytes are exactly `codec.encode(value)`'s. What is saved is the output array and
- * the copy into the frame that follows it, which together were about half of a small
- * encode: 48 ns to 23 ns on the Person fixture, and a 100-message frame in 40% of the
- * time. A free function rather than a method on `Schema`, for `encodeAsync`'s reason:
- * a method is never tree-shaken, and most callers hand `encode()`'s array straight to
- * a send.
+ * the copy into the frame that follows it. The array alone was 39% of a small encode,
+ * 46 ns to 28 ns on the Person fixture, per the `person encode` and `person encodeInto`
+ * rows of `bench/baseline.json`. A free function rather than a method on `Schema`, for
+ * `encodeAsync`'s reason: a method is never tree-shaken, and most callers hand
+ * `encode()`'s array straight to a send.
  *
  * Throws `EncodeError` when the value does not fit, and `target` may then hold a
  * partial write from `offset` on. Decoding needs no counterpart: `decode` takes any

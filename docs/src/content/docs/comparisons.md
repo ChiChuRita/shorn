@@ -31,7 +31,7 @@ Send it as `Content-Type: application/octet-stream`. `Date`, `bigint`, `Map` and
 
 Gzipping the JSON is not the same saving. A compressor shrinks repeated content. shorn removes structure before any compressor runs, and the two stack.
 
-In the [100,000-event benchmarks](/performance/size/#compressed-100000-events), gzipped shorn is 27% smaller than gzipped JSON on repetitive data and 14% smaller on high-entropy data, because gzipped JSON still spends bits on field names shorn never wrote. Gzip also costs 48 to 99 ms of CPU per batch there, while shorn's saving is free, and it applies to payloads far too small to be worth compressing at all.
+In the [100,000-event benchmarks](/performance/size/#compressed-100000-events), gzipped shorn is 27% smaller than gzipped JSON on repetitive data and 14% smaller on high-entropy data, because gzipped JSON still spends bits on field names shorn never wrote. Gzip also costs 48 to 101 ms of CPU per batch there, while shorn's saving is free, and it applies to payloads far too small to be worth compressing at all.
 
 Stay on JSON when other languages or generic tools have to read the payload, when humans need to inspect or edit it directly, when streaming matters, or when the traffic is too small for another format to pay for itself.
 

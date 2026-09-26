@@ -119,7 +119,8 @@ export class FingerprintedSchema<T> extends Schema<T> {
  * Structural changes only: refinements, validator choice and conversion functions are
  * outside the wire shape and need an application-level version.
  *
- * Costs the fingerprint's bytes plus roughly 1.5ns per encode and 6.3ns per decode.
+ * Costs the fingerprint's bytes, plus one prefix write per encode and one prefix compare
+ * per decode.
  * Requires a `compile()` codec; the low-level `m` API is the raw-wire escape hatch
  * and stays unframed.
  */
