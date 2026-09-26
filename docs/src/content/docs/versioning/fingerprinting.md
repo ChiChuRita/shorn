@@ -24,9 +24,7 @@ The fingerprint does not change for refinements, property declaration order, str
 
 Nor does the fingerprint change with how a union is written: flat or nested, as `anyOf` or a `type` array, as literals or as an enum, with `.nullable()` or a `null` branch. One union type has one wire shape, so it has one fingerprint.
 
-Validator independence holds for recursive schemas too, even though validators spell them differently (Zod points the cycle at the root; Valibot inlines the root and repeats it under `$defs`), because a root that merely duplicates a definition is folded back onto it.
-
-**One known exception:** two *mutually* recursive definitions are not deduplicated, so a mutually recursive type may fingerprint differently across validators. Keep both codecs, or write that type in one validator only.
+Recursive schemas get the same guarantee, although validators spell them differently. Zod points a `$ref` at a definition from wherever the type is used, while Valibot inlines one copy there. Which of two mutually recursive types becomes the definition depends on the validator, and in Zod on which field is declared first. shorn reads the definitions as one graph, merges any two nodes that unfold to the same type, and numbers what is left from the root outward. One recursive type therefore has one fingerprint, however it arrives.
 
 ## Choose a width
 

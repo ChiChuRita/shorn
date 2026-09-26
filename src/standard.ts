@@ -664,6 +664,9 @@ function resolvePointer(document: JsonSchema, pointer: string): JsonSchema {
  * the same number. A reference to something already finished is simply that shape again,
  * a shared subtree, not a recursive one, so it is inlined, which keeps a
  * non-recursive `$ref` out of the signature and off `LazySchema`'s indirection.
+ *
+ * The numbering is the walk's own, and depends on where the walk entered each cycle;
+ * `canonicalDocument` replaces it with one that does not.
  */
 function refShape(pointer: string, ctx: RefContext): WireShape {
   const known = ctx.shapes.get(pointer);
@@ -694,25 +697,134 @@ function refShape(pointer: string, ctx: RefContext): WireShape {
 }
 
 /**
- * Every child that *is* one of the definitions, replaced by a reference to it.
+ * A recursive document in the one form its type has, whichever type the walk met first.
  *
- * The top of `shape` is deliberately not tested: a definition's own body is equal to
- * itself, and folding that would leave a definition standing for nothing but its own
- * back-edge. Callers that need the top tested compare it themselves.
+ * `refShape` numbers a definition wherever a cycle first closes, and where that is
+ * depends on the spelling: zod points a `$ref` at a definition from wherever the type is
+ * used while valibot inlines one unrolling there, and a zod object declaring `b` before
+ * `a` enters a mutual recursion at the other type. Same cycle, same bytes, different
+ * signatures, and `fingerprinted()` then refused payloads it could decode. Folding one
+ * definition's copy back onto another cannot settle it: the two definitions are the one
+ * cycle entered at different types, and neither is a subtree of the other.
+ *
+ * So the root and the definitions are read as one graph: every object and array in them
+ * a node, and a `{ ref }` not a node but an edge to that definition's body. The graph is
+ * minimized. Nodes start in classes by their own text with their children left out, and
+ * a class splits by its members' children's classes until no class splits: two nodes
+ * still sharing a class unfold to the same infinite tree. The classes are then emitted
+ * from the root, depth first, children in the order the signature writes them. A class
+ * met again while it is still being emitted closes a cycle and becomes the next
+ * definition; a finished definition is a `{ ref }` wherever it appears; any other class
+ * is inlined, from a memo, so a subtree shared many times is built once.
+ *
+ * `rejectUnknown` stays in a node's text although the signature leaves it out: a merged
+ * class compiles once, and two objects differing only in whether they police extra keys
+ * must not compile to one of them.
  */
-function foldDefs(node: unknown, defs: readonly string[], child = false): unknown {
-  if (typeof node !== "object" || node === null) return node;
-  if (child) {
-    // A shape's JSON text is what the signature is taken from, so comparing the text is
-    // comparing the shape. Rebuilt key by key rather than by variant: a `WireShape` is
-    // plain JSON either way, and the walk costs a fifth of the bytes the variants did.
-    const index = defs.indexOf(JSON.stringify(node));
-    if (index >= 0) return { ref: index };
+function canonicalDocument(root: WireShape, defs: readonly WireShape[]): WireDocument {
+  const nodes: object[] = [];
+  const labels: string[] = [];
+  const edges: number[][] = [];
+  const ids = new Map<object, number>();
+  const isNode = (value: unknown): value is object => typeof value === "object" && value !== null;
+  const visit = (start: object): number => {
+    let node = start;
+    for (let hops = 0; "ref" in node; hops++) {
+      // A definition whose body is itself a reference: a `$ref` to a `$ref`, round in a
+      // circle with no schema anywhere on it, as `{ "$ref": "#" }` alone is. It described
+      // no value, and compiled to a codec that failed on first use.
+      if (hops > defs.length) throw new EncodeError("Unsupported Standard JSON Schema node");
+      node = defs[(node as { readonly ref: number }).ref] as object;
+    }
+    let id = ids.get(node);
+    if (id !== undefined) return id;
+    ids.set(node, (id = nodes.length));
+    nodes.push(node);
+    // Every child written as `{}`, which no scalar a shape holds is written as.
+    labels.push(JSON.stringify(node, (key, value) => (key !== "" && isNode(value) ? {} : value)));
+    const children: number[] = [];
+    edges.push(children);
+    for (const value of Object.values(node)) if (isNode(value)) children.push(visit(value));
+    return id;
+  };
+  const top = visit(root as object);
+
+  // Refined incrementally: a node can split from its class only when one of its children
+  // has just changed class, so each round reads those nodes alone, against the classes
+  // as they stood when the round began. Re-reading every node every round made a cycle
+  // of n alike links ending in one odd link quadratic, n rounds of n nodes: 200 links
+  // took 69 ms that way, against 37 for the fold this replaced and 3 for this. The
+  // difference costs 121 gzip bytes, and a fetched document can be that cycle.
+  const seen = new Map<string, number>();
+  const classes = labels.map((label) => {
+    let cls = seen.get(label);
+    if (cls === undefined) seen.set(label, (cls = seen.size));
+    return cls;
+  });
+  const sizes: number[] = [];
+  for (const cls of classes) sizes[cls] = (sizes[cls] ?? 0) + 1;
+  const parents = nodes.map((): number[] => []);
+  edges.forEach((children, id) => children.forEach((child) => parents[child]!.push(id)));
+  for (let dirty = new Set(nodes.keys()); dirty.size > 0; ) {
+    const groups = new Map<string, number[]>();
+    // How many members of each class this round did not read.
+    const unread = new Map<number, number>();
+    for (const id of dirty) {
+      const cls = classes[id]!;
+      const key = `${cls}:${edges[id]!.map((child) => classes[child])}`;
+      (groups.get(key) ?? groups.set(key, []).get(key)!).push(id);
+      unread.set(cls, (unread.get(cls) ?? sizes[cls]!) - 1);
+    }
+    dirty = new Set();
+    for (const group of groups.values()) {
+      // A class read in full keeps its number for its first group. Any other group read
+      // here differs from the members that were not, which all still agree with each
+      // other, so it moves to a class of its own.
+      const cls = classes[group[0]!]!;
+      if (unread.get(cls) === 0) {
+        unread.set(cls, -1);
+        continue;
+      }
+      sizes[cls]! -= group.length;
+      sizes.push(group.length);
+      for (const id of group) {
+        classes[id] = sizes.length - 1;
+        for (const parent of parents[id]!) dirty.add(parent);
+      }
+    }
   }
-  if (Array.isArray(node)) return node.map((value) => foldDefs(value, defs, true));
-  return Object.fromEntries(
-    Object.entries(node).map(([key, value]) => [key, foldDefs(value, defs, true)]),
-  );
+
+  const first: number[] = [];
+  classes.forEach((cls, id) => (first[cls] ??= id));
+  const out: unknown[] = [];
+  // What each class emits as, once it is known: its inlined shape, or the `{ ref }` of the
+  // definition it became. `null` while it is still being emitted.
+  const forms: unknown[] = [];
+  const emit = (cls: number): unknown => {
+    let form = forms[cls];
+    if (form === null) form = forms[cls] = { ref: out.push(undefined) - 1 };
+    if (form !== undefined) return form;
+    forms[cls] = null;
+    const id = first[cls]!;
+    const node = nodes[id]!;
+    const children = edges[id]!;
+    // Loops rather than `map` callbacks, so a level of nesting costs one stack frame here
+    // and a deep schema overflows no sooner than the walk that built it. A node with no
+    // children, an enum's thousand members say, is the one it already was.
+    let shape: unknown = node;
+    if (children.length > 0) {
+      const entries = Object.entries(node);
+      let next = 0;
+      for (const entry of entries) if (isNode(entry[1])) entry[1] = emit(classes[children[next++]!]!);
+      shape = Array.isArray(node) ? entries.map((entry) => entry[1]) : Object.fromEntries(entries);
+    }
+    form = forms[cls];
+    if (form === null) return (forms[cls] = shape);
+    out[(form as { readonly ref: number }).ref] = shape;
+    return form;
+  };
+  const shape = emit(classes[top]!) as WireShape;
+  return out.length === 0 ? shape : { defs: out as WireShape[], root: shape };
 }
 
 /**
@@ -726,32 +838,16 @@ function toWireShape(document: JsonSchema): WireDocument {
   const root = refShape("#", ctx);
   if (ctx.defs.length === 0) return root;
   const defs = ctx.defs as WireShape[];
-
-  // Vendors spell one recursive type two ways, and the two differ by an unrolling: zod
-  // points a `$ref` at the definition from wherever the type is used, while valibot
-  // inlines a copy of it there and refers back from inside that copy. Both write the
-  // same bytes, so folding a copy of a definition back onto the definition is what keeps
-  // the fingerprint from depending on which validator wrote the schema: the promise
-  // made in the schema-changes documentation, and otherwise a `fingerprinted()` codec
-  // rejects a payload it can decode.
-  //
-  // ponytail: definitions are compared as they were built, so a definition holding an
-  // inlined copy of *another* definition is folded against the un-folded text of that
-  // one. Fold to a fixed point if a mutually recursive type ever turns up.
-  const defsJson = defs.map((def) => JSON.stringify(def));
-  const rootJson = JSON.stringify(root);
-  const duplicate = defsJson.indexOf(rootJson);
-  const folded = defs.map((def) => foldDefs(def, defsJson) as WireShape);
-  const foldedRoot: WireShape =
-    duplicate < 0 ? (foldDefs(root, defsJson) as WireShape) : { ref: duplicate };
   // Now, and only now, is `admitsNull` answerable for a back-edge, so this is where the
   // marker `nullableOf` had to guess about comes off. It has to happen at this level
-  // rather than in `compileShape`, because this is the level the signature is taken at.
-  const nulls = defNulls(folded);
-  return {
-    defs: folded.map((def) => dropDefNullable(def, nulls) as WireShape),
-    root: dropDefNullable(foldedRoot, nulls) as WireShape,
-  };
+  // rather than in `compileShape`, because this is the level the signature is taken at,
+  // and before the graph is minimized, so a spelling carrying the redundant marker and
+  // one without it are the same graph by the time it is.
+  const nulls = defNulls(defs);
+  return canonicalDocument(
+    dropDefNullable(root, nulls) as WireShape,
+    defs.map((def) => dropDefNullable(def, nulls) as WireShape),
+  );
 }
 
 /**

@@ -80,7 +80,7 @@ All of these are `EncodeError` instances thrown when the codec is built. See [Re
 | `Map entries must occupy at least one byte` | the same for a Map, counting key and value together |
 | `Unsupported JSON Schema literal` | a literal that is not a string, number, boolean, or null |
 | `Unsupported Standard JSON Schema type X` | a type with no wire shape. `X` is the type keyword, or `object` when the document put an object there |
-| `Unsupported Standard JSON Schema node` | a non-object node where a schema was expected |
+| `Unsupported Standard JSON Schema node` | a non-object node where a schema was expected, or `$ref`s that lead only to each other, such as `{ "$ref": "#" }` alone |
 | `Unsupported JSON Schema reference "…"; only same-document references are supported` | a `$ref` naming another document |
 | `JSON Schema reference "…" does not resolve` | a `$ref` whose pointer names nothing in the document |
 | `Unsupported JSON Schema combinator X` | `allOf`, an intersection the validator did not merge into one schema, or `not` (`z.never()`) |
