@@ -43,7 +43,9 @@ decode<S extends StandardSchemaV1>(schema: S, bytes: Uint8Array, structure: Stan
 
 Reads the structure, then validates. Throws `DecodeError` for malformed bytes and for a validation failure on the way out.
 
-Bytes left over after a complete value are an error. Input that is not a `Uint8Array` produces a `DecodeError` rather than a raw `TypeError`. An array from another realm, such as `node:vm`, an iframe, or jsdom, is accepted through a tag check when `instanceof` fails.
+Bytes left over after a complete value are an error. Input that is not a `Uint8Array` produces a `DecodeError` rather than a raw `TypeError`, and the message names what arrived instead. An array from another realm, such as `node:vm`, an iframe, or jsdom, is accepted through a tag check when `instanceof` fails.
+
+An `ArrayBuffer` is refused too. `fetch().arrayBuffer()` returns one, and so does a WebSocket with `binaryType = "arraybuffer"`, where `event.data` is typed `any`, so TypeScript does not catch it. Wrap it first: `decode(schema, new Uint8Array(event.data))`.
 
 ## `encodeInto`
 
