@@ -99,6 +99,70 @@ jobs:
             console.log("Node", process.version, "ok");
           '
 
+  bun:
+    # The build is platform-neutral ESM, and the library looks two runtime facilities up
+    # rather than importing them: `Buffer.prototype.utf8Slice` and
+    # `String.prototype.isWellFormed`. Bun and Deno provide both through compatibility
+    # layers of their own, so each gets the floor job's treatment: built on Node, then the
+    # same round trip on the runtime's latest release.
+    name: Built artifact on Bun
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+      - name: Round-trip on Bun
+        run: |
+          bun --eval '
+            import { m } from "./dist/index.js";
+            const s = m.object({ id: m.uint(), name: m.string(), tags: m.array(m.string()) });
+            const value = { id: 7, name: "Ada", tags: ["x", "y"] };
+            const got = s.decode(s.encode(value));
+            if (JSON.stringify(got) !== JSON.stringify(value)) throw new Error("round-trip mismatch");
+            try { m.uint().encode(-1); throw new Error("expected a throw"); } catch (e) {
+              if (e.name !== "EncodeError") throw e;
+            }
+            console.log("Bun", Bun.version, "ok");
+          '
+
+  deno:
+    # As the Bun job, under Deno.
+    name: Built artifact on Deno
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: 2.x
+      - name: Round-trip on Deno
+        run: |
+          deno eval '
+            import { m } from "./dist/index.js";
+            const s = m.object({ id: m.uint(), name: m.string(), tags: m.array(m.string()) });
+            const value = { id: 7, name: "Ada", tags: ["x", "y"] };
+            const got = s.decode(s.encode(value));
+            if (JSON.stringify(got) !== JSON.stringify(value)) throw new Error("round-trip mismatch");
+            try { m.uint().encode(-1); throw new Error("expected a throw"); } catch (e) {
+              if (e.name !== "EncodeError") throw e;
+            }
+            console.log("Deno", Deno.version.deno, "ok");
+          '
+
   soak:
     # The deep property run: 50k generated schemas against every invariant. Too slow
     # for `pnpm check` on every save, cheap enough to run on every push.
