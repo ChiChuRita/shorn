@@ -261,7 +261,10 @@ class StandardBackedSchema<T> extends Schema<T> {
     override readonly signature: string,
   ) {
     super();
+    // Every fact a container reads from its children, since this codec can be one: an
+    // `m` array around it that saw no `_slots` skipped the empty-payload slot ceiling.
     this._minWidth = _structural._minWidth;
+    this._slots = _structural._slots;
     // Carried through, or `compile(z.string().nullable()).nullable()` would build a
     // second null marker over one that already exists and give null two encodings.
     this._yieldsNull = _structural._yieldsNull;
