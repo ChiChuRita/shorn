@@ -669,6 +669,28 @@ describe("Standard Schema adapter", () => {
       );
     });
 
+    it("refuses a z.codec(), whose transform decode would run a second time", () => {
+      // Encode writes what the validator returns and decode validates what it reads, so a
+      // codec's forward transform ran twice per round trip: 1_700_000_000 seconds came
+      // back as 1_700_000_000_000_000 and nothing threw. A trim codec came back right,
+      // which is how it went unnoticed.
+      const Seconds = z.codec(z.int(), z.int(), {
+        decode: (seconds) => seconds * 1000,
+        encode: (milliseconds) => milliseconds / 1000,
+      });
+      const refusal = /A z\.codec\(\) would transform twice/;
+      expect(() => compile(Seconds)).toThrow(refusal);
+      expect(() => compile(z.object({ at: Seconds }))).toThrow(refusal);
+
+      // The documented route: compile the wire side and let Zod run both directions.
+      const Rich = z.object({ at: Seconds });
+      const Wire = compile(z.object({ at: z.int() }));
+      const bytes = Wire.encode(z.encode(Rich, { at: 1_700_000_000_000 }));
+      expect(z.decode(Rich, Wire.decode(bytes))).toEqual({ at: 1_700_000_000_000 });
+      // A pipe without a way back is read as before.
+      expect([...compile(z.string().pipe(z.string().min(1))).encode("a")]).toEqual([1, 97]);
+    });
+
     it("keeps refusing what has no wire form at all, in the vendor's own words", () => {
       for (const [schema, reason] of [
         [z.object({ v: z.undefined() }), /undefined cannot be represented in JSON Schema/],

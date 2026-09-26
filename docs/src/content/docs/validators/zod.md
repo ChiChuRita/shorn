@@ -64,7 +64,7 @@ undefined cannot be represented in JSON Schema
 
 `z.literal(undefined)` and a bigint literal get a message of their own, because Zod's converter would otherwise drop the first and write the second as a number.
 
-For a transform, `z.codec()` declares both directions in the schema itself, and shorn encodes the wire side:
+For a transform, `z.codec()` declares both directions in the schema itself. Compile the wire side rather than the codec: passed to `compile()`, a `z.codec()` is refused, because shorn validates on both sides and decode would run its transform a second time.
 
 ```ts
 const Rich = z.object({
