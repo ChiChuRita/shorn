@@ -7,24 +7,28 @@ shorn does not do schema evolution. A positional payload has to be decoded with 
 
 ## Changes that alter the wire shape
 
-Keep every historical codec and dispatch on the fingerprint. Use four bytes for persistent data.
+Keep every historical codec and dispatch on the fingerprint. The default of four bytes is the width for persistent data.
+
+Keep one width per registry. The width is part of what is hashed, so a schema's 3-byte fingerprint is not the start of its 4-byte one, and a payload framed at one width finds nothing under the other. The registry below reads the width from its codecs and refuses one that differs:
 
 ```ts
-const PREFIX_BYTES = 4;
-const v1 = fingerprinted(compile(PersonV1), { bytes: PREFIX_BYTES });
-const v2 = fingerprinted(compile(PersonV2), { bytes: PREFIX_BYTES });
+const v1 = fingerprinted(compile(PersonV1)); // 4 bytes, the default
+const v2 = fingerprinted(compile(PersonV2));
 const codecs = [v1, v2];
+const width = v1.fingerprint.length;
 
 const byWire = new Map<string, (typeof codecs)[number]>();
 for (const codec of codecs) {
-  if (byWire.has(codec.fingerprintHex)) {
-    throw new Error(`Duplicate wire fingerprint ${codec.fingerprintHex}`);
+  const key = codec.fingerprintHex;
+  if (codec.fingerprint.length !== width) {
+    throw new Error(`One fingerprint width per registry: ${key}`);
   }
-  byWire.set(codec.fingerprintHex, codec);
+  if (byWire.has(key)) throw new Error(`Duplicate wire fingerprint ${key}`);
+  byWire.set(key, codec);
 }
 
 function read(payload: Uint8Array) {
-  const key = [...payload.subarray(0, PREFIX_BYTES)]
+  const key = [...payload.subarray(0, width)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
   const codec = byWire.get(key);

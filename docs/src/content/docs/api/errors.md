@@ -181,7 +181,7 @@ All of these are `DecodeError` with an `offset`.
 | --- | --- |
 | `Expected a Uint8Array, received X` | an input that is not a `Uint8Array`; offset 0. `X` is a primitive's type, `null`, or an object's class, such as `ArrayBuffer`, `DataView`, `Array` or `Promise`. Wrap an `ArrayBuffer` as `new Uint8Array(buffer)`, and a `DataView` as `new Uint8Array(view.buffer, view.byteOffset, view.byteLength)`: `new Uint8Array(view)` is empty |
 | `Unexpected trailing data` | bytes remained after a complete value |
-| `Payload was written by a different schema (expected fingerprint XXXXXX)` | the wire fingerprint differs |
+| `Payload was written by a different schema (expected fingerprint XXXXXXXX)` | the wire fingerprint differs |
 | `Unexpected end of input` | a truncated payload |
 | `Non-canonical variable-length integer` | an overlong varint, e.g. `[129, 0]` for `1` |
 | `Invalid variable-length integer` | a varint longer than ten bytes |

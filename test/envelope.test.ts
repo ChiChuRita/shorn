@@ -28,7 +28,7 @@ describe("fingerprint envelope", () => {
   // and invalidate stored data. This vector is what makes that a failing test
   // rather than a support ticket.
   it("pins the canonical fingerprint bytes", () => {
-    expect([...fingerprinted(compile(Person)).fingerprint]).toEqual([103, 205, 41]);
+    expect([...fingerprinted(compile(Person)).fingerprint]).toEqual([151, 255, 80, 109]);
   });
 
   // The retained width seeds the hash, so a narrower prefix is not a truncation of a wider
@@ -197,7 +197,7 @@ describe("fingerprint envelope", () => {
 
   it("names the expected fingerprint so a mismatch is diagnosable", () => {
     const codec = fingerprinted(compile(Person));
-    expect(() => codec.decode(encode(Person, person))).toThrow(/67cd29/);
+    expect(() => codec.decode(encode(Person, person))).toThrow(/97ff506d/);
   });
 
   // The evolution story is dispatch: shorn detects a mismatch and never resolves one,
@@ -205,13 +205,28 @@ describe("fingerprint envelope", () => {
   // stable string key, which `fingerprint` cannot be: it is a fresh array per read.
   it("exposes a hex key a dispatch map can actually use", () => {
     const codec = fingerprinted(compile(Person));
-    expect(codec.fingerprintHex).toBe("67cd29");
+    expect(codec.fingerprintHex).toBe("97ff506d");
     expect(codec.fingerprintHex).toBe(codec.fingerprintHex);
 
     const written = codec.encode(person);
     const byVersion = new Map([[codec.fingerprintHex, codec]]);
-    const key = [...written.subarray(0, 3)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    // Sliced at the codec's own width rather than a number written here: the width is
+    // hashed in, so a key cut at any other width names nothing in the map.
+    const key = [...written.subarray(0, codec.fingerprint.length)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
     expect(byVersion.get(key)?.decode(written)).toEqual(person);
+  });
+
+  it("defaults to the four bytes recommended for anything stored", () => {
+    // Every example passed `{ bytes: 4 }` over a default of 3, and a registry holding both
+    // widths broke: the width is hashed in, so the 3-byte fingerprint of a schema is not
+    // the start of its 4-byte one, and neither key finds the other codec.
+    const byDefault = fingerprinted(compile(Person));
+    expect(byDefault.fingerprint).toHaveLength(4);
+    expect(byDefault.fingerprintHex).toBe(fingerprinted(compile(Person), { bytes: 4 }).fingerprintHex);
+    const three = fingerprinted(compile(Person), { bytes: 3 }).fingerprintHex;
+    expect(byDefault.fingerprintHex.startsWith(three)).toBe(false);
   });
 
   it("hands out a copy, so a stray write cannot make the encoder non-canonical", () => {
@@ -221,7 +236,7 @@ describe("fingerprint envelope", () => {
     stolen[0] = 0;
     stolen[1] = 0;
     expect([...codec.encode(person)]).toEqual([...before]);
-    expect([...codec.fingerprint]).toEqual([103, 205, 41]);
+    expect([...codec.fingerprint]).toEqual([151, 255, 80, 109]);
   });
 
   // `fingerprinted(compile(asyncSchema))`, the combination that was once unusable in

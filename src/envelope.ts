@@ -7,14 +7,19 @@ import { DecodeError, EncodeError, type Reader, Schema, type Writer } from "./co
  */
 const WIRE_FORMAT_VERSION = 1;
 
-const DEFAULT_FINGERPRINT_BYTES = 3;
+/**
+ * The width for persistent data, which is what the envelope is for. It was 3, and every
+ * example passed `{ bytes: 4 }` over it, so a registry that met both widths broke: the
+ * width is hashed in, so a 3-byte fingerprint is not the first three bytes of a 4-byte one.
+ */
+const DEFAULT_FINGERPRINT_BYTES = 4;
 
 export interface FingerprintOptions {
   /**
-   * Fingerprint bytes to retain, 1 to 4. Default 3.
+   * Fingerprint bytes to retain, 1 to 4. Default 4.
    *
-   * Use 4 for persistent data; 3 favors very small payloads and small, controlled
-   * registries. No supported width is collision-proof.
+   * 3 or fewer suits very small payloads in small, controlled registries. Keep one width
+   * per registry. No supported width is collision-proof.
    */
   readonly bytes?: 1 | 2 | 3 | 4;
 }
