@@ -160,7 +160,9 @@ const label = `The record {"name":"Alice","age":34,"role":"admin"} is ${jsonByte
   const INK = 160;
 
   const timers: ReturnType<typeof setTimeout>[] = [];
-  const fliers: HTMLElement[] = [];
+  // Each copy in the air and the animation carrying it, so a replay can stop both. Only
+  // removing the element left its animation running detached until it finished.
+  const fliers: { el: HTMLElement; flight: Animation }[] = [];
 
   // Server-rendered with the total already in it, which is what the static figure needs.
   // Zeroed whenever the run takes over, in `play` and on arming, because the run is what
@@ -177,7 +179,10 @@ const label = `The record {"name":"Alice","age":34,"role":"admin"} is ${jsonByte
 
     for (const t of timers) clearTimeout(t);
     timers.length = 0;
-    for (const f of fliers) f.remove();
+    for (const { el, flight } of fliers) {
+      flight.cancel();
+      el.remove();
+    }
     fliers.length = 0;
 
     // Restart from the top on a replay. `reset` kills transitions for one frame first:
@@ -216,18 +221,17 @@ const label = `The record {"name":"Alice","age":34,"role":"admin"} is ${jsonByte
       flier.style.width = `${from.width}px`;
       flier.style.height = `${from.height}px`;
       box.append(flier);
-      fliers.push(flier);
 
-      flier
-        .animate(
-          [{ transform: "none" }, { transform: `translate(${to.left - from.left}px, ${to.top - from.top}px)` }],
-          { duration: FLIGHT, delay: LEAD + depart, easing: EASE, fill: "both" },
-        )
-        .finished.then(
-          () => flier.remove(),
-          // Cancelled by a replay, which has already removed it.
-          () => {},
-        );
+      const flight = flier.animate(
+        [{ transform: "none" }, { transform: `translate(${to.left - from.left}px, ${to.top - from.top}px)` }],
+        { duration: FLIGHT, delay: LEAD + depart, easing: EASE, fill: "both" },
+      );
+      fliers.push({ el: flier, flight });
+      flight.finished.then(
+        () => flier.remove(),
+        // Cancelled by a replay, which removes it itself.
+        () => {},
+      );
     });
 
     // When the last byte is on the wire, measured from the trips that were actually found
