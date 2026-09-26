@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { runInNewContext } from "node:vm";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { type } from "arktype";
+import { scope, type } from "arktype";
 import { describe, expect, it } from "vitest";
 import * as v from "valibot";
 import { toStandardJsonSchema } from "@valibot/to-json-schema";
@@ -20,7 +20,7 @@ import {
   safeEncode,
   unchecked,
 } from "../src/index.js";
-import type { EncodableStandardSchema } from "../src/index.js";
+import type { EncodableStandardSchema, Schema } from "../src/index.js";
 
 describe("Standard Schema adapter", () => {
   const value = { name: "Rahul", age: 25, sex: "M" as const };
@@ -1020,12 +1020,19 @@ describe("Standard Schema adapter", () => {
       ).toThrow(/type-disjoint JSON Schema unions/);
     });
 
-    it("costs the one index byte a discriminated union costs", () => {
+    it("reads a union of literals as the enum it is, not as a union of types", () => {
+      // Every branch is a set of values, so the union is their merged set: one index, in
+      // the enum's own order, which for a mixed set is JSON text. This compiled as a
+      // type-disjoint union until the branches were read by their values, `{"types":
+      // ["number","string"],…}`, with "a" at index 1 and 3 at index 0, while
+      // `z.literal(["a", 3])` and arktype's `"'a' | 3"` wrote the enum: one type, two
+      // payloads that decoded each other's bytes to the wrong member.
       const Value = compile(z.union([z.literal("a"), z.literal(3)]));
-      // Both branches are literals, so the index is the entire payload.
-      expect([...Value.encode("a")]).toEqual([1]);
-      expect([...Value.encode(3)]).toEqual([0]);
+      expect(Value.signature).toBe('{"enum":["a",3]}');
+      expect([...Value.encode("a")]).toEqual([0]);
+      expect([...Value.encode(3)]).toEqual([1]);
       expect(Value.decode(Value.encode(3))).toBe(3);
+      expect(compile(z.literal(["a", 3])).signature).toBe(Value.signature);
     });
 
     it("takes null, arrays and objects as types of their own", () => {
@@ -1073,6 +1080,202 @@ describe("Standard Schema adapter", () => {
       expect(() => compile(z.union([z.string(), z.number(), z.null()])).nullable()).toThrow(
         /already decodes to null/,
       );
+    });
+  });
+
+  describe("one wire shape per union type, however it is spelled", () => {
+    const val = (schema: v.GenericSchema) => toStandardJsonSchema(schema) as EncodableStandardSchema;
+    const du = z.discriminatedUnion("k", [
+      z.object({ k: z.literal("a"), n: z.int() }),
+      z.object({ k: z.literal("b") }),
+    ]);
+    const vdu = v.variant("k", [
+      v.object({ k: v.literal("a"), n: v.pipe(v.number(), v.integer()) }),
+      v.object({ k: v.literal("b") }),
+    ]);
+
+    // Each type in every spelling a vendor writes for it. Zod alone has three: a `type`
+    // array over bare types from 4.5, a nested `anyOf` once a branch carries a keyword,
+    // and a nested `anyOf` for everything up to 4.4. The installed zod no longer writes
+    // the 4.4 form, so those documents are written out as 4.4.3 emits them.
+    //
+    // Before the branches were flattened, these 32 spellings of six types compiled to 11
+    // signatures and refused 7 times. The first type split between the two null forms,
+    // so `"s"` wrote `02 01 73` from one spelling and `01 01 01 73` from the other, and
+    // neither payload decoded with the other's codec.
+    const types: ReadonlyArray<{
+      readonly name: string;
+      readonly signature: string;
+      readonly values: readonly unknown[];
+      readonly spellings: ReadonlyArray<readonly [string, () => Schema<unknown>]>;
+    }> = [
+      {
+        name: "string | number | null",
+        signature:
+          '{"types":["null","number","string"],"union":[{"literal":null},"float64","string"]}',
+        values: ["s", 1.5, null],
+        spellings: [
+          ["zod, type array", () => compile(z.union([z.string(), z.number()]).nullable())],
+          ["zod, refined branch", () => compile(z.union([z.string().min(1), z.number()]).nullable())],
+          ["zod, null branch", () => compile(z.union([z.string(), z.number(), z.null()]))],
+          [
+            "zod 4.4",
+            () =>
+              compile(z.union([z.string(), z.number()]).nullable(), {
+                anyOf: [{ anyOf: [{ type: "string" }, { type: "number" }] }, { type: "null" }],
+              }),
+          ],
+          ["valibot", () => compile(val(v.nullable(v.union([v.string(), v.number()]))))],
+          ["arktype", () => compile(type("string | number | null"))],
+        ],
+      },
+      {
+        name: "'a' | 'b' | null",
+        signature: '{"nullable":{"enum":["a","b"]}}',
+        values: ["a", "b", null],
+        spellings: [
+          ["zod, enum", () => compile(z.enum(["a", "b"]).nullable())],
+          ["zod, literals", () => compile(z.union([z.literal("a"), z.literal("b")]).nullable())],
+          ["zod, literal list", () => compile(z.literal(["a", "b", null]))],
+          ["valibot, picklist", () => compile(val(v.nullable(v.picklist(["a", "b"]))))],
+          ["valibot, literals", () => compile(val(v.union([v.literal("a"), v.literal("b"), v.null()])))],
+          ["arktype", () => compile(type("'a' | 'b' | null"))],
+        ],
+      },
+      {
+        name: "'a' | 1",
+        signature: '{"enum":["a",1]}',
+        values: ["a", 1],
+        spellings: [
+          ["zod, literals", () => compile(z.union([z.literal("a"), z.literal(1)]))],
+          ["zod, literal list", () => compile(z.literal(["a", 1]))],
+          ["valibot, picklist", () => compile(val(v.picklist(["a", 1])))],
+          ["valibot, literals", () => compile(val(v.union([v.literal("a"), v.literal(1)])))],
+          ["arktype", () => compile(type("'a' | 1"))],
+        ],
+      },
+      {
+        name: "a discriminated union or null",
+        signature:
+          '{"nullable":{"on":"k","cases":["a","b"],"union":[{"object":[{"key":"k","optional":false,"value":{"literal":"a"}},{"key":"n","optional":false,"value":"int"}]},{"object":[{"key":"k","optional":false,"value":{"literal":"b"}}]}]}}',
+        values: [null, { k: "a", n: 1 }, { k: "b" }],
+        spellings: [
+          ["zod, nullable", () => compile(du.nullable())],
+          ["zod, null branch", () => compile(z.union([du, z.null()]))],
+          ["valibot", () => compile(val(v.nullable(vdu)))],
+          [
+            "arktype",
+            () => compile(type({ k: "'a'", n: "number.integer" }).or({ k: "'b'" }).or("null")),
+          ],
+        ],
+      },
+      {
+        // The control: the common spellings already agreed, and still do. The union of
+        // one inside a nullable did not: `{"nullable":{"types":["string"],…}}`, with an
+        // index byte for the only branch there was.
+        name: "string | null",
+        signature: '{"nullable":"string"}',
+        values: ["s", null],
+        spellings: [
+          ["zod, type array", () => compile(z.string().nullable())],
+          ["zod, refined", () => compile(z.string().min(1).nullable())],
+          [
+            "zod 4.4",
+            () => compile(z.string().nullable(), { anyOf: [{ type: "string" }, { type: "null" }] }),
+          ],
+          ["valibot", () => compile(val(v.nullable(v.string())))],
+          ["valibot, union of one", () => compile(val(v.nullable(v.union([v.string()]))))],
+          ["arktype", () => compile(type("string | null"))],
+        ],
+      },
+      {
+        name: "'a' | 'b' | number",
+        signature: '{"types":["number","string"],"union":["float64",{"enum":["a","b"]}]}',
+        values: ["a", "b", 1.5],
+        spellings: [
+          ["zod, enum", () => compile(z.union([z.enum(["a", "b"]), z.number()]))],
+          ["zod, literals", () => compile(z.union([z.literal("a"), z.literal("b"), z.number()]))],
+          ["valibot, picklist", () => compile(val(v.union([v.picklist(["a", "b"]), v.number()])))],
+          [
+            "valibot, literals",
+            () => compile(val(v.union([v.literal("a"), v.literal("b"), v.number()]))),
+          ],
+          ["arktype", () => compile(type("'a' | 'b' | number"))],
+        ],
+      },
+    ];
+
+    for (const { name, signature, values, spellings } of types) {
+      it(`gives ${name} one signature, one fingerprint and one payload`, () => {
+        const codecs = spellings.map(([spelling, build]) => [spelling, build()] as const);
+        for (const [spelling, codec] of codecs) {
+          expect({ spelling, signature: codec.signature }).toEqual({ spelling, signature });
+        }
+        const prints = codecs.map(([, codec]) => fingerprinted(codec).fingerprintHex);
+        expect(new Set(prints).size).toBe(1);
+        for (const value of values) {
+          const bytes = codecs[0]![1].encode(value);
+          for (const [spelling, codec] of codecs) {
+            expect({ spelling, bytes: [...codec.encode(value)] }).toEqual({ spelling, bytes: [...bytes] });
+            expect(codec.decode(bytes)).toEqual(value);
+          }
+        }
+      });
+    }
+
+    it("keeps the six types apart, and null a type of its own in the first", () => {
+      const prints = types.map(({ spellings }) => fingerprinted(spellings[0]![1]()).fingerprintHex);
+      expect(new Set(prints).size).toBe(types.length);
+      // Null as one of the types, rather than a marker in front of a two-type union: the
+      // bytes zod 4.5 and arktype already wrote, and a byte cheaper than the marker.
+      const refined = compile(z.union([z.string().min(1), z.number()]).nullable());
+      expect([...refined.encode("s")]).toEqual([0x02, 0x01, 0x73]);
+      expect([...refined.encode(null)]).toEqual([0x00]);
+    });
+
+    it("reads a set of values by its values, not by the keyword beside it", () => {
+      // `{ enum: [x] }` and `{ const: x }` are the same JSON Schema, and one wrote an
+      // index byte where the other wrote nothing: `z.enum(["a"])` was `{"enum":["a"]}`.
+      expect(compile(z.literal("a"), { enum: ["a"] }).signature).toBe('{"literal":"a"}');
+      expect(compile(z.literal("a"), { const: "a" }).signature).toBe('{"literal":"a"}');
+      expect(compile(z.enum(["a"])).encode("a")).toHaveLength(0);
+      expect(compile(z.null(), { enum: [null] }).signature).toBe('{"literal":null}');
+      // A one-member enum is therefore refused as an array element, as an array of the
+      // literal it names always was: a count of zero-width elements is not bounded by
+      // the input. `z.array(z.enum(["a"]))` compiled, one byte per element, until now.
+      expect(() => compile(z.array(z.enum(["a"])))).toThrow(
+        /Array elements must occupy at least one byte/,
+      );
+      // `true | false` is `boolean`, and writes the same byte for each value.
+      for (const both of [
+        compile(z.literal([true, false])),
+        compile(val(v.union([v.literal(true), v.literal(false)]))),
+      ]) {
+        expect(both.signature).toBe('"boolean"');
+      }
+    });
+
+    it("costs no index for a union of one branch", () => {
+      // Zod 4.5 unwraps `z.union([z.string()])` and 4.4 wrote `{ anyOf: [{ type:
+      // "string" }] }`, so a zod upgrade used to move this from `00 01 73` to `01 73`.
+      const one = compile(z.union([z.string()]), { anyOf: [{ type: "string" }] });
+      expect(one.signature).toBe('"string"');
+      expect([...one.encode("s")]).toEqual([0x01, 0x73]);
+      expect(compile(val(v.union([v.string()]))).signature).toBe('"string"');
+    });
+
+    it("opens a union nested inside another, which used to be refused", () => {
+      const nested = compile(z.union([z.union([z.string().min(1), z.number()]), z.boolean()]));
+      expect(nested.signature).toBe(
+        '{"types":["boolean","number","string"],"union":["boolean","float64","string"]}',
+      );
+      const inner = compile(z.union([z.string().nullable(), z.number()]));
+      expect(inner.signature).toBe(types[0]!.signature);
+      // Opening the inner union is not a way around the overlap rule: two strings are two
+      // strings at any depth.
+      expect(() =>
+        compile(z.union([z.union([z.string(), z.number()]), z.string().max(2)])),
+      ).toThrow(/Only nullable, discriminated and type-disjoint JSON Schema unions/);
     });
   });
 
@@ -1237,11 +1440,158 @@ describe("Standard Schema adapter", () => {
       expect([...zod.encode(tree)]).toEqual([...valibot.encode(tree as never)]);
     });
 
+    describe("whichever type heads the cycle", () => {
+      // Two types referring to each other. The walk numbered a definition wherever it
+      // first closed the cycle, and zod's declaration order or valibot's unrolling decides
+      // where that is: the same cycle entered at the other type, the same bytes, and a
+      // different signature, so a `fingerprinted()` codec refused payloads it could read.
+      type TA = { name: string; b?: TB | undefined };
+      type TB = { id: number; a?: TA | undefined };
+      const A: z.ZodType<TA> = z.object({ name: z.string(), get b() { return B.optional(); } });
+      const B: z.ZodType<TB> = z.object({ id: z.int(), get a() { return A.optional(); } });
+      const VA: v.GenericSchema<TA> = v.object({ name: v.string(), b: v.optional(v.lazy(() => VB)) });
+      const VB: v.GenericSchema<TB> = v.object({
+        id: v.pipe(v.number(), v.integer()),
+        a: v.optional(v.lazy(() => VA)),
+      });
+      const pair = { x: { name: "n", b: { id: 1 } }, y: { id: 2, a: { name: "m" } } };
+
+      it("derives one signature whichever field a zod object declares first", () => {
+        const xy = compile(z.object({ x: A, y: B }));
+        const yx = compile(z.object({ y: B, x: A }));
+        expect(yx.signature).toBe(xy.signature);
+        expect(fingerprinted(yx).fingerprintHex).toBe(fingerprinted(xy).fingerprintHex);
+        // One definition, emitted where a walk from the root in signature order first
+        // closes the cycle: at A, reached through `x` before `y` reaches B.
+        expect(xy.signature).toBe(
+          '{"defs":[{"object":[{"key":"b","optional":true,"value":{"object":[{"key":"a","optional":true,"value":{"ref":0}},{"key":"id","optional":false,"value":"int"}]}},{"key":"name","optional":false,"value":"string"}]}],"root":{"object":[{"key":"x","optional":false,"value":{"ref":0}},{"key":"y","optional":false,"value":{"object":[{"key":"a","optional":true,"value":{"ref":0}},{"key":"id","optional":false,"value":"int"}]}}]}}',
+        );
+        // The bytes never moved: these are the ones both spellings always wrote.
+        expect([...xy.encode(pair)]).toEqual([1, 0, 2, 1, 110, 1, 0, 1, 109, 4]);
+        expect([...yx.encode(pair)]).toEqual([...xy.encode(pair)]);
+      });
+
+      it("derives one signature whichever validator wrote a mutual recursion", () => {
+        type Expr = { op: string; args: Arg[] };
+        type Arg = number | { expr: Expr };
+        const Expr: z.ZodType<Expr> = z.object({ op: z.string(), get args() { return z.array(Arg); } });
+        const Arg: z.ZodType<Arg> = z.union([z.number(), z.object({ get expr() { return Expr; } })]);
+        const VExpr: v.GenericSchema<Expr> = v.object({ op: v.string(), args: v.array(v.lazy(() => VArg)) });
+        const VArg: v.GenericSchema<Arg> = v.union([v.number(), v.object({ expr: v.lazy(() => VExpr) })]);
+
+        type Employee = { name: string; team: Team | null };
+        type Team = { title: string; members: Employee[] };
+        const Employee: z.ZodType<Employee> = z.object({ name: z.string(), get team() { return Team.nullable(); } });
+        const Team: z.ZodType<Team> = z.object({ title: z.string(), get members() { return z.array(Employee); } });
+        const VEmployee: v.GenericSchema<Employee> = v.object({
+          name: v.string(),
+          team: v.nullable(v.lazy(() => VTeam)),
+        });
+        const VTeam: v.GenericSchema<Team> = v.object({
+          title: v.string(),
+          members: v.array(v.lazy(() => VEmployee)),
+        });
+        const arkAB = scope({ a: { name: "string", "b?": "b" }, b: { id: "number.integer", "a?": "a" } }).export();
+
+        const spellings: ReadonlyArray<readonly [Schema<unknown>[], unknown]> = [
+          [
+            [
+              compile(A),
+              compile(VA, toStandardJsonSchema(VA)),
+              compile(arkAB.a as unknown as EncodableStandardSchema),
+            ],
+            pair.x,
+          ],
+          [[compile(B), compile(VB, toStandardJsonSchema(VB))], pair.y],
+          [
+            [
+              compile(z.object({ x: A, y: B })),
+              compile(v.object({ x: VA, y: VB }), toStandardJsonSchema(v.object({ x: VA, y: VB }))),
+            ],
+            pair,
+          ],
+          [
+            [compile(Expr), compile(VExpr, toStandardJsonSchema(VExpr))],
+            { op: "+", args: [1, { expr: { op: "-", args: [2] } }] },
+          ],
+          [
+            [compile(Employee), compile(VEmployee, toStandardJsonSchema(VEmployee))],
+            { name: "a", team: { title: "t", members: [{ name: "b", team: null }] } },
+          ],
+          [
+            [compile(Team), compile(VTeam, toStandardJsonSchema(VTeam))],
+            { title: "t", members: [{ name: "b", team: null }] },
+          ],
+        ];
+        for (const [codecs, value] of spellings) {
+          for (const codec of codecs) {
+            expect(codec.signature).toBe(codecs[0]!.signature);
+            expect([...codec.encode(value)]).toEqual([...codecs[0]!.encode(value)]);
+          }
+        }
+      });
+
+      it("still compiles a long cycle and a large enum quickly", () => {
+        // The refinement's worst case: n links alike but for the last, so a difference
+        // travels one link per round. Reading every node every round made this quadratic,
+        // as the fold before it was: 400 links took 210 ms here, and 650 ran out of stack.
+        const n = 400;
+        const chain = {
+          $ref: "#/$defs/d0",
+          $defs: Object.fromEntries(
+            Array.from({ length: n }, (_, i) => [
+              `d${i}`,
+              {
+                type: "object",
+                properties:
+                  i === n - 1
+                    ? { next: { $ref: "#/$defs/d0" }, end: { type: "string" } }
+                    : { next: { $ref: `#/$defs/d${i + 1}` } },
+              },
+            ]),
+          ),
+        };
+        const members = Array.from({ length: 20_000 }, (_, i) => `v${i}`);
+        const tagged = {
+          type: "object",
+          properties: { tag: { enum: members }, children: { type: "array", items: { $ref: "#" } } },
+          required: ["tag", "children"],
+        };
+        const started = performance.now();
+        compile(z.unknown(), chain);
+        expect(performance.now() - started).toBeLessThan(150);
+        const Tagged = compile(z.unknown(), tagged);
+        expect(performance.now() - started).toBeLessThan(400);
+        expect(Tagged.decode(Tagged.encode({ tag: "v19999", children: [] }))).toEqual({
+          tag: "v19999",
+          children: [],
+        });
+      });
+
+      it("refuses references that lead only to each other", () => {
+        // `{ "$ref": "#" }` names no schema at all. It compiled to a codec that failed the
+        // first time it was used, and it has no node for the minimized graph to hold.
+        expect(() => compile(z.unknown(), { $ref: "#" })).toThrow(
+          "Unsupported Standard JSON Schema node",
+        );
+        expect(() =>
+          compile(z.unknown(), {
+            $ref: "#/$defs/a",
+            $defs: { a: { $ref: "#/$defs/b" }, b: { $ref: "#/$defs/a" } },
+          }),
+        ).toThrow("Unsupported Standard JSON Schema node");
+      });
+    });
+
     it("leaves a non-recursive schema's signature exactly as it was", () => {
-      // The definition table is emitted only when a cycle is found, so no existing
-      // fingerprint moves. This pins the plain three-field shape.
-      const Person = fingerprinted(compile(z.object({ age: z.int(), name: z.string() })));
-      expect(Person.fingerprintHex).toBe("fee99f");
+      // The definition table is emitted only when a cycle is found, so a schema without
+      // one keeps the signature it always had. This pins the plain two-field shape, and
+      // the fingerprint that signature hashes to.
+      const Person = compile(z.object({ age: z.int(), name: z.string() }));
+      expect(Person.signature).toBe(
+        '{"object":[{"key":"age","optional":false,"value":"int"},{"key":"name","optional":false,"value":"string"}]}',
+      );
+      expect(fingerprinted(Person).fingerprintHex).toBe("450f8b8d");
     });
 
     it("inlines a shared subtree instead of making it a definition", () => {

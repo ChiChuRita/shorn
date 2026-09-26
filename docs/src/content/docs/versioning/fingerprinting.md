@@ -22,13 +22,13 @@ A `Set` and an array of the same element type write byte-identical payloads and 
 
 The fingerprint does not change for refinements, property declaration order, strictness, which validator you used, or conversion functions. So a stricter `.max()` can start rejecting old data without changing the fingerprint. If validation behavior is part of your data version, carry an application version separately in a header, column, or envelope. A wire fingerprint is not a complete schema version.
 
-Validator independence holds for recursive schemas too, even though validators spell them differently (Zod points the cycle at the root; Valibot inlines the root and repeats it under `$defs`), because a root that merely duplicates a definition is folded back onto it.
+Nor does the fingerprint change with how a union is written: flat or nested, as `anyOf` or a `type` array, as literals or as an enum, with `.nullable()` or a `null` branch. One union type has one wire shape, so it has one fingerprint.
 
-**One known exception:** two *mutually* recursive definitions are not deduplicated, so a mutually recursive type may fingerprint differently across validators. Keep both codecs, or write that type in one validator only.
+Recursive schemas get the same guarantee, although validators spell them differently. Zod points a `$ref` at a definition from wherever the type is used, while Valibot inlines one copy there. Which of two mutually recursive types becomes the definition depends on the validator, and in Zod on which field is declared first. shorn reads the definitions as one graph, merges any two nodes that unfold to the same type, and numbers what is left from the root outward. One recursive type therefore has one fingerprint, however it arrives.
 
 ## Choose a width
 
-shorn supports 1 to 4 bytes and defaults to 3. Each width is a truncated 32-bit FNV-1a hash.
+shorn supports 1 to 4 bytes and defaults to 4. Each width is cut from one 32-bit hash of the signature: FNV-1a, finished with murmur3's `fmix32` so that every bit depends on every character. Without that last step, an edit that only reorders the signature, such as two fields swapping types, left three bits of every fingerprint unchanged. A 1-byte fingerprint then caught it no more often than a 5-bit one would.
 
 | Bytes | Possible fingerprints | Approx. collision chance at 1,000 registered shapes |
 | ---: | ---: | ---: |
@@ -37,9 +37,9 @@ shorn supports 1 to 4 bytes and defaults to 3. Each width is a truncated 32-bit 
 | 3 | 16,777,216 | 2.9% |
 | 4 | 4,294,967,296 | 0.012% |
 
-These figures use the birthday approximation and assume the hash spreads evenly. FNV-1a is not a cryptographic hash, and a collision is deterministic: two shapes either collide or they do not, and every decode gives the same answer.
+These figures use the birthday approximation and assume the hash spreads evenly, which the mixing step is there to make true at every width. It is still not a cryptographic hash, and a collision is deterministic: two shapes either collide or they do not, and every decode gives the same answer.
 
-**Use 4 bytes for persistent data.** The 3-byte default favors small payloads and small, controlled registries. No width is collision-proof, so reject duplicate `fingerprintHex` values when you build a registry, and carry an application version when identity has to be unambiguous.
+**The default of 4 bytes is the width for persistent data.** Choose 3 or fewer only for very small payloads in a small, controlled registry. Keep one width per registry: the width is part of what is hashed, so a schema's 3-byte fingerprint is not the start of its 4-byte one. No width is collision-proof, so reject duplicate `fingerprintHex` values when you build a registry, and carry an application version when identity has to be unambiguous.
 
 ## Carry it separately
 

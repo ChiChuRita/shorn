@@ -7,22 +7,39 @@ import { DecodeError, EncodeError, type Reader, Schema, type Writer } from "./co
  */
 const WIRE_FORMAT_VERSION = 1;
 
-const DEFAULT_FINGERPRINT_BYTES = 3;
+/**
+ * The width for persistent data, which is what the envelope is for. It was 3, and every
+ * example passed `{ bytes: 4 }` over it, so a registry that met both widths broke: the
+ * width is hashed in, so a 3-byte fingerprint is not the first three bytes of a 4-byte one.
+ */
+const DEFAULT_FINGERPRINT_BYTES = 4;
 
 export interface FingerprintOptions {
   /**
-   * Fingerprint bytes to retain, 1 to 4. Default 3.
+   * Fingerprint bytes to retain, 1 to 4. Default 4.
    *
-   * Use 4 for persistent data; 3 favors very small payloads and small, controlled
-   * registries. No supported width is collision-proof.
+   * 3 or fewer suits very small payloads in small, controlled registries. Keep one width
+   * per registry. No supported width is collision-proof.
    */
   readonly bytes?: 1 | 2 | 3 | 4;
 }
 
 /**
- * FNV-1a over the canonical structural signature. `version` and `retain` seed the LOW
- * byte deliberately: FNV-1a multiplies mod 2^32, so a seed bit at position 8 or above
- * can never influence the low output byte, leaving a 1-byte fingerprint blind to both.
+ * FNV-1a over the canonical structural signature, then murmur3's `fmix32`, so that every
+ * output bit depends on every input bit before the fingerprint is cut to width.
+ *
+ * FNV-1a alone multiplies mod 2^32, so an output bit depends only on the bits at or
+ * below it, and the lowest ones on almost nothing. Each character goes in as two steps,
+ * its low byte and then a high byte that is zero for ASCII, which multiplies by the
+ * prime twice, and the prime squared is 1 mod 8: bits 0 to 2 of every fingerprint were
+ * the XOR of the characters' low three bits, in any order. Swapping two fields' types,
+ * or moving an `.optional()` to another field, permutes the signature's characters and
+ * kept those bits at every width. Over 252 such pairs a 1-byte fingerprint collided 11
+ * times, where 1 is expected; mixed, 2.
+ *
+ * `version` and `retain` go into the seed's low byte. Before the mix that was
+ * load-bearing, since a seed bit at position 8 or above could never reach the low output
+ * byte; after it every seed bit reaches every output bit, so the placement is harmless.
  */
 function fingerprintOf(signature: string, retain: number): Uint8Array {
   let hash = 0x811c9dc5 ^ (WIRE_FORMAT_VERSION << 4) ^ retain;
@@ -31,6 +48,11 @@ function fingerprintOf(signature: string, retain: number): Uint8Array {
     hash = Math.imul(hash ^ (code & 0xff), 0x01000193);
     hash = Math.imul(hash ^ (code >>> 8), 0x01000193);
   }
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x85ebca6b);
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35);
+  hash ^= hash >>> 16;
   const bytes = new Uint8Array(retain);
   for (let index = 0; index < retain; index++) {
     bytes[index] = (hash >>> (8 * (retain - 1 - index))) & 0xff;

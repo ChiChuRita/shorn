@@ -26,6 +26,8 @@ A varint is a variable-length integer: small values take one byte, larger values
 
 Enum members do not have to be strings. `z.enum({ Ok: 200, Missing: 404 })` writes a one-byte index instead of the eight bytes each number would otherwise cost. Members are indexed in canonical order: by value for an all-string enum, and by JSON text for anything else, because `<` cannot order mixed types consistently.
 
+A union of literals is an enum, in any validator: `z.union([z.literal("a"), z.literal(1)])`, `v.picklist(["a", 1])` and `"'a' | 1"` all write the same one-byte index. An enum with one member is a literal and writes nothing. A `null` among the members becomes a nullable marker, so `z.literal(["a", null])` writes what `z.literal("a").nullable()` writes.
+
 A `uuid` is stored as the 16 bytes it stands for, not the 36 characters it is written as. Bytes have no case, so shorn accepts lowercase UUIDs only. An uppercase one is refused rather than returned as a different string than the one you gave it. RFC 4122 says to generate lowercase.
 
 `uuid` and `date-time` are the only two string formats shorn packs. Every other format is stored as text. A `date-time` becomes the 6 bytes of the instant it names.
@@ -70,10 +72,12 @@ A union needs no discriminant when no two branches share a JSON type, because th
 ```ts
 z.union([z.string(), z.number()]);              // number is 0, string is 1
 z.union([z.string(), z.array(z.string()), z.null()]);
-z.union([z.literal("a"), z.literal(3)]);        // the index is the whole payload
+z.union([z.enum(["a", "b"]), z.number()]);     // a string enum beside a number
 ```
 
 The seven JSON types are `string`, `number`, `boolean`, `null`, `array`, `object`, and `integer`, which folds into `number`. Branches are ordered by type name, so again declaration order does not reach the wire.
+
+`null` is one of those types. `z.union([z.string(), z.number()]).nullable()` is a union of three types, and writes the same bytes as the `z.null()` branch spelling. Literals of one type count as one branch, so `"'a' | 'b' | number"` in ArkType is a string enum beside a number. A union nested inside another is read as the flat union it amounts to.
 
 Two branches that share a type stay [refused](/schemas/rejected-shapes/#overlapping-unions). Nothing about `5` says whether it was declared as `z.int()` or `z.number()`, and choosing between two object branches without a `const` would mean trying each one in turn.
 
@@ -114,6 +118,8 @@ const Json = z.union([
 
 Six branches, no two sharing a type, two of them recursive. A branch that *is* the whole definition works too. Its type is read at the far end of the `$ref`.
 
+Mutually recursive types work as well, such as an expression whose arguments hold expressions. They get one fingerprint whichever validator wrote them, and whichever of them a Zod object declares first.
+
 ## Records, open objects, and dynamic values
 
 | Shape | Zod | Bytes |
@@ -150,7 +156,7 @@ A field with a default is an optional field on the wire. The validator fills it 
 
 ## Nullable and nesting
 
-`z.nullable(T)` · `v.nullable(T)` · `"T | null"` → one marker byte, then the value if there is one. Both JSON Schema spellings work: an `anyOf` with two branches where one is `null`, and a `type` array with two entries where one is `"null"`. A two-branch nullable is the cheapest union there is: one byte and no index.
+`z.nullable(T)` · `v.nullable(T)` · `"T | null"` → one marker byte, then the value if there is one. That holds when `T` is one type, a set of literals, or a discriminated union, whether the JSON Schema says it with `anyOf`, a `type` array, or a union nested inside another. When `T` is itself a type-disjoint union, `null` joins it as one more type instead, and costs no marker.
 
 Objects, arrays, and tuples nest with no per-level header. A nested object encodes as nothing more than its fields. Nesting fixed by the schema has no limit of its own, though the JavaScript stack runs out at about 1,300 to 1,400 levels through `compile()`, while the codec is being built, or at about 1,600 through `m`, when a value is encoded; [Errors](/api/errors/#one-error-that-is-not-a-decodeerror) says what is thrown. Reaching that takes a hostile *schema*, not merely hostile bytes. Nesting chosen by the *payload* is capped: 256 levels for a recursive schema, 64 for a dynamic value.
 

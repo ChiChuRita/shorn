@@ -70,17 +70,17 @@ All of these are `EncodeError` instances thrown when the codec is built. See [Re
 
 | Message | Cause |
 | --- | --- |
-| `Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported; give the branches one property that is a distinct const in each, or make no two branches share a JSON type` | a union with two branches of one JSON type and no property that is a distinct `const` in every branch, whether written as `anyOf`, `oneOf` or a `type` array |
+| `Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported; give the branches one property that is a distinct const in each, or make no two branches share a JSON type` | a union with two branches of one JSON type, at least one of them not a literal, and no property that is a distinct `const` in every branch, whether written as `anyOf`, `oneOf` or a `type` array, and at any depth of nesting |
 | `Empty enums are unsupported` | an enum with no members |
 | `Enum values must be unique` | `m.enum` given the same member twice. `compile()` drops a member that a JSON Schema `enum` repeats instead |
 | `Enum member … has no JSON text of its own` | `NaN`, an infinity or `-0` in a mixed enum. None of the four survives the JSON text a mixed enum is ordered by |
 | `Invalid fixed array length X` | `minItems === maxItems` outside 0 to 1,000,000 |
-| `Array elements must occupy at least one byte, or a fixed count of them must stay under the collection limit` | an array of zero-width elements: a literal, an empty tuple, an empty object, or an object or tuple built only from those. A variable count can never be checked against the payload. A fixed count can be, but only up to 1,000,000 elements in total across nesting, since a fixed count needs no payload at all to satisfy |
+| `Array elements must occupy at least one byte, or a fixed count of them must stay under the collection limit` | an array of zero-width elements: a literal (a one-member enum is one), an empty tuple, an empty object, or an object or tuple built only from those. A variable count can never be checked against the payload. A fixed count can be, but only up to 1,000,000 elements in total across nesting, since a fixed count needs no payload at all to satisfy |
 | `Set elements must occupy at least one byte` | the same for a Set, which has no fixed-count form to exempt |
 | `Map entries must occupy at least one byte` | the same for a Map, counting key and value together |
 | `Unsupported JSON Schema literal` | a literal that is not a string, number, boolean, or null |
 | `Unsupported Standard JSON Schema type X` | a type with no wire shape. `X` is the type keyword, or `object` when the document put an object there |
-| `Unsupported Standard JSON Schema node` | a non-object node where a schema was expected |
+| `Unsupported Standard JSON Schema node` | a non-object node where a schema was expected, or `$ref`s that lead only to each other, such as `{ "$ref": "#" }` alone |
 | `Unsupported JSON Schema reference "…"; only same-document references are supported` | a `$ref` naming another document |
 | `JSON Schema reference "…" does not resolve` | a `$ref` whose pointer names nothing in the document |
 | `Unsupported JSON Schema combinator X` | `allOf`, an intersection the validator did not merge into one schema, or `not` (`z.never()`) |
@@ -181,7 +181,7 @@ All of these are `DecodeError` with an `offset`.
 | --- | --- |
 | `Expected a Uint8Array, received X` | an input that is not a `Uint8Array`; offset 0. `X` is a primitive's type, `null`, or an object's class, such as `ArrayBuffer`, `DataView`, `Array` or `Promise`. Wrap an `ArrayBuffer` as `new Uint8Array(buffer)`, and a `DataView` as `new Uint8Array(view.buffer, view.byteOffset, view.byteLength)`: `new Uint8Array(view)` is empty |
 | `Unexpected trailing data` | bytes remained after a complete value |
-| `Payload was written by a different schema (expected fingerprint XXXXXX)` | the wire fingerprint differs |
+| `Payload was written by a different schema (expected fingerprint XXXXXXXX)` | the wire fingerprint differs |
 | `Unexpected end of input` | a truncated payload |
 | `Non-canonical variable-length integer` | an overlong varint, e.g. `[129, 0]` for `1` |
 | `Invalid variable-length integer` | a varint longer than ten bytes |
