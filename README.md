@@ -79,7 +79,7 @@ const codec = compile(schema, structure);
 
 ## Scope
 
-shorn encodes strings, booleans, integers, floats, literals, enums, nullable values, arrays, tuples, records, recursive schemas, `z.any()`, and objects, closed or open, with optional fields. Unions need a literal tag in every branch, or branches that share no JSON type. `Date`, `bigint`, `Map`, and `Set` are supported natively.
+shorn encodes strings, booleans, integers, floats, literals, enums, nullable values, arrays, tuples, records, recursive schemas, `z.any()`, and objects, closed or open, with optional fields. Unions need a literal tag in every branch, or branches that share no JSON type. A union of literals is an enum. `Date`, `bigint`, `Map`, and `Set` are supported natively.
 
 Not supported: overlapping unions, one-way transforms, streaming, and schema migration. `undefined`, symbols, `RegExp`, and class instances have no wire form, so convert those first.
 
