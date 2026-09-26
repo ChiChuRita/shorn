@@ -49,11 +49,11 @@ export class FingerprintedSchema<T> extends Schema<T> {
    * The prefix bytes, so a caller can carry them out of band instead: a Kafka header,
    * a column, a filename, and keep the payload bare.
    *
-   * A fresh copy on every read: a stray write into the encoder's own array would make
-   * this a non-canonical encoder that still round-trips against itself. Read it once
-   * and keep it if you need it in a loop.
+   * A fresh copy on every read. Read it once and keep it if you need it in a loop.
    */
   get fingerprint(): Uint8Array {
+    // A fresh copy on every read: a stray write into the encoder's own array would make
+    // this a non-canonical encoder that still round-trips against itself.
     return this.prefix.slice();
   }
 
@@ -89,7 +89,8 @@ export class FingerprintedSchema<T> extends Schema<T> {
     this.inner._encode(writer, value);
   }
 
-  /** Delegated, or every fingerprinted codec loses its field path. */
+  // Delegated, or every fingerprinted codec loses its field path.
+  /** @internal */
   override _failingChild(value: unknown) {
     return this.inner._failingChild(value);
   }
@@ -122,7 +123,10 @@ export class FingerprintedSchema<T> extends Schema<T> {
  * Costs the fingerprint's bytes, plus one prefix write per encode and one prefix compare
  * per decode.
  * Requires a `compile()` codec; the low-level `m` API is the raw-wire escape hatch
- * and stays unframed.
+ * and stays unframed. Throws `EncodeError` for a codec without a signature, and for
+ * `bytes` outside 1 to 4.
+ *
+ * @see https://shorn.dev/api/functions/#fingerprinted
  */
 export function fingerprinted<T>(
   codec: Schema<T>,

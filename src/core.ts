@@ -190,10 +190,11 @@ export class EncodeError extends Error {
 
   /**
    * Field path to the value that failed: `user.address.zip`, `tags[3]`. For a value the
-   * encoder refused, appended to the message once, at the top, by `Schema.encode`, so
-   * throwing from a leaf costs nothing. For a validator failure, the first issue's path
-   * in the same notation; the message already leads each issue with its own.
+   * encoder refused, the message ends with it too. For a validator failure, the first
+   * issue's path in the same notation; the message already leads each issue with its own.
    */
+  // For a value the encoder refused, appended to the message once, at the top, by
+  // `Schema.encode`, so throwing from a leaf costs nothing.
   path?: string | undefined;
 
   /**
@@ -206,6 +207,7 @@ export class EncodeError extends Error {
 
 // Exported so `StandardBackedSchema` and `FingerprintedSchema` can name it in their
 // declaration files. Internal machinery, not re-exported from `index.ts`.
+/** @internal */
 export interface FailingChild {
   readonly segment: string;
   readonly schema: Schema<unknown>;
@@ -303,10 +305,8 @@ export class Writer {
   private buffer: Uint8Array = new Uint8Array(64);
   private offset = 0;
 
-  /**
-   * Built on first float, discarded when the buffer moves: a schema with no float
-   * field would otherwise pay for a DataView on every encode.
-   */
+  // Built on first float, discarded when the buffer moves: a schema with no float
+  // field would otherwise pay for a DataView on every encode.
   private view: DataView | undefined;
 
   private ensure(size: number): void {
@@ -475,7 +475,7 @@ export class Writer {
     this.offset += width + written;
   }
 
-  /** A varint of a known width at a known offset, for a length reserved before it was known. */
+  // A varint of a known width at a known offset, for a length reserved before it was known.
   private putVaruint(at: number, value: number, width: number): void {
     const buffer = this.buffer;
     let word = value;
@@ -498,14 +498,13 @@ export class Writer {
     this.offset += 8;
   }
 
-  /**
-   * Always a copy, never a view: `Schema.encode` reuses one Writer, so a subarray
-   * would alias a buffer the next encode overwrites. `slice` pays a fixed setup cost
-   * whatever the length: 41.8ns against 24.8ns for allocate-and-copy at 4 bytes,
-   * level at 16, 344ns against 140ns at 512, so short payloads copy by hand.
-   * `set()` from a subarray loses to both at every length.
-   */
+  /** The bytes written so far, as a copy of exactly that length, never a view. */
   finish(): Uint8Array {
+    // Always a copy, never a view: `Schema.encode` reuses one Writer, so a subarray
+    // would alias a buffer the next encode overwrites. `slice` pays a fixed setup cost
+    // whatever the length: 41.8ns against 24.8ns for allocate-and-copy at 4 bytes,
+    // level at 16, 344ns against 140ns at 512, so short payloads copy by hand.
+    // `set()` from a subarray loses to both at every length.
     const length = this.offset;
     if (length >= SLICE_COPY_LIMIT) return this.buffer.slice(0, length);
 
@@ -515,11 +514,10 @@ export class Writer {
     return copy;
   }
 
-  /**
-   * Called on release rather than on acquire, so a buffer grown by one oversized
-   * payload is dropped now instead of staying pinned for as long as the process idles.
-   */
+  /** Empties the writer for reuse, and lets go of a buffer grown past 64 KiB. */
   reset(): void {
+    // Called on release rather than on acquire, so a buffer grown by one oversized
+    // payload is dropped now instead of staying pinned for as long as the process idles.
     this.offset = 0;
     if (this.buffer.length > MAX_RETAINED_BUFFER_BYTES) {
       this.buffer = new Uint8Array(64);
@@ -562,18 +560,22 @@ interface OpenWriter {
 /**
  * Encodes into a buffer the caller owns and returns the offset just past the last byte
  * written, so consecutive calls pack a frame: `end = encodeInto(codec, next, frame, end)`.
- * The bytes are exactly `codec.encode(value)`'s. What is saved is the output array and
- * the copy into the frame that follows it. The array alone was 39% of a small encode,
- * 46 ns to 28 ns on the Person fixture, per the `person encode` and `person encodeInto`
- * rows of `bench/baseline.json`. A free function rather than a method on `Schema`, for
- * `encodeAsync`'s reason: a method is never tree-shaken, and most callers hand
- * `encode()`'s array straight to a send.
+ * The bytes are exactly `codec.encode(value)`'s, without the output array or the copy
+ * into the frame.
  *
  * Throws `EncodeError` when the value does not fit, and `target` may then hold a
  * partial write from `offset` on. Decoding needs no counterpart: `decode` takes any
  * `Uint8Array` view, so a reader hands it `frame.subarray(start, end)`.
+ *
+ * @see https://shorn.dev/api/functions/#encodeinto
  */
 export function encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, offset = 0): number {
+  // What is saved is the output array and the copy into the frame that follows it. The
+  // array alone was 39% of a small encode, 46 ns to 28 ns on the Person fixture, per the
+  // `person encode` and `person encodeInto` rows of `bench/baseline.json`. A free function
+  // rather than a method on `Schema`, for `encodeAsync`'s reason: a method is never
+  // tree-shaken, and most callers hand `encode()`'s array straight to a send.
+  //
   // A Standard Schema arrives here by habit from `encode(schema, value)`, and failed deep
   // inside as `codec._encode is not a function`. Tested by shape, not `instanceof`, so a
   // codec from a second installed copy of shorn keeps working as it always has.
@@ -624,12 +626,10 @@ export function encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, of
 export class Reader {
   private offset = 0;
 
-  /**
-   * Built once a decode has read `FLOAT_VIEW_TRIP` floats, never before: a DataView
-   * costs more to allocate than the scratch copy below saves on a record holding one
-   * or two of them: a 38-byte nested event decodes 34% slower if this is built eagerly,
-   * while an array of floats amortizes the one allocation to nothing.
-   */
+  // Built once a decode has read `FLOAT_VIEW_TRIP` floats, never before: a DataView
+  // costs more to allocate than the scratch copy below saves on a record holding one
+  // or two of them: a 38-byte nested event decodes 34% slower if this is built eagerly,
+  // while an array of floats amortizes the one allocation to nothing.
   private view: DataView | undefined;
   private floatsRead = 0;
 
@@ -772,20 +772,18 @@ export class Reader {
     return this.varuintSlow();
   }
 
-  /**
-   * The unsigned reader past one byte: the multi-byte body `varuintWide` shares,
-   * refusing a result that body had to widen. Both readers have the same shape, an
-   * inline one-byte path in front of one small slow body, and two shapes that look
-   * equivalent are cliffs, measured on 500-element arrays:
-   *
-   *   - delegating this to a `varuintWide` that still held its BigInt tail inline
-   *     measured 3x slower on 2- and 3-byte uints;
-   *   - rewriting `varuintWide` on the integer unit without the inline one-byte path
-   *     measured 2x slower on one- and two-byte ints.
-   *
-   * Both are the inlining-budget behaviour `float64`/`float64Slow` documents: the hot
-   * body has to stay small and BigInt-free, so the tail lives in `varuintBig`.
-   */
+  // The unsigned reader past one byte: the multi-byte body `varuintWide` shares,
+  // refusing a result that body had to widen. Both readers have the same shape, an
+  // inline one-byte path in front of one small slow body, and two shapes that look
+  // equivalent are cliffs, measured on 500-element arrays:
+  //
+  //   - delegating this to a `varuintWide` that still held its BigInt tail inline
+  //     measured 3x slower on 2- and 3-byte uints;
+  //   - rewriting `varuintWide` on the integer unit without the inline one-byte path
+  //     measured 2x slower on one- and two-byte ints.
+  //
+  // Both are the inlining-budget behaviour `float64`/`float64Slow` documents: the hot
+  // body has to stay small and BigInt-free, so the tail lives in `varuintBig`.
   private varuintSlow(): number {
     const value = this.varuintWideSlow();
     if (typeof value !== "number") {
@@ -796,12 +794,13 @@ export class Reader {
 
   /**
    * Stays a `number` while the value is representable as one, widening to `bigint`
-   * only when it is not. The unconditional `bigint` reader this replaced cost the
-   * signed-integer decoder three BigInt allocations per value in the range where none
-   * were needed. The same inline one-byte path as `varuint`, then the same slow body;
-   * `varuintSlow` names the two shapes that measured as cliffs.
+   * only when it is not.
    */
   varuintWide(): number | bigint {
+    // The unconditional `bigint` reader this replaced cost the signed-integer decoder
+    // three BigInt allocations per value in the range where none were needed. The same
+    // inline one-byte path as `varuint`, then the same slow body; `varuintSlow` names the
+    // two shapes that measured as cliffs.
     const first = this.buffer[this.offset];
     if (first !== undefined && first < 0x80) {
       this.offset++;
@@ -810,17 +809,15 @@ export class Reader {
     return this.varuintWideSlow();
   }
 
-  /**
-   * Two registers so every byte stays on the integer unit, as `Writer.varuint` does on
-   * the way out: bytes one to four fill `low`, five to eight fill `high`, and 28 bits of
-   * payload cannot overflow int32 in either. The float loop this replaced, a multiply,
-   * an add and a `Number.isSafeInteger` per byte from the fifth, measured 4% slower on
-   * 500 millisecond timestamps, head to head over five processes. A value past 2^53 is
-   * read again in `varuintBig`, from the start `offset` still marks since it is only
-   * committed on success; so is anything that reaches a ninth byte. Entered only past
-   * the one-byte path, so the first byte here is never terminal and a terminal zero is
-   * non-canonical at any position.
-   */
+  // Two registers so every byte stays on the integer unit, as `Writer.varuint` does on
+  // the way out: bytes one to four fill `low`, five to eight fill `high`, and 28 bits of
+  // payload cannot overflow int32 in either. The float loop this replaced, a multiply,
+  // an add and a `Number.isSafeInteger` per byte from the fifth, measured 4% slower on
+  // 500 millisecond timestamps, head to head over five processes. A value past 2^53 is
+  // read again in `varuintBig`, from the start `offset` still marks since it is only
+  // committed on success; so is anything that reaches a ninth byte. Entered only past
+  // the one-byte path, so the first byte here is never terminal and a terminal zero is
+  // non-canonical at any position.
   private varuintWideSlow(): number | bigint {
     const buffer = this.buffer;
     let at = this.offset;
@@ -852,10 +849,8 @@ export class Reader {
     return this.varuintBig();
   }
 
-  /**
-   * A value past 2^53, or an encoding past eight bytes, read again from its first byte
-   * in BigInt: rare, so cold, and the one place the ten-byte cap is enforced.
-   */
+  // A value past 2^53, or an encoding past eight bytes, read again from its first byte
+  // in BigInt: rare, so cold, and the one place the ten-byte cap is enforced.
   private varuintBig(): bigint {
     let large = 0n;
     for (let shift = 0n; shift < 70n; shift += 7n) {
@@ -918,14 +913,14 @@ export abstract class Schema<T> {
   /** Set only by codecs built from a Standard JSON Schema; `m` leaves wire unframed. */
   declare readonly signature?: string;
 
-  /**
-   * The two halves a validating codec fuses, kept apart so `encodeAsync`/`decodeAsync`
-   * can `await` the validator between them. Set together or not at all: a wrapper
-   * opts in by assigning both, so neither async function needs to know
-   * `FingerprintedSchema` exists. Undefined on `m` schemas, which the async entry
-   * points refuse.
-   */
+  // The two halves a validating codec fuses, kept apart so `encodeAsync`/`decodeAsync`
+  // can `await` the validator between them. Set together or not at all: a wrapper
+  // opts in by assigning both, so neither async function needs to know
+  // `FingerprintedSchema` exists. Undefined on `m` schemas, which the async entry
+  // points refuse.
+  /** @internal */
   declare _source?: StandardSchemaV1<unknown, unknown>;
+  /** @internal */
   declare _structural?: Schema<unknown>;
 
   /**
@@ -936,38 +931,40 @@ export abstract class Schema<T> {
    */
   _minWidth = 1;
 
-  /**
-   * Array slots a decode of this schema materializes before reading a byte. Zero for
-   * everything the `_minWidth` budget already bounds: the one shape that allocates for
-   * free is a fixed-count array of a zero-width element, whose count comes from the
-   * schema rather than the input. Nesting those multiplies, so `ArraySchema` holds the
-   * product to the same collection ceiling a length varint answers to: without it three
-   * levels of a million turn an empty payload into 10^18 slots and a fatal OOM. Summed
-   * by the two containers that can be zero-width themselves; every other shape costs at
-   * least a byte, which makes its slots the input's problem and not this counter's.
-   */
+  // Array slots a decode of this schema materializes before reading a byte. Zero for
+  // everything the `_minWidth` budget already bounds: the one shape that allocates for
+  // free is a fixed-count array of a zero-width element, whose count comes from the
+  // schema rather than the input. Nesting those multiplies, so `ArraySchema` holds the
+  // product to the same collection ceiling a length varint answers to: without it three
+  // levels of a million turn an empty payload into 10^18 slots and a fatal OOM. Summed
+  // by the two containers that can be zero-width themselves; every other shape costs at
+  // least a byte, which makes its slots the input's problem and not this counter's.
+  /** @internal */
   _slots = 0;
 
-  /**
-   * Whether a value of this schema can itself be `null` or `undefined`. Read by
-   * `nullable()` and `optional()` to refuse a marker whose absent case would duplicate
-   * a value the inner schema can already produce. Both propagate through the other
-   * wrapper, so a stack three deep is caught as readily as one.
-   */
+  // Whether a value of this schema can itself be `null` or `undefined`. Read by
+  // `nullable()` and `optional()` to refuse a marker whose absent case would duplicate
+  // a value the inner schema can already produce. Both propagate through the other
+  // wrapper, so a stack three deep is caught as readily as one.
+  /** @internal */
   _yieldsNull = false;
+  /** @internal */
   _yieldsUndefined = false;
 
   abstract _encode(writer: Writer, value: T): void;
   abstract _decode(reader: Reader): T;
 
-  /**
-   * The first child whose encode fails, for `encodePath` to descend through.
-   * Containers override it; a leaf ends the walk here.
-   */
+  // The first child whose encode fails, for `encodePath` to descend through.
+  // Containers override it; a leaf ends the walk here.
+  /** @internal */
   _failingChild(_value: unknown): FailingChild | undefined {
     return undefined;
   }
 
+  /**
+   * Writes the value as bytes, running the validator first on a codec that has one.
+   * Throws `EncodeError`, whose `path` names the failing field when there is one.
+   */
   encode(value: T): Uint8Array {
     const pooled = !pooledWriterBusy;
     const writer = pooled ? pooledWriter : new Writer();
@@ -986,6 +983,11 @@ export abstract class Schema<T> {
     }
   }
 
+  /**
+   * Reads a value back from its bytes, then runs the validator on a codec that has one.
+   * Throws `DecodeError` for malformed or trailing bytes and for a value the validator
+   * refuses.
+   */
   decode(value: Uint8Array): T {
     if (!isUint8Array(value)) {
       throw new DecodeError(`Expected a Uint8Array, received ${typeof value}`, 0);
@@ -1003,19 +1005,25 @@ export abstract class Schema<T> {
   }
 
   /**
-   * Collapses a repeated `optional()`: a second presence marker would make `[0]` and
-   * `[1, 0]` both mean absent, so `decode` would stop being injective.
+   * The same schema with `undefined` allowed: a bit in the presence bitmap as an object
+   * field, a marker byte anywhere else. Calling it again returns the same schema. Throws
+   * `EncodeError` if the schema already decodes to `undefined`.
    */
   optional(): OptionalSchema<T> {
+    // Collapses a repeated `optional()`: a second presence marker would make `[0]` and
+    // `[1, 0]` both mean absent, so `decode` would stop being injective.
     if (this instanceof OptionalSchema) return this as unknown as OptionalSchema<T>;
     return new OptionalSchema(this);
   }
 
   /**
-   * Collapses a repeated `nullable()` for the reason `optional()` does, and refuses
-   * `m.literal(null).nullable()`, where collapsing would change the width to zero.
+   * The same schema with `null` allowed: one marker byte, then the value if there is one.
+   * Calling it again returns the same schema. Throws `EncodeError` if the schema already
+   * decodes to `null`.
    */
   nullable(): NullableSchema<T> {
+    // Collapses a repeated `nullable()` for the reason `optional()` does, and refuses
+    // `m.literal(null).nullable()`, where collapsing would change the width to zero.
     if (this instanceof NullableSchema) return this as unknown as NullableSchema<T>;
     return new NullableSchema(this);
   }
@@ -1151,12 +1159,10 @@ export class Float64Schema extends Schema<number> {
 }
 
 export class OptionalSchema<T> extends Schema<T | undefined> {
-  /**
-   * Type-only brand, `declare` so it costs no runtime bytes. TS compares classes
-   * structurally, so without it `NullableSchema<string>` matched `OptionalKeys` and a
-   * nullable field inferred as an optional *key*. Nothing else tells the two classes
-   * apart, so `NullableSchema` must not be folded into a shared base with this one.
-   */
+  // Type-only brand, `declare` so it costs no runtime bytes. TS compares classes
+  // structurally, so without it `NullableSchema<string>` matched `OptionalKeys` and a
+  // nullable field inferred as an optional *key*. Nothing else tells the two classes
+  // apart, so `NullableSchema` must not be folded into a shared base with this one.
   declare readonly _optionalBrand: true;
 
   constructor(readonly inner: Schema<T>) {
@@ -1177,13 +1183,12 @@ export class OptionalSchema<T> extends Schema<T | undefined> {
     if (value !== undefined) this.inner._encode(writer, value);
   }
 
-  /**
-   * No segment of its own, as `UnionSchema` and `LazySchema` also have none: the
-   * position holding the wrapper is the parent's to name, and without this the path
-   * stops there. The absent case ends the walk rather than descending: `_encode` never
-   * reached `inner`, so no failure came from there, and `inner` would refuse the
-   * sentinel that only means "not present".
-   */
+  // No segment of its own, as `UnionSchema` and `LazySchema` also have none: the
+  // position holding the wrapper is the parent's to name, and without this the path
+  // stops there. The absent case ends the walk rather than descending: `_encode` never
+  // reached `inner`, so no failure came from there, and `inner` would refuse the
+  // sentinel that only means "not present".
+  /** @internal */
   override _failingChild(value: unknown): FailingChild | undefined {
     if (value === undefined) return undefined;
     return this.inner._failingChild(value);
@@ -1214,10 +1219,9 @@ export class NullableSchema<T> extends Schema<T | null> {
     if (value !== null) this.inner._encode(writer, value);
   }
 
-  /**
-   * Descends for the reason `OptionalSchema._failingChild` does, with `null` as the
-   * sentinel that ends the walk. Copied rather than shared, per that class's brand.
-   */
+  // Descends for the reason `OptionalSchema._failingChild` does, with `null` as the
+  // sentinel that ends the walk. Copied rather than shared, per that class's brand.
+  /** @internal */
   override _failingChild(value: unknown): FailingChild | undefined {
     if (value === null) return undefined;
     return this.inner._failingChild(value);
@@ -2686,27 +2690,50 @@ export class OpenObjectSchema<S extends Shape> extends ObjectSchema<S> {
   }
 }
 
+/**
+ * Codecs built straight from the wire format, with no Standard Schema and no JSON Schema:
+ * no validation beyond what encoding needs, and no fingerprint. A builder throws
+ * `EncodeError` for a shape the wire format cannot hold.
+ *
+ * @see https://shorn.dev/api/m/
+ */
 export const m = {
+  /** A string: a varint byte length, then UTF-8. */
   string: (): Schema<string> => new StringSchema(),
+  /** A `Uint8Array`: a varint byte length, then the bytes. Decodes to a copy. */
   bytes: (): Schema<Uint8Array> => new BytesSchema(),
+  /** A boolean: one byte, `0` or `1`. */
   boolean: (): Schema<boolean> => new BooleanSchema(),
+  /** A non-negative safe integer as a varint: one byte below 128. */
   uint: (): Schema<number> => new UintSchema(),
+  /** A safe integer as a ZigZag varint: one byte from -64 to 63. */
   int: (): Schema<number> => new IntSchema(),
+  /** A number in 4 bytes, little-endian, at 32-bit float precision. */
   float32: (): Schema<number> => new Float32Schema(),
+  /** A number in 8 bytes, little-endian. */
   float64: (): Schema<number> => new Float64Schema(),
+  /** A `Date` as epoch milliseconds in a ZigZag varint: 6 bytes for any current date. */
   date: (): Schema<Date> => new DateSchema(),
+  /** A `bigint` of any size: a varint header, then the magnitude little-endian. */
   bigint: (): Schema<bigint> => new BigIntSchema(),
+  /** A value fixed by the schema, written as zero bytes. */
   literal: <const T extends string | number | boolean | null>(value: T): Schema<T> =>
     new LiteralSchema(value),
+  /** One of a list of scalars, as a varint index into the sorted members. */
   enum: <const T extends readonly [EnumValue, ...EnumValue[]]>(values: T): Schema<T[number]> =>
     new EnumSchema(values),
+  /** A varint count, then the elements. A fixed `length` leaves the count off the wire. */
   array: <T>(item: Schema<T>, length?: number): Schema<T[]> => new ArraySchema(item, length),
+  /** A `Set` in the array layout: a varint count, then the elements. */
   set: <T>(item: Schema<T>): Schema<Set<T>> => new SetSchema(item),
+  /** A `Map` as a varint count, then each key followed by its value. */
   map: <K, V>(key: Schema<K>, value: Schema<V>): Schema<Map<K, V>> => new MapSchema(key, value),
   // No rest parameter, deliberately: `TupleSchema` takes one and `compile` uses it, but
   // typing it on `m` means a variadic return type and two casts to reach it.
   // `RecordSchema`, `UnionSchema` and `DynamicSchema` are absent for the same reason.
+  /** Fixed positions, written in order with no count. */
   tuple: <const S extends readonly Schema<unknown>[]>(items: S): Schema<TupleOutput<S>> =>
     new TupleSchema(items),
+  /** A presence bitmap for optional fields, then the values in key order. Drops extra keys. */
   object: <S extends Shape>(shape: S): Schema<ObjectOutput<S>> => new ObjectSchema(shape),
 };
