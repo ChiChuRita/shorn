@@ -42,7 +42,7 @@ There is no lint or format step. Match the surrounding code.
 | Path | What |
 | --- | --- |
 | `src/core.ts` | the `m` builders, the wire format, `Reader`/`Writer` |
-| `src/standard.ts` | the Standard Schema bridge: `compile`, `encode`, `decode`, `codec` |
+| `src/standard.ts` | the Standard Schema bridge: `compile`, `encode`, `decode`, `unchecked` |
 | `src/envelope.ts` | `fingerprinted()` and the mismatch prefix |
 | `test/` | vitest; `property.test.ts` and `fuzz.test.ts` are generative |
 | `bench/` | benchmarks against msgpackr, cbor-x, Avro, Protobuf, SchemaPack, JSON |

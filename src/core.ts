@@ -1025,7 +1025,7 @@ export type Infer<S extends Schema<unknown>> = S["_output"];
 
 // Exported for `standard.ts`, which builds wire schemas straight from these rather
 // than through `m`: referencing `m` there retained the whole object, and with it
-// `BytesSchema` and `Float32Schema`, in every bundle importing only `codec`.
+// `BytesSchema` and `Float32Schema`, in every bundle importing only `compile`.
 export class StringSchema extends Schema<string> {
   _encode(writer: Writer, value: string): void {
     if (typeof value !== "string") throw new EncodeError("Expected a string");
