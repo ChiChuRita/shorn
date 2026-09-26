@@ -58,7 +58,7 @@ Both are keywords in ArkType, and neither says what type its members have. A for
 
 ArkType has no `format: "date-time"` spelling either. `"string.date.iso"` converts to a pattern, so an ISO timestamp stays an ordinary string rather than becoming the 6 bytes `z.iso.datetime()` gets.
 
-A morph is refused when its input and output produce different wire shapes, because shorn needs both sides to agree on the bytes. Standard Schema has no reverse operation, so shorn cannot run a morph backwards; see [Date, BigInt, Map, Set](/schemas/rich-types/).
+A morph is refused when its input and output produce different wire shapes, because shorn needs both sides to agree on the bytes. Standard Schema has no reverse operation, so shorn cannot run a morph backwards; see [Date, BigInt, Map, Set](/schemas/rich-types/). A morph whose two sides have the same wire shape compiles, and runs on encode and again on decode, so it has to return its own output unchanged when it runs a second time.
 
 ## Minimum version
 

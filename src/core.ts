@@ -73,8 +73,29 @@ function hasTag(value: unknown, tag: string): boolean {
   return Object.prototype.toString.call(value) === tag;
 }
 
+/**
+ * The acceptance tests a container's `_encode` and its `_failingChild` share. The walk
+ * has to refuse exactly what the encoder refuses: where it did not, an array handed to
+ * an object went on to blame a field, `Expected an object at a`, for a value the caller
+ * never wrote.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSet(value: unknown): value is Set<unknown> {
+  return value instanceof Set || hasTag(value, "[object Set]");
+}
+
+function isMap(value: unknown): value is Map<unknown, unknown> {
+  return value instanceof Map || hasTag(value, "[object Map]");
+}
+
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder("utf-8", { fatal: true });
+// `ignoreBOM`, or the decoder strips a leading U+FEFF as a byte-order mark: the string
+// would come back one character short, and `[4, ef, bb, bf, 61]` would decode to the
+// same "a" as `[1, 61]`. This decoder is the only one browsers, workers and Deno use.
+const textDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 /**
  * Node's own UTF-8 decoder, when there is one: 45% cheaper than `TextDecoder` at every
@@ -168,9 +189,10 @@ export class EncodeError extends Error {
   override readonly name = "EncodeError";
 
   /**
-   * Field path to the value that failed: `user.address.zip`, `tags[3]`. Appended to
-   * the message once, at the top, by `Schema.encode`, so throwing from a leaf costs
-   * nothing.
+   * Field path to the value that failed: `user.address.zip`, `tags[3]`. For a value the
+   * encoder refused, appended to the message once, at the top, by `Schema.encode`, so
+   * throwing from a leaf costs nothing. For a validator failure, the first issue's path
+   * in the same notation; the message already leads each issue with its own.
    */
   path?: string | undefined;
 
@@ -253,7 +275,12 @@ function firstFailing(children: Iterable<FailingChild>): FailingChild | undefine
  * encode cannot append a second, less precise path over the first.
  */
 function withPath(error: unknown, schema: Schema<unknown>, value: unknown): unknown {
-  if (!(error instanceof EncodeError) || error.path !== undefined) return error;
+  // A validator's failure arrives with `issues`, which already say where it is. Walking
+  // the value it was handed, before it coerced or transformed anything, found a
+  // different field: `age: Too small at id`.
+  if (!(error instanceof EncodeError) || error.path !== undefined || error.issues !== undefined) {
+    return error;
+  }
   const path = encodePath(schema, value);
   if (path === undefined) return error;
   error.path = path;
@@ -547,6 +574,12 @@ interface OpenWriter {
  * `Uint8Array` view, so a reader hands it `frame.subarray(start, end)`.
  */
 export function encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, offset = 0): number {
+  // A Standard Schema arrives here by habit from `encode(schema, value)`, and failed deep
+  // inside as `codec._encode is not a function`. Tested by shape, not `instanceof`, so a
+  // codec from a second installed copy of shorn keeps working as it always has.
+  if (typeof (codec as { _encode?: unknown } | null)?._encode !== "function") {
+    throw new EncodeError("encodeInto() takes a codec, not a schema");
+  }
   if (!isUint8Array(target)) {
     throw new EncodeError(`Expected a Uint8Array target, received ${typeof target}`);
   }
@@ -578,7 +611,9 @@ export function encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, of
   } finally {
     // A target larger than the pool keeps, or a buffer grown past one, is let go for
     // `reset`'s reason: a one-off frame must not stay pinned to a module-level Writer.
-    if (open.buffer !== target || target.length > MAX_RETAINED_BUFFER_BYTES) {
+    // Measured by its ArrayBuffer, not its own length: a 16-byte view of a 256 MB buffer
+    // held all 256 MB here until the next call brought a different target.
+    if (open.buffer !== target || target.buffer.byteLength > MAX_RETAINED_BUFFER_BYTES) {
       open.buffer = new Uint8Array(0);
       open.view = undefined;
     }
@@ -973,11 +1008,6 @@ export abstract class Schema<T> {
    */
   optional(): OptionalSchema<T> {
     if (this instanceof OptionalSchema) return this as unknown as OptionalSchema<T>;
-    if (this._yieldsUndefined) {
-      throw new EncodeError(
-        "This schema already decodes to undefined; wrapping it in optional() would give undefined two encodings",
-      );
-    }
     return new OptionalSchema(this);
   }
 
@@ -987,11 +1017,6 @@ export abstract class Schema<T> {
    */
   nullable(): NullableSchema<T> {
     if (this instanceof NullableSchema) return this as unknown as NullableSchema<T>;
-    if (this._yieldsNull) {
-      throw new EncodeError(
-        "This schema already decodes to null; wrapping it in nullable() would give null two encodings",
-      );
-    }
     return new NullableSchema(this);
   }
 }
@@ -1136,6 +1161,13 @@ export class OptionalSchema<T> extends Schema<T | undefined> {
 
   constructor(readonly inner: Schema<T>) {
     super();
+    // The refusal lives here rather than in `optional()`, so a wrapper built with `new`,
+    // which `index.ts` exports, cannot stack a second marker around one either.
+    if (inner._yieldsUndefined) {
+      throw new EncodeError(
+        "This schema already decodes to undefined; wrapping it in optional() would give undefined two encodings",
+      );
+    }
     this._yieldsUndefined = true;
     this._yieldsNull = inner._yieldsNull;
   }
@@ -1167,6 +1199,12 @@ export class OptionalSchema<T> extends Schema<T | undefined> {
 export class NullableSchema<T> extends Schema<T | null> {
   constructor(readonly inner: Schema<T>) {
     super();
+    // In the constructor for `OptionalSchema`'s reason.
+    if (inner._yieldsNull) {
+      throw new EncodeError(
+        "This schema already decodes to null; wrapping it in nullable() would give null two encodings",
+      );
+    }
     this._yieldsNull = true;
     this._yieldsUndefined = inner._yieldsUndefined;
   }
@@ -1522,7 +1560,14 @@ export class ArraySchema<T> extends Schema<T[]> {
   }
 
   override _failingChild(value: unknown): FailingChild | undefined {
-    if (!Array.isArray(value)) return undefined;
+    // A count `_encode` refuses is the array's own failure, not an element's, even when
+    // an element would have failed too.
+    if (
+      !Array.isArray(value) ||
+      (this.length === undefined ? value.length > MAX_COLLECTION_LENGTH : value.length !== this.length)
+    ) {
+      return undefined;
+    }
     // `Array.from`, not `.map`: map skips a sparse array's holes, and a hole is one of
     // the values that gets here: `_encode` writes it as `undefined` and throws.
     return firstFailing(
@@ -1576,9 +1621,7 @@ export class SetSchema<T> extends Schema<Set<T>> {
   }
 
   _encode(writer: Writer, value: Set<T>): void {
-    if (!(value instanceof Set || hasTag(value, "[object Set]"))) {
-      throw new EncodeError("Expected a Set");
-    }
+    if (!isSet(value)) throw new EncodeError("Expected a Set");
     const size = value.size;
     if (size > MAX_COLLECTION_LENGTH) throw new EncodeError("Set is too large");
     writer.varuint(size);
@@ -1597,7 +1640,7 @@ export class SetSchema<T> extends Schema<Set<T>> {
   }
 
   override _failingChild(value: unknown): FailingChild | undefined {
-    if (!(value instanceof Set)) return undefined;
+    if (!isSet(value) || value.size > MAX_COLLECTION_LENGTH) return undefined;
     return firstFailing(
       Array.from(value, (element, index) => ({
         schema: this.item,
@@ -1645,9 +1688,7 @@ export class MapSchema<K, V> extends Schema<Map<K, V>> {
   }
 
   _encode(writer: Writer, value: Map<K, V>): void {
-    if (!(value instanceof Map || hasTag(value, "[object Map]"))) {
-      throw new EncodeError("Expected a Map");
-    }
+    if (!isMap(value)) throw new EncodeError("Expected a Map");
     const size = value.size;
     if (size > MAX_COLLECTION_LENGTH) throw new EncodeError("Map is too large");
     writer.varuint(size);
@@ -1666,7 +1707,7 @@ export class MapSchema<K, V> extends Schema<Map<K, V>> {
 
   /** Both halves of an entry under one segment: a key is data, not a path. */
   override _failingChild(value: unknown): FailingChild | undefined {
-    if (!(value instanceof Map)) return undefined;
+    if (!isMap(value) || value.size > MAX_COLLECTION_LENGTH) return undefined;
     return firstFailing(
       Array.from(value, ([entryKey, entryValue], index) => [
         { schema: this.key, segment: `[${index}]`, value: entryKey },
@@ -1715,9 +1756,7 @@ export class RecordSchema<T> extends Schema<Record<string, T>> {
    * records equal as values would otherwise write different bytes.
    */
   _encode(writer: Writer, value: Record<string, T>): void {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      throw new EncodeError("Expected an object");
-    }
+    if (!isRecord(value)) throw new EncodeError("Expected an object");
     const keys = canonicalKeyOrder(Object.keys(value));
     if (keys.length > MAX_COLLECTION_LENGTH) throw new EncodeError("Record is too large");
     writer.varuint(keys.length);
@@ -1728,15 +1767,10 @@ export class RecordSchema<T> extends Schema<Record<string, T>> {
   }
 
   override _failingChild(value: unknown): FailingChild | undefined {
-    if (typeof value !== "object" || value === null) return undefined;
-    const record = value as Record<string, unknown>;
-    return firstFailing(
-      canonicalKeyOrder(Object.keys(record)).map((key) => ({
-        schema: this.value,
-        segment: key,
-        value: record[key],
-      })),
-    );
+    if (!isRecord(value)) return undefined;
+    const keys = canonicalKeyOrder(Object.keys(value));
+    if (keys.length > MAX_COLLECTION_LENGTH) return undefined;
+    return firstFailing(keys.map((key) => ({ schema: this.value, segment: key, value: value[key] })));
   }
 
   _decode(reader: Reader): Record<string, T> {
@@ -2128,9 +2162,17 @@ export class TupleSchema<S extends readonly Schema<unknown>[]> extends Schema<Tu
     this._minWidth = width;
   }
 
+  /** The shape `_encode` accepts, shared with the walk so a short tuple blames no item. */
+  private fits(value: unknown): value is unknown[] {
+    const fixed = this.items.length;
+    return (
+      Array.isArray(value) && (this.tail === undefined ? value.length === fixed : value.length >= fixed)
+    );
+  }
+
   _encode(writer: Writer, value: TupleOutput<S>): void {
     const fixed = this.items.length;
-    if (!Array.isArray(value) || (this.tail === undefined ? value.length !== fixed : value.length < fixed)) {
+    if (!this.fits(value)) {
       throw new EncodeError(
         this.tail === undefined
           ? `Expected a tuple with ${fixed} items`
@@ -2149,7 +2191,7 @@ export class TupleSchema<S extends readonly Schema<unknown>[]> extends Schema<Tu
    * past `items` into `rest` is what keeps that one walk rather than two.
    */
   override _failingChild(value: unknown): FailingChild | undefined {
-    if (!Array.isArray(value)) return undefined;
+    if (!this.fits(value)) return undefined;
     const length = this.rest === undefined ? this.items.length : value.length;
     return firstFailing(
       Array.from({ length }, (_, index) => ({
@@ -2429,9 +2471,7 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
       this.encoder(writer, value as Record<string, unknown>);
       return;
     }
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      throw new EncodeError("Expected an object");
-    }
+    if (!isRecord(value)) throw new EncodeError("Expected an object");
 
     const record = value as Record<string, unknown>;
     if (this.rejectUnknown) {
@@ -2499,43 +2539,27 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
    */
   protected writeExtras(_writer: Writer, _record: Record<string, unknown>): void {}
 
-  /**
-   * `defineProperty` throughout, not `Object.assign`: assignment goes through
-   * `[[Set]]`, and a decoded `__proto__` key would reassign the prototype.
-   *
-   * A key repeating a declared field is refused rather than merged: it would
-   * overwrite the field decoded moments earlier, so two payloads would decode alike.
-   */
-  private readExtras(reader: Reader, result: Record<string, unknown>): void {
-    if (this.tail === undefined) return;
-    const extras = this.tail._decode(reader);
-    for (const key of Object.keys(extras)) {
-      if (this.knownKeys!.has(key)) {
-        throw new DecodeError(
-          `Extra property ${JSON.stringify(key)} repeats a declared field`,
-          reader.position,
-        );
-      }
-      Object.defineProperty(result, key, {
-        configurable: true,
-        enumerable: true,
-        value: extras[key],
-        writable: true,
-      });
-    }
-  }
+  /** The decode half of the same hook: a closed object reads no extras either. */
+  protected readExtras(_reader: Reader, _result: Record<string, unknown>): void {}
 
   /**
-   * Absent optionals are skipped: the field's schema here is the unwrapped inner one,
-   * which would reject the `undefined` that only means the field is not there.
+   * The object's own refusals end the walk, as `_encode` makes them: the wrong shape,
+   * and under `rejectUnknown` a key the schema does not name. Fields are read the way
+   * the encoder reads them, own properties only once a field is named like an
+   * `Object.prototype` member, or the inherited member is blamed for a value the caller
+   * never wrote. Absent optionals are skipped: the field's schema here is the unwrapped
+   * inner one, which would reject the `undefined` that only means the field is not there.
    */
   override _failingChild(value: unknown): FailingChild | undefined {
-    if (typeof value !== "object" || value === null) return undefined;
-    const record = value as Record<string, unknown>;
+    if (!isRecord(value)) return undefined;
+    if (this.rejectUnknown && Object.keys(value).some((key) => !this.knownKeys!.has(key))) {
+      return undefined;
+    }
+    const source = this.hasInheritedKey ? this.ownFields(value) : value;
     return firstFailing(
       this.fields
-        .filter(([key, , optionalIndex]) => optionalIndex < 0 || record[key] !== undefined)
-        .map(([key, schema]) => ({ schema, segment: key, value: record[key] })),
+        .filter(([key, , optionalIndex]) => optionalIndex < 0 || source[key] !== undefined)
+        .map(([key, schema]) => ({ schema, segment: key, value: source[key] })),
     );
   }
 
@@ -2600,10 +2624,11 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
 }
 
 /**
- * Everything an open object does with its undeclared keys on the way out: deriving them,
- * and walking them for a path. Out here rather than in `ObjectSchema` because only the
- * Standard Schema bridge builds a tail, so an `m`-only bundle can run neither, and pays
- * for them anyway when they sit there: the derivation alone measured 164 minified bytes.
+ * Everything an open object does with its undeclared keys: deriving and writing them,
+ * reading them back, and walking them for a path. Out here rather than in `ObjectSchema`
+ * because only the Standard Schema bridge builds a tail, so an `m`-only bundle can run
+ * none of it, and pays for it anyway when it sits there: the derivation alone measured
+ * 164 minified bytes, and the read half 61 gzip bytes.
  * The same finding that keeps `new RecordSchema(...)` out of that constructor. Nothing `m`
  * exports names this class, so a bundle without `compile` drops it whole.
  */
@@ -2613,19 +2638,41 @@ export class OpenObjectSchema<S extends Shape> extends ObjectSchema<S> {
   }
 
   /**
+   * `defineProperty` throughout, not `Object.assign`: assignment goes through
+   * `[[Set]]`, and a decoded `__proto__` key would reassign the prototype.
+   *
+   * A key repeating a declared field is refused rather than merged: it would
+   * overwrite the field decoded moments earlier, so two payloads would decode alike.
+   */
+  protected override readExtras(reader: Reader, result: Record<string, unknown>): void {
+    const extras = this.tail!._decode(reader);
+    for (const key of Object.keys(extras)) {
+      if (this.knownKeys!.has(key)) {
+        throw new DecodeError(
+          `Extra property ${JSON.stringify(key)} repeats a declared field`,
+          reader.position,
+        );
+      }
+      Object.defineProperty(result, key, {
+        configurable: true,
+        enumerable: true,
+        value: extras[key],
+        writable: true,
+      });
+    }
+  }
+
+  /**
    * Declared fields first, in the order encode writes them, then the undeclared keys. The
    * tail names the key itself, so an extras key is a direct child of the object in path
    * terms: `o.note` rather than `o.<extras>.note`.
    *
-   * The guard repeats the base's because a non-object has no undeclared keys either: the
-   * extras of a string would be its character indices.
+   * The guard repeats the base's because the base's `undefined` does not say why, and
+   * a value the object refuses has no extras to walk: a string's would be its indices.
    */
   override _failingChild(value: unknown): FailingChild | undefined {
-    if (typeof value !== "object" || value === null) return undefined;
-    return (
-      super._failingChild(value) ??
-      this.tail!._failingChild(this.extras(value as Record<string, unknown>))
-    );
+    if (!isRecord(value)) return undefined;
+    return super._failingChild(value) ?? this.tail!._failingChild(this.extras(value));
   }
 
   /** Which keys are undeclared, decided here for both the write and the walk. */

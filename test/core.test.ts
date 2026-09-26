@@ -1,7 +1,16 @@
 import { runInNewContext } from "node:vm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { ObjectSchema } from "../src/core.js";
-import { DecodeError, EncodeError, encodeInto, m, Writer } from "../src/index.js";
+import { ObjectSchema, OpenObjectSchema, RecordSchema } from "../src/core.js";
+import {
+  DecodeError,
+  EncodeError,
+  encodeInto,
+  m,
+  NullableSchema,
+  OptionalSchema,
+  type Schema,
+  Writer,
+} from "../src/index.js";
 import { buildUnderCsp } from "./csp.js";
 
 /**
@@ -42,6 +51,22 @@ describe("shorn core", () => {
     const encoded = User.encode({ id: 7, email: "a@b.co" });
     expect(encoded[0]).toBe(0b01);
     expect(User.decode(encoded)).toEqual({ id: 7, email: "a@b.co" });
+  });
+
+  it("refuses a second marker, however the wrapper was built", () => {
+    // `[0]` and `[1, 0]` would both decode to absent. The methods always refused this,
+    // but the classes are exported and `new` skipped the check: a doubled optional
+    // built that way decoded both payloads to `{}`.
+    expect(() => new OptionalSchema(m.string().optional())).toThrow(/already decodes to undefined/);
+    expect(() => new OptionalSchema(m.string().optional().nullable())).toThrow(
+      /already decodes to undefined/,
+    );
+    expect(() => new NullableSchema(m.literal(null))).toThrow(/already decodes to null/);
+    expect(() => new NullableSchema(m.string().nullable())).toThrow(/already decodes to null/);
+    // The methods still collapse an immediate repeat, and refuse through the other wrapper.
+    const once = m.string().optional();
+    expect(once.optional()).toBe(once);
+    expect(() => m.string().optional().nullable().optional()).toThrow(/already decodes to undefined/);
   });
 
   it("reads each optional property only once", () => {
@@ -181,9 +206,18 @@ describe("shorn core", () => {
     }
   });
 
-  // Bug: the U+FFFD re-decode goes through a TextDecoder that strips a leading U+FEFF.
-  it.fails("keeps a leading U+FEFF in a string that also holds U+FFFD", () => {
-    expect(m.string().decode(m.string().encode("\uFEFF\uFFFD"))).toBe("\uFEFF\uFFFD");
+  it("keeps a leading U+FEFF on the fallback decoder", () => {
+    // `TextDecoder` strips a leading byte-order mark unless told not to, so a string that
+    // started with U+FEFF came back one character short, and two payloads decoded alike.
+    // Node reaches that decoder only for a string holding U+FFFD, which is why each of
+    // these carries one; browsers, workers and Deno use it for every string over 8 bytes.
+    for (const value of ["\ufeff\ufffd", "\ufeffa\ufffdb", `\ufeff${"x".repeat(40)}\ufffd`]) {
+      expect(m.string().decode(m.string().encode(value))).toBe(value);
+    }
+    const marked = m.string().decode(new Uint8Array([7, 0xef, 0xbb, 0xbf, 0x61, 0xef, 0xbf, 0xbd]));
+    const bare = m.string().decode(new Uint8Array([4, 0x61, 0xef, 0xbf, 0xbd]));
+    expect(marked).toBe("\ufeffa\ufffd");
+    expect(marked).not.toBe(bare);
   });
 
   it("rejects unpaired UTF-16 surrogates instead of changing the string", () => {
@@ -564,6 +598,14 @@ describe("shorn core", () => {
       );
     });
 
+    it("refuses a schema that is not a codec, by name", () => {
+      // A Standard Schema arrives by habit from `encode(schema, value)`, and failed inside
+      // as a raw TypeError: `codec._encode is not a function`.
+      expect(() => encodeInto({ "~standard": {} } as never, 1, new Uint8Array(8))).toThrow(
+        "encodeInto() takes a codec, not a schema",
+      );
+    });
+
     it("refuses an offset outside the target and a target that is not a Uint8Array", () => {
       const target = new Uint8Array(8);
       for (const offset of [-1, 9, 1.5, Number.NaN]) {
@@ -914,6 +956,57 @@ describe("shorn core", () => {
       expect(schema.decode(schema.encode(full))).toEqual(full);
     });
 
+    it("stops at the container that refused, however deep it sits", () => {
+      // Each container re-derives in `_failingChild` which child to blame, so a value its
+      // `_encode` refuses outright has to end the walk there. Every row below used to go
+      // on and blame a child the caller got right, `Expected an object at a` for an
+      // array; the fixed count and the unknown key did it even with a child that really
+      // was wrong, because the container refuses first.
+      const refused: ReadonlyArray<readonly [Schema<unknown>, unknown, string]> = [
+        [m.object({ a: m.string() }), ["x"], "Expected an object"],
+        [new RecordSchema(m.uint()), ["x"], "Expected an object"],
+        [new OpenObjectSchema({ a: m.string() }, false, new RecordSchema(m.uint())), ["x"], "Expected an object"],
+        [m.tuple([m.uint(), m.string()]), [1], "Expected a tuple with 2 items"],
+        [m.array(m.string(), 2), ["a", 1, 2], "Expected an array with 2 items"],
+        [new ObjectSchema({ a: m.string() }, true), { a: 1, b: 2 }, 'Unknown object property "b"'],
+      ];
+      const failure = (encode: () => unknown): EncodeError => {
+        try {
+          encode();
+        } catch (thrown) {
+          return thrown as EncodeError;
+        }
+        throw new Error("expected a throw");
+      };
+      for (const [schema, value, message] of refused) {
+        const bare = failure(() => schema.encode(value as never));
+        expect([bare.message, bare.path]).toEqual([message, undefined]);
+        const field = failure(() => m.object({ k: schema }).encode({ k: value } as never));
+        expect([field.message, field.path]).toEqual([`${message} at k`, "k"]);
+        const element = failure(() => m.array(schema).encode([value] as never));
+        expect([element.message, element.path]).toEqual([`${message} at [0]`, "[0]"]);
+      }
+    });
+
+    it("walks into a Set or a Map from another realm", () => {
+      // `_encode` accepts them by their tag; the walk tested `instanceof` alone and stopped
+      // at the container, so the path named the Set but not the element inside it.
+      const set = runInNewContext("new Set([1, 'x'])") as Set<number>;
+      expect(() => m.object({ s: m.set(m.uint()) }).encode({ s: set })).toThrow(/ at s\[1\]$/);
+      const map = runInNewContext("new Map([['k', 'x']])") as Map<string, number>;
+      expect(() => m.object({ m: m.map(m.string(), m.uint()) }).encode({ m: map })).toThrow(
+        / at m\[0\]$/,
+      );
+    });
+
+    it("reads a field named like a prototype member the way the encoder does", () => {
+      // Once such a field exists the encoder reads own properties only; the walk read the
+      // inherited `constructor` function, refused it as a uint, and blamed that field
+      // for the `zip` the caller actually got wrong.
+      const schema = m.object({ constructor: m.uint().optional(), zip: m.uint() });
+      expect(() => schema.encode({ zip: "x" } as never)).toThrow(/ at zip$/);
+    });
+
     it("appends the path exactly once through a re-entrant encode", () => {
       const inner = m.object({ zip: m.uint() });
       const outer = m.object({ tag: m.string(), user: m.object({ zip: m.uint() }) });
@@ -1202,8 +1295,10 @@ describe("without Buffer or String.prototype.isWellFormed, as in a browser", () 
     }
   });
 
-  // Bug: TextDecoder strips a leading U+FEFF by default, and here every string goes through it.
-  it.fails("keeps a leading U+FEFF", () => {
+  // Here every string goes through TextDecoder, which strips a leading U+FEFF unless told
+  // not to: the one runtime path where any string starting with the mark lost it.
+  it("keeps a leading U+FEFF", () => {
     expect(fresh.m.string().decode(fresh.m.string().encode("\uFEFFabc"))).toBe("\uFEFFabc");
+    expect(fresh.m.string().decode(new Uint8Array([4, 0xef, 0xbb, 0xbf, 0x61]))).toBe("\uFEFFa");
   });
 });

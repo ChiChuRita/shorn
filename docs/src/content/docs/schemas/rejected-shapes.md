@@ -12,7 +12,7 @@ shorn refuses any schema it cannot encode exactly. Unless a section says otherwi
 | `$ref` to another document | build | inline the definition |
 | Recursion past 256 levels, or with no way out | encode and decode | a nullable back-edge, or an array |
 | A recursive type inside a `Set` or `Map` | build | hold the cycle in an array or an object |
-| `z.undefined()`, `z.nan()`, a symbol, a transform | build | convert at the edge |
+| `z.undefined()`, `z.nan()`, a symbol, a transform, a `z.codec()` | build | convert at the edge |
 | ArkType `Set` or `Map` | build | a typed collection, or convert at the edge |
 | Empty enum | build | none; an enum needs at least one member |
 | `NaN`, `Infinity` or `-0` enum member | build | a finite number, or a string |
@@ -74,7 +74,7 @@ An intersection (`allOf`) would need the merged shape, which the validator has n
 
 > Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported
 
-shorn converts and compares both `jsonSchema.input()` and `.output()`. A default or a widening refinement that makes the two wire shapes differ is refused, because shorn cannot reverse that change while encoding. With `z.codec()`, JSON Schema conversion usually throws before this check is reached.
+shorn converts and compares both `jsonSchema.input()` and `.output()`. A default or a widening refinement that makes the two wire shapes differ is refused, because shorn cannot reverse that change while encoding. A `z.codec()` is refused by name before this check is reached, [below](#values-with-no-wire-form-and-transforms).
 
 ## Values with no wire form, and transforms
 
@@ -96,6 +96,14 @@ the edge, see Rejected Shapes)
 That is what Valibot's converter produces for `v.undefined()` and `v.pipe(..., v.transform(...))`, and for `v.date()`, `v.bigint()`, `v.set()` and `v.map()` when the [`valibotOverride` recipe](/validators/valibot/#rich-types) is not used. ArkType reaches it through a constraint shorn has no hook for, such as the predicate behind `"string.date"`.
 
 A one-way transform has no reverse direction in Standard Schema, so shorn cannot undo it on decode. Use `z.codec()` for a declarative pair that runs both ways, applied outside the codec. See [What still needs converting at the edge](/schemas/rich-types/#what-still-needs-converting-at-the-edge).
+
+Passed to `compile()` itself, a `z.codec()` is refused wherever it sits in the schema:
+
+> A z.codec() would transform twice; compile its wire side instead
+
+shorn validates on both sides and writes what the validator returns, so decode would read the codec's output back and run its forward transform over it again. A codec from seconds to milliseconds came back a thousand times too large, and nothing threw. Compile the wire side, as [the Zod page shows](/validators/zod/#what-is-still-refused).
+
+A refinement that rewrites its value runs on both sides for the same reason, and shorn cannot tell one apart from a check: Zod's `.overwrite()` and an ArkType morph whose two sides have the same wire shape both compile. Such a function has to return its own output unchanged when it runs a second time, as `.trim()` does.
 
 ## ArkType's `Set` and `Map`
 

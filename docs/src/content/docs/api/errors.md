@@ -33,11 +33,14 @@ try {
 }
 ```
 
-To avoid exceptions, use `safeDecode`. It returns either `{ success: true, data }` or `{ success: false, error }`, and wraps anything thrown that is not already an `Error`.
+To avoid exceptions for bad input, use `safeDecode`. It returns either `{ success: true, data }` or `{ success: false, error }`, and wraps anything thrown that is not already an `Error`. A schema shorn cannot compile, or an argument that is not a schema, still throws from the first call: that is a bug in the program rather than in the input, and a failed result would read as the caller's fault.
 
 ## Locating the failure
 
-`EncodeError.path` names the value that failed, as `user.address.zip` or `tags[3]`, and is also appended to `message`. It is absent when no single field is at fault, for example when an array was passed where an object was expected.
+`EncodeError.path` names the value that failed, as `user.address.zip` or `tags[3]`. It is absent when the value as a whole was refused, for example an array passed where an object was expected.
+
+- When the validator refused the value, `path` is the first issue's path, and `message` starts each issue with its own path: `tags[1]: Invalid input: expected string, received number`.
+- When the validator passed the value and the encoder refused it, as it does a lone surrogate or an array over the size limit, the path is appended to `message`: `String contains an unpaired surrogate at user.note`. The same holds for everything the `m` API and `unchecked()` refuse.
 
 ```ts
 try {
@@ -47,15 +50,15 @@ try {
 }
 ```
 
-`issues` is set when a validator rejected the value. It holds the validator's own [Standard Schema issues](https://standardschema.dev) rather than the `; `-joined summary in `message`. Use it to build a field-keyed response without running the validator a second time. A `DecodeError` from a failed validation carries the same array.
+`issues` is set when a validator rejected the value. It holds the validator's own [Standard Schema issues](https://standardschema.dev) rather than the `; `-joined summary in `message`. Use it to build a field-keyed response without running the validator a second time. A `DecodeError` from a failed validation carries the same array. A path segment can be a key or a `{ key }` object, which is what Valibot writes, so read `key` off it:
 
 ```ts
 const result = safeDecode(Person, bytes);
 if (!result.success && result.error instanceof DecodeError) {
-  return Response.json(
-    { fields: result.error.issues?.map((issue) => issue.path?.join(".")) },
-    { status: 422 },
+  const fields = result.error.issues?.map((issue) =>
+    issue.path?.map((segment) => (typeof segment === "object" ? segment.key : segment)).join("."),
   );
+  return Response.json({ fields }, { status: 422 });
 }
 ```
 
@@ -85,10 +88,12 @@ All of these are `EncodeError` instances thrown when the codec is built. See [Re
 | `A Set or Map element has no Standard JSON Schema of its own` | a Set or Map whose element is not a schema shorn can convert on its own |
 | `ArkType's Set carries no element type, so there is nothing to encode its members as; convert it at the edge` | ArkType's `Set` or `Map` keyword. Neither names the type of its members, and a format without type tags writes members and nothing else |
 | `X cannot be represented in JSON Schema` | a Zod or ArkType type with no wire form: `undefined`, `void`, `symbol`, `nan`, `custom`, `function`, `transform`, and ArkType protos such as `RegExp` or `URL`. `X` is the validator's own name for it |
+| `encodeInto() takes a codec, not a schema` | a Standard Schema passed to `encodeInto()`, which writes with a codec it is handed rather than compiling one. Pass it `compile(schema)` |
+| `A z.codec() would transform twice; compile its wire side instead` | a `z.codec()` anywhere in a schema passed to `compile()`. shorn validates on both sides, so decode would run the codec's forward transform a second time. Compile the wire side and call `z.encode()` and `z.decode()` around it |
 | `A literal undefined or bigint cannot be represented in JSON Schema` | `z.literal(undefined)` or `z.literal(1n)`. Zod would drop the first member and write the second as a number, so either would decode to a different value than was declared |
 | `The second argument must be a Standard JSON Schema implementation (toStandardJsonSchema(schema) for Valibot) or a JSON Schema document` | a `structure` that is neither. A plain object counts as a document when it has `$schema`, `$ref`, `type`, `anyOf`, `oneOf`, `const`, `enum`, `properties` or `x-shorn`. A validator passed twice, or a structure wrapped in `{ structure }`, has none of those |
 | `Required property "x" has no schema` | `required` names a property that is missing from `properties` |
-| `A "__proto__" property does not survive a JSON Schema; rename the field` | a field named `__proto__`. No validator's JSON Schema can carry it: the key sets the prototype of the `properties` object instead of joining it, so the field would be missing from the wire shape |
+| `A "__proto__" property does not survive a JSON Schema; rename the field` | a field named `__proto__` in a Zod or Valibot schema. Valibot's converter sets the prototype of `properties` with the key instead of adding the field, and Zod's validator drops the key from every value it returns, so no value could reach the encoder with it. A hand-written JSON Schema document paired with a validator that keeps the key is accepted |
 | `Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported` | a default or widening refinement makes the two sides differ |
 | `Standard Schema provides validation but not structure; pass a Standard JSON Schema implementation as the second argument` | Valibot, Zod before 4.2, ArkType before 2.1.28 |
 | `This schema already decodes to null; wrapping it in nullable() would give null two encodings` | `m.literal(null).nullable()`, or a second null marker over one already reachable. Never from a validator schema: `compile()` drops a redundant wrapper instead of reaching this |
@@ -117,7 +122,9 @@ This Standard Schema validates asynchronously; use encodeAsync/decodeAsync,
 which accept either this schema or a codec built from it.
 ```
 
-Every codec that reaches this error can follow the remedy, fingerprinted ones included. A codec with no validator at all gets a different message:
+Every codec that reaches this error can follow the remedy, fingerprinted ones included. The message can also mean a Zod refinement threw: Zod answers with a Promise whenever one does, so a synchronous schema lands here too. `encodeAsync` then reports the refinement's own error, with the original as `cause`.
+
+A codec with no validator at all gets a different message:
 
 ```text
 This codec has no validator to await; async validation needs a codec from

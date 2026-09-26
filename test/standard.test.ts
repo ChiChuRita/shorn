@@ -520,6 +520,19 @@ describe("Standard Schema adapter", () => {
       const Huge = compile(z.array(z.string()).length(1_000_000));
       expect(() => Huge.decode(new Uint8Array([1, 2, 3]))).toThrow(/remaining input/);
     });
+
+    it("carries the slot bound when a compiled codec sits inside an m container", () => {
+      // The codec copied every fact of its structural half but `_slots`, so an `m`
+      // array around it saw zero slots and skipped the ceiling: this built, and turned
+      // an empty payload into 2,000,000 slots. At a million a level it is the OOM the
+      // bound exists for. `examples/02-rpc.ts` nests compiled codecs in `m` this way.
+      const inner = compile(z.array(z.literal(true)).length(1000));
+      expect(inner._slots).toBe(unchecked(inner)._slots);
+      const refusal = /or a fixed count of them must stay under the collection limit/;
+      expect(() => m.array(inner, 2000)).toThrow(refusal);
+      expect(() => m.array(unchecked(inner), 2000)).toThrow(refusal);
+      expect(m.array(inner, 900).decode(new Uint8Array(0))).toHaveLength(900);
+    });
   });
 
   it("keeps the selected library's validation behavior", () => {
@@ -563,6 +576,29 @@ describe("Standard Schema adapter", () => {
       "hello",
     );
     expect(() => Value.encode("hello")).toThrow(/validates asynchronously/);
+  });
+
+  it("leaves no unhandled rejection when a sync entry point meets a promise", async () => {
+    // Zod answers with a Promise whenever a refinement throws, and a sync encode that met
+    // one threw here and dropped it, so its rejection went unhandled. By default that
+    // ends a Node process: one value that tripped the refinement took a server down.
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", record);
+    try {
+      const Throwing = z.int().refine(() => {
+        throw new RangeError("boom");
+      });
+      expect(() => compile(Throwing).encode(5)).toThrow(/validates asynchronously/);
+      expect(safeEncode(Throwing, 5).success).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+      // The async twin reaches the refinement's own error, which is the remedy the
+      // message gives.
+      await expect(encodeAsync(Throwing, 5)).rejects.toThrow("boom");
+    } finally {
+      process.off("unhandledRejection", record);
+    }
   });
 
   it("detects promise-like validators without relying on Promise identity", () => {
@@ -654,6 +690,28 @@ describe("Standard Schema adapter", () => {
       expect(fingerprinted(compile(z.iso.datetime())).fingerprintHex).not.toBe(
         fingerprinted(compile(z.string())).fingerprintHex,
       );
+    });
+
+    it("refuses a z.codec(), whose transform decode would run a second time", () => {
+      // Encode writes what the validator returns and decode validates what it reads, so a
+      // codec's forward transform ran twice per round trip: 1_700_000_000 seconds came
+      // back as 1_700_000_000_000_000 and nothing threw. A trim codec came back right,
+      // which is how it went unnoticed.
+      const Seconds = z.codec(z.int(), z.int(), {
+        decode: (seconds) => seconds * 1000,
+        encode: (milliseconds) => milliseconds / 1000,
+      });
+      const refusal = /A z\.codec\(\) would transform twice/;
+      expect(() => compile(Seconds)).toThrow(refusal);
+      expect(() => compile(z.object({ at: Seconds }))).toThrow(refusal);
+
+      // The documented route: compile the wire side and let Zod run both directions.
+      const Rich = z.object({ at: Seconds });
+      const Wire = compile(z.object({ at: z.int() }));
+      const bytes = Wire.encode(z.encode(Rich, { at: 1_700_000_000_000 }));
+      expect(z.decode(Rich, Wire.decode(bytes))).toEqual({ at: 1_700_000_000_000 });
+      // A pipe without a way back is read as before.
+      expect([...compile(z.string().pipe(z.string().min(1))).encode("a")]).toEqual([1, 97]);
     });
 
     it("keeps refusing what has no wire form at all, in the vendor's own words", () => {
@@ -766,6 +824,15 @@ describe("Standard Schema adapter", () => {
 
     expect(decode(Stripping, encode(Stripping, extra as never))).toEqual({ name: "x" });
     expect(() => encode(Strict, extra as never)).toThrow(/Unrecognized key/);
+  });
+
+  it("refuses a Zod field named __proto__, which Zod's own validator drops", () => {
+    // Zod 4.6 lists the field in `properties` as an own key, so the codec built, but every
+    // value Zod returns lacks the key: every encode failed with a bare "Expected a
+    // string". Refused by name now, as Valibot's spelling and Zod 4.5's already were. A
+    // hand-written document with a validator that keeps the key still works, below.
+    const Proto = z.object({ ["__proto__"]: z.string(), a: z.string() });
+    expect(() => compile(Proto)).toThrow(/"__proto__" property does not survive/);
   });
 
   it("preserves a declared __proto__ field without mutating the decoded prototype", () => {
@@ -1196,6 +1263,36 @@ describe("Standard Schema adapter", () => {
       expect(error.path).toBe("user.note");
     });
 
+    it("takes a validator failure's path from the validator, not from a walk", async () => {
+      // The walk re-encoded the value the validator was handed, before it coerced
+      // anything, so here it found `a` still a number and blamed it for the error `b`
+      // raised: "b: Too big … at a". The issue already knows where it is.
+      const Row = z.object({ a: z.coerce.string(), b: z.int().max(3) });
+      const coerced = thrown(() => compile(Row).encode({ a: 123, b: 9 } as never)) as EncodeError;
+      expect(coerced.path).toBe("b");
+      expect(coerced.message).toBe("b: Too big: expected number to be <=3");
+
+      // A refusal of the whole value names no field, where the walk named the first one.
+      const Person = z.object({ name: z.string(), age: z.int() });
+      const whole = thrown(() => compile(Person).encode([] as never)) as EncodeError;
+      expect(whole.path).toBeUndefined();
+      expect(whole.message).toBe("Invalid input: expected object, received array");
+
+      // Indexes read as they do for the wire, from every vendor, and async agrees.
+      const Tags = z.object({ tags: z.array(z.string()) });
+      const sync = thrown(() => compile(Tags).encode({ tags: ["a", 2 as never] })) as EncodeError;
+      expect(sync.path).toBe("tags[1]");
+      expect(sync.message).toMatch(/^tags\[1\]: /);
+      const later = await encodeAsync(Tags, { tags: ["a", 2 as never] }).catch((error) => error);
+      expect([later.message, later.path]).toEqual([sync.message, sync.path]);
+      const ValibotTags = v.object({ tags: v.array(v.string()) });
+      const valibot = thrown(() =>
+        compile(ValibotTags, toStandardJsonSchema(ValibotTags)).encode({ tags: ["a", 2 as never] }),
+      ) as EncodeError;
+      expect(valibot.path).toBe("tags[1]");
+      expect(valibot.message).toMatch(/^tags\[1\]: /);
+    });
+
     it("carries the validator's issues alongside the joined message", () => {
       const Person = compile(z.object({ age: z.int().min(18), name: z.string().min(2) }));
       const error = thrown(() => Person.encode({ age: 3, name: "x" })) as EncodeError;
@@ -1252,7 +1349,37 @@ describe("Standard Schema adapter", () => {
     it("throws EncodeError, not a TypeError, and does so from every entry point", () => {
       expect(() => compile(null as never)).toThrow(EncodeError);
       expect(() => encode({ type: "object" } as never, 1 as never)).toThrow(/raw JSON Schema/);
-      expect(safeEncode(null as never, 1 as never)).toMatchObject({ success: false });
+      // The safe variants too, below: a wrong schema is the program's bug, not a value's.
+      expect(() => safeEncode(null as never, 1 as never)).toThrow(EncodeError);
+    });
+
+    it("throws a schema error from the safe variants and keeps value errors as results", () => {
+      // Compiled lazily, so an unsupported schema first failed inside a request, came back
+      // as `{ success: false }`, and the quick start's pattern answered every request
+      // with a 400 for what is a bug in the program.
+      const Unsupported = z.object({ a: z.undefined() });
+      expect(() => safeEncode(Unsupported, { a: undefined })).toThrow(/cannot be represented/);
+      expect(() => safeDecode(Unsupported, new Uint8Array([0]))).toThrow(/cannot be represented/);
+      // What a caller cannot control stays a result: a bad value, bad bytes, a wrong type.
+      const Person = z.object({ name: z.string() });
+      expect(safeEncode(Person, { name: 1 as never }).success).toBe(false);
+      expect(safeDecode(Person, new Uint8Array([9])).success).toBe(false);
+      expect(safeDecode(Person, "nope" as never).success).toBe(false);
+    });
+
+    it("takes a codec in the safe variants, as the async ones do", () => {
+      // The docs pair `safeDecode` for untrusted input with `fingerprinted(compile(...))`
+      // for stored data, and the two could not be combined: a good payload came back
+      // `success: false`, "received a shorn schema".
+      const Person = z.object({ name: z.string(), age: z.int().nonnegative() });
+      const stored = fingerprinted(compile(Person), { bytes: 4 });
+      const bytes = stored.encode({ name: "Ada", age: 36 });
+      expect(safeDecode(stored, bytes)).toEqual({ success: true, data: { name: "Ada", age: 36 } });
+      expect(safeEncode(stored, { name: "Ada", age: 36 })).toEqual({ success: true, data: bytes });
+      const other = fingerprinted(compile(z.object({ name: z.string() })), { bytes: 4 });
+      const mismatch = safeDecode(other, bytes);
+      expect(mismatch.success).toBe(false);
+      if (!mismatch.success) expect(mismatch.error).toBeInstanceOf(DecodeError);
     });
 
     it("gates the structure argument too, naming the remedy rather than a TypeError", () => {

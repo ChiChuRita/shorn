@@ -164,9 +164,9 @@ type StructureFor<S extends StandardSchemaV1> =
 export type SafeResult<T> = { success: true; data: T } | { success: false; error: Error };
 
 /**
- * The whole body of `safeEncode` and `safeDecode`. The normalization is the part
- * worth having once: a vendor's validator may reject with something that is not an
- * `Error`, and `SafeResult` promises one.
+ * What `safeEncode` and `safeDecode` catch. The normalization is the part worth having
+ * once: a vendor's validator may reject with something that is not an `Error`, and
+ * `SafeResult` promises one.
  */
 function safely<T>(run: () => T): SafeResult<T> {
   try {
@@ -176,19 +176,31 @@ function safely<T>(run: () => T): SafeResult<T> {
   }
 }
 
-/** The joined message is for a log line, the array for an HTTP handler. */
+/**
+ * An issue's path in the notation `EncodeError.path` uses for the wire, `tags[1].id`, so a
+ * field reads the same whichever side refused it. Valibot's segments are `{ key }` objects.
+ */
+function issuePath(issue: StandardSchemaV1.Issue): string {
+  let path = "";
+  for (const segment of issue.path ?? []) {
+    const key = typeof segment === "object" ? segment.key : segment;
+    path += typeof key === "number" ? `[${key}]` : `${path && "."}${String(key)}`;
+  }
+  return path;
+}
+
+/**
+ * The joined message is for a log line, the array for an HTTP handler. `path` is the
+ * first issue's, and is what `Schema.encode` would otherwise have guessed at by walking
+ * the value the validator was handed, which named the wrong field once it coerced one.
+ */
 function validationError(issues: ReadonlyArray<StandardSchemaV1.Issue>): EncodeError {
+  const paths = issues.map(issuePath);
   const error = new EncodeError(
-    issues
-      .map((issue) => {
-        const path = issue.path
-          ?.map((segment) => String(typeof segment === "object" ? segment.key : segment))
-          .join(".");
-        return path ? `${path}: ${issue.message}` : issue.message;
-      })
-      .join("; "),
+    issues.map((issue, index) => (paths[index] ? `${paths[index]}: ` : "") + issue.message).join("; "),
   );
   error.issues = issues;
+  if (paths[0]) error.path = paths[0];
   return error;
 }
 
@@ -223,6 +235,10 @@ function validateSync<T>(schema: StandardSchemaV1<unknown, T>, value: unknown): 
   // Thenable rather than `instanceof Promise`: a vendor may hand back a promise
   // from another realm, which fails the instance check while being one.
   if (typeof (result as { then?: unknown } | null)?.then === "function") {
+    // Handled before it is dropped. Zod answers with a Promise whenever a refinement
+    // throws, so this is often a rejection nobody else will ever see, and an unhandled
+    // rejection ends a Node process by default: one bad value took the server with it.
+    (result as PromiseLike<unknown>).then(undefined, () => {});
     throw new EncodeError(
       "This Standard Schema validates asynchronously; use encodeAsync/decodeAsync, which accept either this schema or a codec built from it.",
     );
@@ -261,7 +277,10 @@ class StandardBackedSchema<T> extends Schema<T> {
     override readonly signature: string,
   ) {
     super();
+    // Every fact a container reads from its children, since this codec can be one: an
+    // `m` array around it that saw no `_slots` skipped the empty-payload slot ceiling.
     this._minWidth = _structural._minWidth;
+    this._slots = _structural._slots;
     // Carried through, or `compile(z.string().nullable()).nullable()` would build a
     // second null marker over one that already exists and give null two encodings.
     this._yieldsNull = _structural._yieldsNull;
@@ -300,7 +319,7 @@ function asSchema(value: unknown): JsonSchema {
   return value as JsonSchema;
 }
 
-/** Said from two places, since two vendors lose a `__proto__` field two different ways. */
+/** Said from three places, since the vendors lose a `__proto__` field three different ways. */
 const PROTO_KEY_MESSAGE =
   'A "__proto__" property does not survive a JSON Schema; rename the field';
 
@@ -981,6 +1000,8 @@ interface ZodOverrideContext {
         readonly values?: readonly unknown[];
         readonly keyType?: unknown;
         readonly valueType?: unknown;
+        readonly reverseTransform?: unknown;
+        readonly shape?: object;
       };
     };
   };
@@ -1010,6 +1031,26 @@ function zodOverride(io: Side, converting: Set<unknown>): (context: ZodOverrideC
         json[RICH_KEYWORD] = "map";
         json[RICH_KEY_KEYWORD] = childJsonSchema(def.keyType, io, converting);
         json.items = childJsonSchema(def.valueType, io, converting);
+        return;
+      case "object":
+        // Zod 4.6 writes a `__proto__` field into `properties` as an own key, where 4.5
+        // left it out, but its validator still drops the key from every value it returns,
+        // so every encode failed on a field that looked declared. Refused here, with the
+        // message the other spellings get, because the document alone reads as valid.
+        if (def.shape !== undefined && Object.hasOwn(def.shape, "__proto__")) {
+          throw new EncodeError(PROTO_KEY_MESSAGE);
+        }
+        return;
+      case "pipe":
+        // A `z.codec()` is the one pipe with a way back, and shorn cannot take it: encode
+        // writes the validator's output, so decode reads that output and runs the forward
+        // transform over it again. A seconds-to-milliseconds codec came back a thousand
+        // times too large. A plain `.pipe()` has no reverse and is read as before.
+        if (def.reverseTransform !== undefined) {
+          throw new EncodeError(
+            "A z.codec() would transform twice; compile its wire side instead",
+          );
+        }
         return;
       case "literal":
         // With the test off, Zod drops an `undefined` member and writes a bigint one as a
@@ -1289,6 +1330,11 @@ export function compile(
   return getCompiled(schema, structure);
 }
 
+/** A codec as given, or the cached one `compile()` builds, for the entry points taking either. */
+function codecOf(schemaOrCodec: StandardSchemaV1 | Schema<unknown>, structure?: Structure): Schema<unknown> {
+  return schemaOrCodec instanceof Schema ? schemaOrCodec : getCompiled(schemaOrCodec, structure);
+}
+
 /**
  * The same codec with the validator taken out. Identical bytes on the wire; the
  * refinements are simply not run, on either side. On the three-field zod person fixture
@@ -1319,9 +1365,7 @@ export function unchecked(
   schemaOrCodec: StandardSchemaV1 | Schema<unknown>,
   structure?: Structure,
 ): Schema<unknown> {
-  const codec =
-    schemaOrCodec instanceof Schema ? schemaOrCodec : getCompiled(schemaOrCodec, structure);
-  const bare = codec._structural;
+  const bare = codecOf(schemaOrCodec, structure)._structural;
   if (bare === undefined) {
     // Not a no-op return of the argument: an `m` schema really is already unchecked, but
     // `compile(schema).nullable()` reaches here too, and handing that back would keep
@@ -1367,6 +1411,7 @@ export function decode(
   return getCompiled(schema, structure).decode(value);
 }
 
+export function safeEncode<T>(codec: Schema<T>, value: T): SafeResult<Uint8Array>;
 export function safeEncode<S extends EncodableStandardSchema>(
   schema: S,
   value: StandardSchemaV1.InferOutput<S>,
@@ -1377,13 +1422,17 @@ export function safeEncode<S extends StandardSchemaV1>(
   structure: StructureFor<S>,
 ): SafeResult<Uint8Array>;
 export function safeEncode(
-  schema: StandardSchemaV1,
+  schema: StandardSchemaV1 | Schema<unknown>,
   value: unknown,
   structure?: Structure,
 ): SafeResult<Uint8Array> {
-  return safely(() => getCompiled(schema, structure).encode(value));
+  // Built outside `safely`: a schema shorn refuses is a bug in the program, not a bad
+  // value, and returned as a result it answered every request with a 400.
+  const codec = codecOf(schema, structure);
+  return safely(() => codec.encode(value));
 }
 
+export function safeDecode<T>(codec: Schema<T>, value: Uint8Array): SafeResult<T>;
 export function safeDecode<S extends EncodableStandardSchema>(
   schema: S,
   value: Uint8Array,
@@ -1394,11 +1443,14 @@ export function safeDecode<S extends StandardSchemaV1>(
   structure: StructureFor<S>,
 ): SafeResult<StandardSchemaV1.InferOutput<S>>;
 export function safeDecode(
-  schema: StandardSchemaV1,
+  schema: StandardSchemaV1 | Schema<unknown>,
   value: Uint8Array,
   structure?: Structure,
 ): SafeResult<unknown> {
-  return safely(() => getCompiled(schema, structure).decode(value));
+  // Outside `safely` for `safeEncode`'s reason. The payload is the only input a caller
+  // does not control, so every failure of the bytes is still a result.
+  const codec = codecOf(schema, structure);
+  return safely(() => codec.decode(value));
 }
 
 /**
@@ -1412,8 +1464,7 @@ function asyncParts(
   schemaOrCodec: StandardSchemaV1 | Schema<unknown>,
   jsonSchema: Structure | undefined,
 ): readonly [source: StandardSchemaV1<unknown, unknown>, structure: Schema<unknown>] {
-  const codec =
-    schemaOrCodec instanceof Schema ? schemaOrCodec : getCompiled(schemaOrCodec, jsonSchema);
+  const codec = codecOf(schemaOrCodec, jsonSchema);
   const source = codec._source;
   const structure = codec._structural;
   if (source === undefined || structure === undefined) {

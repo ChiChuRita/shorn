@@ -60,7 +60,7 @@ socket.send(frame.subarray(0, end));
 
 The bytes are exactly what `codec.encode(value)` would return. What you save is the output array and the copy into the frame that would follow it, which together are about half the cost of a small encode: on the Person fixture, 48 ns down to 23 ns, and a 100-message frame in 40% of the time. For a message that goes straight to `send()`, `encode()` is simpler and no slower.
 
-Takes any codec: from `compile()`, `fingerprinted()`, `unchecked()`, or `m`. Throws `EncodeError` when the value does not fit, when `offset` is outside `target`, or when `target` is not a `Uint8Array`, and names the failing field as `encode()` does. After a too-small target, the bytes from `offset` onward are unspecified.
+Takes any codec: from `compile()`, `fingerprinted()`, `unchecked()`, or `m`, and refuses a schema that is not one yet. Throws `EncodeError` when the value does not fit, when `offset` is outside `target`, or when `target` is not a `Uint8Array`, and names the failing field as `encode()` does. After a too-small target, the bytes from `offset` onward are unspecified.
 
 Decoding needs no counterpart: `decode()` takes any `Uint8Array` view, so pass it `frame.subarray(start, end)`.
 
@@ -69,11 +69,13 @@ Decoding needs no counterpart: `decode()` takes any `Uint8Array` view, so pass i
 ```ts
 safeEncode(schema, value, structure?): SafeResult<Uint8Array>;
 safeDecode(schema, bytes, structure?): SafeResult<InferOutput<S>>;
+safeEncode<T>(codec: Schema<T>, value: T): SafeResult<Uint8Array>;
+safeDecode<T>(codec: Schema<T>, bytes: Uint8Array): SafeResult<T>;
 
 type SafeResult<T> = { success: true; data: T } | { success: false; error: Error };
 ```
 
-Same behavior, without throwing. Anything thrown that is not an `Error` is wrapped, so `result.error` is always an `Error`.
+Same behavior, without throwing for bad input. Anything thrown that is not an `Error` is wrapped, so `result.error` is always an `Error`. A schema shorn cannot compile still throws, from the first call, because it is a bug in the program: returned as a result, it would answer every request with a 400. Like the async pair, both take a codec as well as a schema, so a stored payload can be checked against its `fingerprinted()` codec without a `try`.
 
 ## `encodeAsync` / `decodeAsync`
 

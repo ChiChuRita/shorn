@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { DecodeError, compile, encode, type Schema } from "../src/index.js";
+import { DecodeError, compile, encode, type Schema, unchecked } from "../src/index.js";
 import { below, mulberry32, pick, propertySeeds, randomString } from "./generate.js";
 
 /**
@@ -92,7 +92,7 @@ function leaf(rng: Rng): ZodGen {
 function zodGen(rng: Rng, depth: number): ZodGen {
   if (depth <= 0 || rng() < 0.45) return leaf(rng);
 
-  switch (below(rng, 3)) {
+  switch (below(rng, 4)) {
     case 0: {
       // Doubled nullability is deliberate and legal: zod nests `anyOf` and the wire
       // side must collapse it, but nullable over a bare null literal is refused at
@@ -116,6 +116,18 @@ function zodGen(rng: Rng, depth: number): ZodGen {
         zeroWidth: false,
         yieldsNull: false,
         sample: (r) => Array.from({ length: below(r, 5) }, () => item.sample(r)),
+      };
+    }
+    case 2: {
+      // A count the schema fixes: no length varint, and the one array a zero-width element
+      // may fill, which is what puts the slot bound through the compile seam.
+      const item = zodGen(rng, depth - 1);
+      const count = below(rng, 4);
+      return {
+        schema: z.array(item.schema).length(count),
+        zeroWidth: count === 0 || item.zeroWidth,
+        yieldsNull: false,
+        sample: (r) => Array.from({ length: count }, () => item.sample(r)),
       };
     }
     default: {
@@ -158,9 +170,8 @@ function zodGen(rng: Rng, depth: number): ZodGen {
  * `toString` and friends. Both exclusions are zod's limits, not shorn's, and
  * generating them would assert against zod rather than against the seam:
  *
- * - `__proto__` never arrives. zod builds its JSON Schema `properties` on a plain
- *   object literal, so the key sets that object's prototype instead of becoming a
- *   property, and shorn is handed a schema with no such field.
+ * - `__proto__` is refused at compile: zod's validator drops the key from every
+ *   value it returns, so no value could carry the field to the encoder.
  * - An `Object.prototype` member name cannot be an optional property at all.
  *   `z.object({ valueOf: z.array(z.string()).optional() }).parse({})` throws on its
  *   own, reading the inherited function as the field's value.
@@ -261,6 +272,23 @@ describe(`property: generated vendor schemas through the compile seam${SEEDS}`, 
         }
         expect([...codec.encode(decoded)], `seed ${seed}`).toEqual([...bytes]);
       }
+    }
+  });
+
+  it("reports the construction facts of the structural half it wraps", async () => {
+    // A container reads its children's facts in its own constructor, so a codec that
+    // forgets to carry one hides it from every `m` container built around it: `_slots`
+    // went missing this way, and the empty-payload slot ceiling with it.
+    const facts = (schema: Schema<unknown>) => [
+      schema._minWidth,
+      schema._slots,
+      schema._yieldsNull,
+      schema._yieldsUndefined,
+    ];
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
+      await breathe(seed);
+      const codec = codecFor(zodGen(mulberry32(seed * 6_700_417), 4).schema);
+      expect(facts(codec), `seed ${seed}`).toEqual(facts(unchecked(codec)));
     }
   });
 
