@@ -28,7 +28,7 @@ shorn refuses any schema it cannot encode exactly. Unless a section says otherwi
 
 ## Overlapping unions
 
-> Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported
+> Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported; give the branches one property that is a distinct const in each, or make no two branches share a JSON type
 
 Three kinds of union are supported. In each one the encoder can name the branch without trying any of them:
 
@@ -48,7 +48,7 @@ Picking a branch there would mean trying each in turn and keeping the first that
 
 `integer` and `number` count as one type here, because nothing about `5` says which one it was declared as. A branch with a `type` array, or with no `type` at all, is refused for the same reason: it overlaps whatever sits next to it.
 
-Extra properties are a separate question from open objects, which are [supported](/schemas/supported-types/#records-open-objects-and-dynamic-values). When a validator leaves out `additionalProperties` entirely, as ArkType and some Valibot object schemas do, the object is closed and has no tail to hold extras. The codec builds, and encoding a value with an extra property throws `Unknown object property "x"`.
+Extra properties are a separate question from open objects, which are [supported](/schemas/supported-types/#records-open-objects-and-dynamic-values). When a validator leaves out `additionalProperties` entirely, as ArkType and Valibot's `looseObject` do, the object is closed and has no tail to hold extras. The codec builds, and encoding a value with an extra property throws `Unknown object property "x"`.
 
 ## Recursion that cannot terminate
 
@@ -68,7 +68,9 @@ A `$ref` is resolved against the document it appears in. Fetching a remote schem
 
 > Unsupported JSON Schema combinator allOf
 
-An intersection (`allOf`) would need the merged shape, which the validator has not computed. `z.never()` (`not`) admits no value, so there is nothing to encode. Merge the intersection yourself into one object schema.
+An intersection that arrives as `allOf` would need the merged shape, which the validator has not computed. Valibot's `v.intersect` arrives that way, and so does any intersection Zod cannot merge. From Zod 4.5 an intersection of plain objects arrives merged into one object, and ArkType merges its own intersections, so those compile. Merge a refused intersection yourself into one object schema.
+
+`z.never()` (`not`) admits no value, so there is nothing to encode.
 
 ## Different input and output shapes
 
@@ -164,9 +166,9 @@ An enum whose members are not all strings orders them by their JSON text, becaus
 
 Encoding `-0` against an enum that *does* list `0` is refused too, at encode time rather than at build: it would go out as the `0` member's index and come back as `0`. `m.literal(0).encode(-0)` is refused for the same reason.
 
-The same four values as a single literal are not caught, because the validator's JSON Schema has already lost them. `z.literal(NaN)` and both infinities arrive as `{ type: "number", const: null }`, and `z.literal(-0)` as `{ const: 0 }`.
+The same four values as a single literal are not caught, because the validator's JSON Schema has already lost them. `z.literal(NaN)` and both infinities arrive as `{ type: "number", const: null }`, and `z.literal(-0)` as `{ type: "number", const: 0 }`.
 
-The first three build a codec that refuses every value it is given and decodes to `null`. `-0` round-trips to `0`. Do not use a non-finite number or `-0` as a literal.
+The first three build a codec that refuses every value it is given. Decoding the empty payload gives `null`, which the validator then rejects, so only `unchecked()` returns it. `z.literal(-0)` builds a `0` literal: it refuses `-0` at encode, and accepts and returns `0`, which Zod's own check lets through. Do not use a non-finite number or `-0` as a literal.
 
 ## Arrays of zero-width elements
 
@@ -182,7 +184,7 @@ An array whose count the schema fixes may too, for the same reason, but only up 
 
 ```ts
 z.array(z.literal("x")).length(1_000_000);                     // fine: a million slots
-z.array(z.array(z.literal("x")).length(1000)).length(1000);     // refused: a million and one
+z.array(z.array(z.literal("x")).length(1000)).length(1000);     // refused: 1,001,000 slots
 ```
 
 See [Hostile input](/hostile-input/).

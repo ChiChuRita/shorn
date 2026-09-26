@@ -149,7 +149,7 @@ An object writes a presence bitmap for its optional fields, `ceil(n / 8)` bytes,
 
 `z.nullable(T)` · `v.nullable(T)` · `"T | null"` → one marker byte, then the value if there is one. Both JSON Schema spellings work: an `anyOf` with two branches where one is `null`, and a `type` array with two entries where one is `"null"`. A two-branch nullable is the cheapest union there is: one byte and no index.
 
-Objects, arrays, and tuples nest with no per-level header. A nested object encodes as nothing more than its fields. Nesting fixed by the schema has no limit of its own, though at about 1,400 levels through `compile()`, or 1,600 through `m`, JavaScript throws a `RangeError` while the codec is being built. Reaching that takes a hostile *schema*, not merely hostile bytes. Nesting chosen by the *payload* is capped: 256 levels for a recursive schema, 64 for a dynamic value.
+Objects, arrays, and tuples nest with no per-level header. A nested object encodes as nothing more than its fields. Nesting fixed by the schema has no limit of its own, though the JavaScript stack runs out at about 1,300 to 1,400 levels through `compile()`, while the codec is being built, or at about 1,600 through `m`, when a value is encoded; [Errors](/api/errors/#one-error-that-is-not-a-decodeerror) says what is thrown. Reaching that takes a hostile *schema*, not merely hostile bytes. Nesting chosen by the *payload* is capped: 256 levels for a recursive schema, 64 for a dynamic value.
 
 ## Refinements are validated, not encoded
 
