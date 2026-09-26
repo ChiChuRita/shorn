@@ -53,7 +53,6 @@
     "test": "vitest run",
     "lint:pack": "publint && attw --pack . --profile esm-only",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm lint:pack",
-    "release": "pnpm check && npm publish",
     "regress": "pnpm build && node --expose-gc bench/regression.mjs",
     "regress:update": "pnpm build && node --expose-gc bench/regression.mjs --update",
     "verify": "pnpm check && pnpm regress",
