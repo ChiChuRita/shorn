@@ -996,6 +996,7 @@ interface ZodOverrideContext {
         readonly values?: readonly unknown[];
         readonly keyType?: unknown;
         readonly valueType?: unknown;
+        readonly reverseTransform?: unknown;
       };
     };
   };
@@ -1025,6 +1026,17 @@ function zodOverride(io: Side, converting: Set<unknown>): (context: ZodOverrideC
         json[RICH_KEYWORD] = "map";
         json[RICH_KEY_KEYWORD] = childJsonSchema(def.keyType, io, converting);
         json.items = childJsonSchema(def.valueType, io, converting);
+        return;
+      case "pipe":
+        // A `z.codec()` is the one pipe with a way back, and shorn cannot take it: encode
+        // writes the validator's output, so decode reads that output and runs the forward
+        // transform over it again. A seconds-to-milliseconds codec came back a thousand
+        // times too large. A plain `.pipe()` has no reverse and is read as before.
+        if (def.reverseTransform !== undefined) {
+          throw new EncodeError(
+            "A z.codec() would transform twice; compile its wire side instead",
+          );
+        }
         return;
       case "literal":
         // With the test off, Zod drops an `undefined` member and writes a bigint one as a
