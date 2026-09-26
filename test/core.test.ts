@@ -180,6 +180,11 @@ describe("shorn core", () => {
     }
   });
 
+  // Bug: the U+FFFD re-decode goes through a TextDecoder that strips a leading U+FEFF.
+  it.fails("keeps a leading U+FEFF in a string that also holds U+FFFD", () => {
+    expect(m.string().decode(m.string().encode("\uFEFF\uFFFD"))).toBe("\uFEFF\uFFFD");
+  });
+
   it("rejects unpaired UTF-16 surrogates instead of changing the string", () => {
     expect(() => m.string().encode("\ud800")).toThrow(/unpaired surrogate/);
     expect(() => m.string().encode("\udc00")).toThrow(/unpaired surrogate/);
