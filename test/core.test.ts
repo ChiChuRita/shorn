@@ -598,6 +598,14 @@ describe("shorn core", () => {
       );
     });
 
+    it("refuses a schema that is not a codec, by name", () => {
+      // A Standard Schema arrives by habit from `encode(schema, value)`, and failed inside
+      // as a raw TypeError: `codec._encode is not a function`.
+      expect(() => encodeInto({ "~standard": {} } as never, 1, new Uint8Array(8))).toThrow(
+        "encodeInto() takes a codec, not a schema",
+      );
+    });
+
     it("refuses an offset outside the target and a target that is not a Uint8Array", () => {
       const target = new Uint8Array(8);
       for (const offset of [-1, 9, 1.5, Number.NaN]) {
