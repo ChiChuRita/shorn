@@ -33,7 +33,7 @@ try {
 }
 ```
 
-To avoid exceptions, use `safeDecode`. It returns either `{ success: true, data }` or `{ success: false, error }`, and wraps anything thrown that is not already an `Error`.
+To avoid exceptions for bad input, use `safeDecode`. It returns either `{ success: true, data }` or `{ success: false, error }`, and wraps anything thrown that is not already an `Error`. A schema shorn cannot compile, or an argument that is not a schema, still throws from the first call: that is a bug in the program rather than in the input, and a failed result would read as the caller's fault.
 
 ## Locating the failure
 

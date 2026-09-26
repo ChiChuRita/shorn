@@ -75,7 +75,7 @@ safeDecode<T>(codec: Schema<T>, bytes: Uint8Array): SafeResult<T>;
 type SafeResult<T> = { success: true; data: T } | { success: false; error: Error };
 ```
 
-Same behavior, without throwing. Anything thrown that is not an `Error` is wrapped, so `result.error` is always an `Error`. Like the async pair, both take a codec as well as a schema, so a stored payload can be checked against its `fingerprinted()` codec without a `try`.
+Same behavior, without throwing for bad input. Anything thrown that is not an `Error` is wrapped, so `result.error` is always an `Error`. A schema shorn cannot compile still throws, from the first call, because it is a bug in the program: returned as a result, it would answer every request with a 400. Like the async pair, both take a codec as well as a schema, so a stored payload can be checked against its `fingerprinted()` codec without a `try`.
 
 ## `encodeAsync` / `decodeAsync`
 

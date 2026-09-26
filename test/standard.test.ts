@@ -1326,7 +1326,22 @@ describe("Standard Schema adapter", () => {
     it("throws EncodeError, not a TypeError, and does so from every entry point", () => {
       expect(() => compile(null as never)).toThrow(EncodeError);
       expect(() => encode({ type: "object" } as never, 1 as never)).toThrow(/raw JSON Schema/);
-      expect(safeEncode(null as never, 1 as never)).toMatchObject({ success: false });
+      // The safe variants too, below: a wrong schema is the program's bug, not a value's.
+      expect(() => safeEncode(null as never, 1 as never)).toThrow(EncodeError);
+    });
+
+    it("throws a schema error from the safe variants and keeps value errors as results", () => {
+      // Compiled lazily, so an unsupported schema first failed inside a request, came back
+      // as `{ success: false }`, and the quick start's pattern answered every request
+      // with a 400 for what is a bug in the program.
+      const Unsupported = z.object({ a: z.undefined() });
+      expect(() => safeEncode(Unsupported, { a: undefined })).toThrow(/cannot be represented/);
+      expect(() => safeDecode(Unsupported, new Uint8Array([0]))).toThrow(/cannot be represented/);
+      // What a caller cannot control stays a result: a bad value, bad bytes, a wrong type.
+      const Person = z.object({ name: z.string() });
+      expect(safeEncode(Person, { name: 1 as never }).success).toBe(false);
+      expect(safeDecode(Person, new Uint8Array([9])).success).toBe(false);
+      expect(safeDecode(Person, "nope" as never).success).toBe(false);
     });
 
     it("takes a codec in the safe variants, as the async ones do", () => {
