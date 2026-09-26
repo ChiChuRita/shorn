@@ -66,6 +66,26 @@ jobs:
       - run: pnpm ls zod valibot arktype @valibot/to-json-schema --depth 0
       - run: pnpm test
 
+  vendors-floor:
+    # The other end of the same promise. The README and the installation page each name a
+    # lowest supported version, and nothing else in CI installs one, so this pins every
+    # vendor at its floor and runs the suite. Valibot's is the lowest release that the
+    # lockfile's @valibot/to-json-schema accepts as a peer, since that converter is how
+    # Valibot reaches shorn at all. Raise a pin here in the same change that moves a floor.
+    name: Vendors at floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm add -w -D zod@4.2.0 arktype@2.1.28 valibot@1.5.0
+      - run: pnpm ls zod valibot arktype @valibot/to-json-schema --depth 0
+      - run: pnpm test
+
   engines-floor:
     # `engines` says Node 20, and a floor CI cannot exercise is a claim rather than
     # a fact. pnpm 11 needs Node 22.13 to install, so the build runs on 22 and the
