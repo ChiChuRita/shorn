@@ -578,6 +578,29 @@ describe("Standard Schema adapter", () => {
     expect(() => Value.encode("hello")).toThrow(/validates asynchronously/);
   });
 
+  it("leaves no unhandled rejection when a sync entry point meets a promise", async () => {
+    // Zod answers with a Promise whenever a refinement throws, and a sync encode that met
+    // one threw here and dropped it, so its rejection went unhandled. By default that
+    // ends a Node process: one value that tripped the refinement took a server down.
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", record);
+    try {
+      const Throwing = z.int().refine(() => {
+        throw new RangeError("boom");
+      });
+      expect(() => compile(Throwing).encode(5)).toThrow(/validates asynchronously/);
+      expect(safeEncode(Throwing, 5).success).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+      // The async twin reaches the refinement's own error, which is the remedy the
+      // message gives.
+      await expect(encodeAsync(Throwing, 5)).rejects.toThrow("boom");
+    } finally {
+      process.off("unhandledRejection", record);
+    }
+  });
+
   it("detects promise-like validators without relying on Promise identity", () => {
     const thenableSchema = {
       "~standard": {

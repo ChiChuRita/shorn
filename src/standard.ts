@@ -235,6 +235,10 @@ function validateSync<T>(schema: StandardSchemaV1<unknown, T>, value: unknown): 
   // Thenable rather than `instanceof Promise`: a vendor may hand back a promise
   // from another realm, which fails the instance check while being one.
   if (typeof (result as { then?: unknown } | null)?.then === "function") {
+    // Handled before it is dropped. Zod answers with a Promise whenever a refinement
+    // throws, so this is often a rejection nobody else will ever see, and an unhandled
+    // rejection ends a Node process by default: one bad value took the server with it.
+    (result as PromiseLike<unknown>).then(undefined, () => {});
     throw new EncodeError(
       "This Standard Schema validates asynchronously; use encodeAsync/decodeAsync, which accept either this schema or a codec built from it.",
     );
