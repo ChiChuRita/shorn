@@ -181,9 +181,18 @@ describe("shorn core", () => {
     }
   });
 
-  // Bug: the U+FFFD re-decode goes through a TextDecoder that strips a leading U+FEFF.
-  it.fails("keeps a leading U+FEFF in a string that also holds U+FFFD", () => {
-    expect(m.string().decode(m.string().encode("\uFEFF\uFFFD"))).toBe("\uFEFF\uFFFD");
+  it("keeps a leading U+FEFF on the fallback decoder", () => {
+    // `TextDecoder` strips a leading byte-order mark unless told not to, so a string that
+    // started with U+FEFF came back one character short, and two payloads decoded alike.
+    // Node reaches that decoder only for a string holding U+FFFD, which is why each of
+    // these carries one; browsers, workers and Deno use it for every string over 8 bytes.
+    for (const value of ["\ufeff\ufffd", "\ufeffa\ufffdb", `\ufeff${"x".repeat(40)}\ufffd`]) {
+      expect(m.string().decode(m.string().encode(value))).toBe(value);
+    }
+    const marked = m.string().decode(new Uint8Array([7, 0xef, 0xbb, 0xbf, 0x61, 0xef, 0xbf, 0xbd]));
+    const bare = m.string().decode(new Uint8Array([4, 0x61, 0xef, 0xbf, 0xbd]));
+    expect(marked).toBe("\ufeffa\ufffd");
+    expect(marked).not.toBe(bare);
   });
 
   it("rejects unpaired UTF-16 surrogates instead of changing the string", () => {
@@ -1202,8 +1211,10 @@ describe("without Buffer or String.prototype.isWellFormed, as in a browser", () 
     }
   });
 
-  // Bug: TextDecoder strips a leading U+FEFF by default, and here every string goes through it.
-  it.fails("keeps a leading U+FEFF", () => {
+  // Here every string goes through TextDecoder, which strips a leading U+FEFF unless told
+  // not to: the one runtime path where any string starting with the mark lost it.
+  it("keeps a leading U+FEFF", () => {
     expect(fresh.m.string().decode(fresh.m.string().encode("\uFEFFabc"))).toBe("\uFEFFabc");
+    expect(fresh.m.string().decode(new Uint8Array([4, 0xef, 0xbb, 0xbf, 0x61]))).toBe("\uFEFFa");
   });
 });
