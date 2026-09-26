@@ -1209,6 +1209,36 @@ describe("Standard Schema adapter", () => {
       expect(error.path).toBe("user.note");
     });
 
+    it("takes a validator failure's path from the validator, not from a walk", async () => {
+      // The walk re-encoded the value the validator was handed, before it coerced
+      // anything, so here it found `a` still a number and blamed it for the error `b`
+      // raised: "b: Too big … at a". The issue already knows where it is.
+      const Row = z.object({ a: z.coerce.string(), b: z.int().max(3) });
+      const coerced = thrown(() => compile(Row).encode({ a: 123, b: 9 } as never)) as EncodeError;
+      expect(coerced.path).toBe("b");
+      expect(coerced.message).toBe("b: Too big: expected number to be <=3");
+
+      // A refusal of the whole value names no field, where the walk named the first one.
+      const Person = z.object({ name: z.string(), age: z.int() });
+      const whole = thrown(() => compile(Person).encode([] as never)) as EncodeError;
+      expect(whole.path).toBeUndefined();
+      expect(whole.message).toBe("Invalid input: expected object, received array");
+
+      // Indexes read as they do for the wire, from every vendor, and async agrees.
+      const Tags = z.object({ tags: z.array(z.string()) });
+      const sync = thrown(() => compile(Tags).encode({ tags: ["a", 2 as never] })) as EncodeError;
+      expect(sync.path).toBe("tags[1]");
+      expect(sync.message).toMatch(/^tags\[1\]: /);
+      const later = await encodeAsync(Tags, { tags: ["a", 2 as never] }).catch((error) => error);
+      expect([later.message, later.path]).toEqual([sync.message, sync.path]);
+      const ValibotTags = v.object({ tags: v.array(v.string()) });
+      const valibot = thrown(() =>
+        compile(ValibotTags, toStandardJsonSchema(ValibotTags)).encode({ tags: ["a", 2 as never] }),
+      ) as EncodeError;
+      expect(valibot.path).toBe("tags[1]");
+      expect(valibot.message).toMatch(/^tags\[1\]: /);
+    });
+
     it("carries the validator's issues alongside the joined message", () => {
       const Person = compile(z.object({ age: z.int().min(18), name: z.string().min(2) }));
       const error = thrown(() => Person.encode({ age: 3, name: "x" })) as EncodeError;
