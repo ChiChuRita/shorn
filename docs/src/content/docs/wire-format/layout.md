@@ -346,7 +346,7 @@ The recursion is bounded by whatever lets it stop: an empty array here, a `null`
 
 A `$ref` reached twice but never through itself is not a cycle. It is inlined, so a shared definition writes and fingerprints exactly as it would written out in full.
 
-The exception is a copy of a *recursive* definition, which is folded back onto that definition instead. Same bytes either way. The fold is what keeps one recursive type on one fingerprint across validators that spell it differently.
+The definitions themselves take one canonical form before the fingerprint is taken. Two definitions that unfold to the same type are one definition, and each definition is numbered where a walk from the root, in field order, first closes its cycle. A copy of a recursive definition, a mutual recursion entered at the other type, and a Zod object declaring its fields in another order all give the same fingerprint, as they already gave the same bytes.
 
 ### Dynamic values
 

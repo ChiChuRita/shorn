@@ -1050,7 +1050,7 @@ describe("wire digest over the whole matrix", () => {
    * That is the point: decide whether any byte moved, then update the digest in the same
    * commit as whatever answers it.
    */
-  const VENDOR_WIRE_DIGEST = "6e7b68faf3e0676d";
+  const VENDOR_WIRE_DIGEST = "823e98e1e284a474";
 
   it("hashes to a pinned value", () => {
     const lines: string[] = [];
@@ -1224,8 +1224,9 @@ describe("fixed vendor disagreements", () => {
     // zod points a `$ref` at its definition from the use site, while valibot inlines one
     // unrolling there and refers back from inside it. The bytes were always equal and the
     // signatures were not, so `fingerprinted()` rejected payloads it could decode, the
-    // false positive it exists to not produce. A child equal to a definition now folds onto
-    // that definition. The "recursion under an array of objects" case covers it too.
+    // false positive it exists to not produce. The definition table is minimized as a
+    // graph now, so an unrolling is the same graph as the definition it copies. The
+    // "recursion under an array of objects" case covers it too.
     const zodCodec = compile(z.object({ roots: z.array(zodTree) }));
     const valibotCodec = compile(val(v.object({ roots: v.array(valibotTree) })));
     const value = { roots: [{ value: "a", children: [{ value: "b", children: [] }] }] };

@@ -118,6 +118,8 @@ const Json = z.union([
 
 Six branches, no two sharing a type, two of them recursive. A branch that *is* the whole definition works too. Its type is read at the far end of the `$ref`.
 
+Mutually recursive types work as well, such as an expression whose arguments hold expressions. They get one fingerprint whichever validator wrote them, and whichever of them a Zod object declares first.
+
 ## Records, open objects, and dynamic values
 
 | Shape | Zod | Bytes |

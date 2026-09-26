@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { runInNewContext } from "node:vm";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { type } from "arktype";
+import { scope, type } from "arktype";
 import { describe, expect, it } from "vitest";
 import * as v from "valibot";
 import { toStandardJsonSchema } from "@valibot/to-json-schema";
@@ -1438,6 +1438,149 @@ describe("Standard Schema adapter", () => {
       expect(zod.fingerprintHex).toBe(valibot.fingerprintHex);
       const tree = { value: "r", children: [{ value: "a", children: [] }] };
       expect([...zod.encode(tree)]).toEqual([...valibot.encode(tree as never)]);
+    });
+
+    describe("whichever type heads the cycle", () => {
+      // Two types referring to each other. The walk numbered a definition wherever it
+      // first closed the cycle, and zod's declaration order or valibot's unrolling decides
+      // where that is: the same cycle entered at the other type, the same bytes, and a
+      // different signature, so a `fingerprinted()` codec refused payloads it could read.
+      type TA = { name: string; b?: TB | undefined };
+      type TB = { id: number; a?: TA | undefined };
+      const A: z.ZodType<TA> = z.object({ name: z.string(), get b() { return B.optional(); } });
+      const B: z.ZodType<TB> = z.object({ id: z.int(), get a() { return A.optional(); } });
+      const VA: v.GenericSchema<TA> = v.object({ name: v.string(), b: v.optional(v.lazy(() => VB)) });
+      const VB: v.GenericSchema<TB> = v.object({
+        id: v.pipe(v.number(), v.integer()),
+        a: v.optional(v.lazy(() => VA)),
+      });
+      const pair = { x: { name: "n", b: { id: 1 } }, y: { id: 2, a: { name: "m" } } };
+
+      it("derives one signature whichever field a zod object declares first", () => {
+        const xy = compile(z.object({ x: A, y: B }));
+        const yx = compile(z.object({ y: B, x: A }));
+        expect(yx.signature).toBe(xy.signature);
+        expect(fingerprinted(yx).fingerprintHex).toBe(fingerprinted(xy).fingerprintHex);
+        // One definition, emitted where a walk from the root in signature order first
+        // closes the cycle: at A, reached through `x` before `y` reaches B.
+        expect(xy.signature).toBe(
+          '{"defs":[{"object":[{"key":"b","optional":true,"value":{"object":[{"key":"a","optional":true,"value":{"ref":0}},{"key":"id","optional":false,"value":"int"}]}},{"key":"name","optional":false,"value":"string"}]}],"root":{"object":[{"key":"x","optional":false,"value":{"ref":0}},{"key":"y","optional":false,"value":{"object":[{"key":"a","optional":true,"value":{"ref":0}},{"key":"id","optional":false,"value":"int"}]}}]}}',
+        );
+        // The bytes never moved: these are the ones both spellings always wrote.
+        expect([...xy.encode(pair)]).toEqual([1, 0, 2, 1, 110, 1, 0, 1, 109, 4]);
+        expect([...yx.encode(pair)]).toEqual([...xy.encode(pair)]);
+      });
+
+      it("derives one signature whichever validator wrote a mutual recursion", () => {
+        type Expr = { op: string; args: Arg[] };
+        type Arg = number | { expr: Expr };
+        const Expr: z.ZodType<Expr> = z.object({ op: z.string(), get args() { return z.array(Arg); } });
+        const Arg: z.ZodType<Arg> = z.union([z.number(), z.object({ get expr() { return Expr; } })]);
+        const VExpr: v.GenericSchema<Expr> = v.object({ op: v.string(), args: v.array(v.lazy(() => VArg)) });
+        const VArg: v.GenericSchema<Arg> = v.union([v.number(), v.object({ expr: v.lazy(() => VExpr) })]);
+
+        type Employee = { name: string; team: Team | null };
+        type Team = { title: string; members: Employee[] };
+        const Employee: z.ZodType<Employee> = z.object({ name: z.string(), get team() { return Team.nullable(); } });
+        const Team: z.ZodType<Team> = z.object({ title: z.string(), get members() { return z.array(Employee); } });
+        const VEmployee: v.GenericSchema<Employee> = v.object({
+          name: v.string(),
+          team: v.nullable(v.lazy(() => VTeam)),
+        });
+        const VTeam: v.GenericSchema<Team> = v.object({
+          title: v.string(),
+          members: v.array(v.lazy(() => VEmployee)),
+        });
+        const arkAB = scope({ a: { name: "string", "b?": "b" }, b: { id: "number.integer", "a?": "a" } }).export();
+
+        const spellings: ReadonlyArray<readonly [Schema<unknown>[], unknown]> = [
+          [
+            [
+              compile(A),
+              compile(VA, toStandardJsonSchema(VA)),
+              compile(arkAB.a as unknown as EncodableStandardSchema),
+            ],
+            pair.x,
+          ],
+          [[compile(B), compile(VB, toStandardJsonSchema(VB))], pair.y],
+          [
+            [
+              compile(z.object({ x: A, y: B })),
+              compile(v.object({ x: VA, y: VB }), toStandardJsonSchema(v.object({ x: VA, y: VB }))),
+            ],
+            pair,
+          ],
+          [
+            [compile(Expr), compile(VExpr, toStandardJsonSchema(VExpr))],
+            { op: "+", args: [1, { expr: { op: "-", args: [2] } }] },
+          ],
+          [
+            [compile(Employee), compile(VEmployee, toStandardJsonSchema(VEmployee))],
+            { name: "a", team: { title: "t", members: [{ name: "b", team: null }] } },
+          ],
+          [
+            [compile(Team), compile(VTeam, toStandardJsonSchema(VTeam))],
+            { title: "t", members: [{ name: "b", team: null }] },
+          ],
+        ];
+        for (const [codecs, value] of spellings) {
+          for (const codec of codecs) {
+            expect(codec.signature).toBe(codecs[0]!.signature);
+            expect([...codec.encode(value)]).toEqual([...codecs[0]!.encode(value)]);
+          }
+        }
+      });
+
+      it("still compiles a long cycle and a large enum quickly", () => {
+        // The refinement's worst case: n links alike but for the last, so a difference
+        // travels one link per round. Reading every node every round made this quadratic,
+        // as the fold before it was: 400 links took 210 ms here, and 650 ran out of stack.
+        const n = 400;
+        const chain = {
+          $ref: "#/$defs/d0",
+          $defs: Object.fromEntries(
+            Array.from({ length: n }, (_, i) => [
+              `d${i}`,
+              {
+                type: "object",
+                properties:
+                  i === n - 1
+                    ? { next: { $ref: "#/$defs/d0" }, end: { type: "string" } }
+                    : { next: { $ref: `#/$defs/d${i + 1}` } },
+              },
+            ]),
+          ),
+        };
+        const members = Array.from({ length: 20_000 }, (_, i) => `v${i}`);
+        const tagged = {
+          type: "object",
+          properties: { tag: { enum: members }, children: { type: "array", items: { $ref: "#" } } },
+          required: ["tag", "children"],
+        };
+        const started = performance.now();
+        compile(z.unknown(), chain);
+        expect(performance.now() - started).toBeLessThan(150);
+        const Tagged = compile(z.unknown(), tagged);
+        expect(performance.now() - started).toBeLessThan(400);
+        expect(Tagged.decode(Tagged.encode({ tag: "v19999", children: [] }))).toEqual({
+          tag: "v19999",
+          children: [],
+        });
+      });
+
+      it("refuses references that lead only to each other", () => {
+        // `{ "$ref": "#" }` names no schema at all. It compiled to a codec that failed the
+        // first time it was used, and it has no node for the minimized graph to hold.
+        expect(() => compile(z.unknown(), { $ref: "#" })).toThrow(
+          "Unsupported Standard JSON Schema node",
+        );
+        expect(() =>
+          compile(z.unknown(), {
+            $ref: "#/$defs/a",
+            $defs: { a: { $ref: "#/$defs/b" }, b: { $ref: "#/$defs/a" } },
+          }),
+        ).toThrow("Unsupported Standard JSON Schema node");
+      });
     });
 
     it("leaves a non-recursive schema's signature exactly as it was", () => {

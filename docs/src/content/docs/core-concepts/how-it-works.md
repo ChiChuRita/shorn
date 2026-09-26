@@ -61,7 +61,7 @@ The JSON Schema becomes a `WireShape`, a small closed set of cases. Most of them
 
 The two union cases are the two ways a branch can be identified without trying each one. `on`/`cases` means one property names the branch, a discriminant. `types` means the JSON type of the value names the branch. A union whose branches could overlap has neither, and is [refused](/schemas/rejected-shapes/#overlapping-unions).
 
-A `{ ref }` is the back edge of a cycle in a recursive schema. It points into a table of definitions that the plan carries alongside its root shape. That table exists only when a `$ref` closes a cycle. shorn inlines a `$ref` reached twice but never through itself.
+A `{ ref }` is the back edge of a cycle in a recursive schema. It points into a table of definitions that the plan carries alongside its root shape. That table exists only when a `$ref` closes a cycle. shorn inlines a `$ref` reached twice but never through itself. The table is minimized and numbered from the root, so it does not depend on which type the validator happened to define first.
 
 Two JSON Schema details decide most of what matters:
 

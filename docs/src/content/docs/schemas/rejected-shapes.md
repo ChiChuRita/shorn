@@ -61,6 +61,8 @@ Recursive schemas are [supported](/schemas/supported-types/#recursive-schemas). 
 
 A cycle needs a way out: a nullable back edge, an optional field, or an array that may be empty. A cycle without one describes no finite value. Rather than prove that at build time, shorn lets the depth counter report it the first time the schema is used.
 
+A cycle with no schema on it at all is refused when the codec is built, as `Unsupported Standard JSON Schema node`. That is a `$ref` whose target is another `$ref`, round in a circle, such as `{ "$ref": "#" }` alone.
+
 Depth is capped at 256 levels on both sides. A recursive schema takes its nesting from the payload, and without a cap a couple of bytes per level would buy unbounded stack. Anything deeper wants an array, not a cycle.
 
 > Unsupported JSON Schema reference "…"; only same-document references are supported
