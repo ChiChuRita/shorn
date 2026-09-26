@@ -1,12 +1,18 @@
 import { createHash } from "node:crypto";
 import { runInNewContext } from "node:vm";
+import { toStandardJsonSchema } from "@valibot/to-json-schema";
+import * as v from "valibot";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import {
   compile,
+  decode,
+  encode,
+  encodeAsync,
   fingerprinted,
   type Infer,
   m,
+  safeEncode,
   type Schema,
 } from "../src/index.js";
 import * as shorn from "../src/index.js";
@@ -346,5 +352,37 @@ describe("type inference is pinned", () => {
     const schema = z.object({ id: z.string(), count: z.int().nonnegative() });
     type Decoded = ReturnType<ReturnType<typeof compile<typeof schema>>["decode"]>;
     expectTypeOf<Decoded>().toEqualTypeOf<{ id: string; count: number }>();
+  });
+
+  it("types a schema's value to encode as the validator's input, which is what it checks", async () => {
+    // The value is validated before a byte is written, so the runtime takes whatever the
+    // validator takes: a branded field as a plain string, a coerced field as its raw
+    // text, a defaulted field left out. The six schema overloads typed it as the output,
+    // so every call below was a type error for a call that worked. Both halves again:
+    // each call typechecks, and the runtime takes it.
+    const User = z.object({ id: z.string().brand("UserId"), name: z.string() });
+    const row: { id: string; name: string } = { id: "u1", name: "Grace" };
+    const Settings = v.object({ theme: v.optional(v.string(), "light"), volume: v.number() });
+    const structure = toStandardJsonSchema(Settings);
+
+    expect(encode(User, row)).toBeInstanceOf(Uint8Array);
+    expect(encode(Settings, { volume: 3 }, structure)).toBeInstanceOf(Uint8Array);
+    expect(safeEncode(z.object({ n: z.coerce.number() }), { n: "42" }).success).toBe(true);
+    expect(safeEncode(Settings, { volume: 3 }, structure).success).toBe(true);
+    await expect(encodeAsync(z.array(z.string().default("x")), [undefined, "y"])).resolves.toBeInstanceOf(
+      Uint8Array,
+    );
+    await expect(encodeAsync(Settings, { volume: 3 }, structure)).resolves.toBeInstanceOf(Uint8Array);
+    expectTypeOf(encode<typeof User>).parameter(1).toEqualTypeOf<{ id: string; name: string }>();
+
+    // Decode keeps the output, brand included, and what it returns encodes again.
+    const decoded = decode(User, encode(User, row));
+    expectTypeOf(decoded).toEqualTypeOf<z.output<typeof User>>();
+    expect(encode(User, decoded)).toBeInstanceOf(Uint8Array);
+
+    // A value the validator refuses is still a type error.
+    const Person = z.object({ role: z.enum(["viewer", "admin"]) });
+    // @ts-expect-error "owner" is not a role
+    expect(() => encode(Person, { role: "owner" })).toThrow(shorn.EncodeError);
   });
 });
