@@ -1071,6 +1071,30 @@ describe("Standard Schema adapter", () => {
       expect(shared.fingerprintHex).toBe(written.fingerprintHex);
     });
 
+    it("refuses a $ref that leaves the document, or that points at nothing in it", () => {
+      // A document handed in as the structure may have been fetched, and vendors only ever
+      // point within the document they wrote, so these two are reachable from a caller's
+      // own JSON alone. Following the first would mean fetching mid-build; the second
+      // would otherwise fail somewhere deeper, naming neither the pointer nor the fix.
+      const structure = (ref: string) => ({
+        type: "object",
+        properties: { name: { $ref: ref } },
+        required: ["name"],
+        $defs: { name: { type: "string" } },
+      });
+      const remote = () => compile(z.any(), structure("https://example.com/name.json"));
+      expect(remote).toThrow(EncodeError);
+      expect(remote).toThrow(
+        'Unsupported JSON Schema reference "https://example.com/name.json"; only same-document references are supported',
+      );
+      const dangling = () => compile(z.any(), structure("#/$defs/missing"));
+      expect(dangling).toThrow(EncodeError);
+      expect(dangling).toThrow('JSON Schema reference "#/$defs/missing" does not resolve');
+      // The same document with a pointer that resolves compiles, so each refusal above is
+      // its pointer's alone.
+      expect([...compile(z.any(), structure("#/$defs/name")).encode({ name: "x" })]).toEqual([1, 120]);
+    });
+
     it("composes with a type-disjoint union, including a bare $ref branch", () => {
       // The canonical recursive union: a JSON value. zod types the array and object
       // branches, so their `$ref`s sit inside `items` rather than being the branch.
