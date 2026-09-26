@@ -164,8 +164,11 @@ jobs:
           '
 
   soak:
-    # The deep property run: 50k generated schemas against every invariant. Too slow
-    # for `pnpm check` on every save, cheap enough to run on every push.
+    # The deep property run: 50k generated schemas against every invariant, through `m` and
+    # through `compile`. Too slow for `pnpm check` on every save, cheap enough to run on
+    # every push. A push run draws the same seeds every time, so a red one reproduces from
+    # the commit alone; the weekly run offsets them by its run id and explores cases no run
+    # has drawn. Every failure names its seed, and the titles name the offset.
     name: Property soak
     runs-on: ubuntu-latest
     steps:
@@ -176,4 +179,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:soak
+      - name: pnpm test:soak
+        # Below a million: the suites multiply each seed by a constant, and the product has
+        # to stay exact, which a raw run id would not.
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            export SHORN_PROPERTY_SEED=$((GITHUB_RUN_ID % 1000000))
+            echo "SHORN_PROPERTY_SEED=$SHORN_PROPERTY_SEED"
+          fi
+          pnpm test:soak
