@@ -2539,31 +2539,8 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
    */
   protected writeExtras(_writer: Writer, _record: Record<string, unknown>): void {}
 
-  /**
-   * `defineProperty` throughout, not `Object.assign`: assignment goes through
-   * `[[Set]]`, and a decoded `__proto__` key would reassign the prototype.
-   *
-   * A key repeating a declared field is refused rather than merged: it would
-   * overwrite the field decoded moments earlier, so two payloads would decode alike.
-   */
-  private readExtras(reader: Reader, result: Record<string, unknown>): void {
-    if (this.tail === undefined) return;
-    const extras = this.tail._decode(reader);
-    for (const key of Object.keys(extras)) {
-      if (this.knownKeys!.has(key)) {
-        throw new DecodeError(
-          `Extra property ${JSON.stringify(key)} repeats a declared field`,
-          reader.position,
-        );
-      }
-      Object.defineProperty(result, key, {
-        configurable: true,
-        enumerable: true,
-        value: extras[key],
-        writable: true,
-      });
-    }
-  }
+  /** The decode half of the same hook: a closed object reads no extras either. */
+  protected readExtras(_reader: Reader, _result: Record<string, unknown>): void {}
 
   /**
    * The object's own refusals end the walk, as `_encode` makes them: the wrong shape,
@@ -2647,16 +2624,42 @@ export class ObjectSchema<S extends Shape> extends Schema<ObjectOutput<S>> {
 }
 
 /**
- * Everything an open object does with its undeclared keys on the way out: deriving them,
- * and walking them for a path. Out here rather than in `ObjectSchema` because only the
- * Standard Schema bridge builds a tail, so an `m`-only bundle can run neither, and pays
- * for them anyway when they sit there: the derivation alone measured 164 minified bytes.
+ * Everything an open object does with its undeclared keys: deriving and writing them,
+ * reading them back, and walking them for a path. Out here rather than in `ObjectSchema`
+ * because only the Standard Schema bridge builds a tail, so an `m`-only bundle can run
+ * none of it, and pays for it anyway when it sits there: the derivation alone measured
+ * 164 minified bytes, and the read half 61 gzip bytes.
  * The same finding that keeps `new RecordSchema(...)` out of that constructor. Nothing `m`
  * exports names this class, so a bundle without `compile` drops it whole.
  */
 export class OpenObjectSchema<S extends Shape> extends ObjectSchema<S> {
   protected override writeExtras(writer: Writer, record: Record<string, unknown>): void {
     this.tail!._encode(writer, this.extras(record));
+  }
+
+  /**
+   * `defineProperty` throughout, not `Object.assign`: assignment goes through
+   * `[[Set]]`, and a decoded `__proto__` key would reassign the prototype.
+   *
+   * A key repeating a declared field is refused rather than merged: it would
+   * overwrite the field decoded moments earlier, so two payloads would decode alike.
+   */
+  protected override readExtras(reader: Reader, result: Record<string, unknown>): void {
+    const extras = this.tail!._decode(reader);
+    for (const key of Object.keys(extras)) {
+      if (this.knownKeys!.has(key)) {
+        throw new DecodeError(
+          `Extra property ${JSON.stringify(key)} repeats a declared field`,
+          reader.position,
+        );
+      }
+      Object.defineProperty(result, key, {
+        configurable: true,
+        enumerable: true,
+        value: extras[key],
+        writable: true,
+      });
+    }
   }
 
   /**
