@@ -1118,37 +1118,47 @@ describe("Date, bigint, Set and Map agree across vendors", () => {
 });
 
 /**
- * Known gaps, pinned with `it.fails` so the suite stays green today and turns red the
- * moment one is fixed: at which point flip the test to a normal `it`. Each one is a
- * disagreement between vendors over a shape shorn otherwise supports.
+ * Disagreements between vendors that have been fixed, each a shape that compiled from one
+ * validator and not another, or compiled to a different fingerprint. Kept as named pins
+ * beside the matrix cases that also cover them, so a regression names the bug it brings
+ * back rather than one case among hundreds.
  */
-describe("known gaps", () => {
+describe("fixed vendor disagreements", () => {
   it("compiles an arktype array of unknown, which carries no `items`", () => {
-    // `type("unknown[]")` emits a bare `{type:"array"}`. JSON Schema leaves the items
-    // unconstrained there, which is what `any` already means to shorn: zod and valibot
-    // both write `items: {}` and compile. Refusing it makes `unknown[]` vendor-specific.
+    // `type("unknown[]")` emits a bare `{type:"array"}` where zod and valibot write
+    // `items: {}`, and it used to be refused, so `unknown[]` compiled from two vendors and
+    // not the third. Absent `items` leaves the elements unconstrained, which is what `any`
+    // already means, so it compiles to an array of dynamic values. The "array of any" case
+    // holds its bytes equal to the other two.
     const codec = compile(type("unknown[]") as unknown as EncodableStandardSchema);
     expect(codec.decode(codec.encode([1, "x"] as never))).toEqual([1, "x"]);
   });
 
+  it("gives one recursive type one fingerprint, whichever vendor wrote it", () => {
+    // zod points a `$ref` at its definition from the use site, while valibot inlines one
+    // unrolling there and refers back from inside it. The bytes were always equal and the
+    // signatures were not, so `fingerprinted()` rejected payloads it could decode, the
+    // false positive it exists to not produce. A child equal to a definition now folds onto
+    // that definition. The "recursion under an array of objects" case covers it too.
+    const zodCodec = compile(z.object({ roots: z.array(zodTree) }));
+    const valibotCodec = compile(val(v.object({ roots: v.array(valibotTree) })));
+    const value = { roots: [{ value: "a", children: [{ value: "b", children: [] }] }] };
+    expect([...valibotCodec.encode(value as never)]).toEqual([...zodCodec.encode(value as never)]);
+    expect(valibotCodec.signature).toBe(zodCodec.signature);
+  });
+});
+
+/**
+ * Known gaps, pinned with `it.fails` so the suite stays green today and turns red the
+ * moment one is fixed: at which point make it a normal `it` in the block above. Each one
+ * is a disagreement between vendors over a shape shorn otherwise supports.
+ */
+describe("known gaps", () => {
   it.fails("carries extra properties out of a valibot looseObject", () => {
     // valibot emits no `additionalProperties`, which shorn reads as a closed object, so
     // the extras a `looseObject` exists to keep are refused. Zod's `looseObject` emits
     // `additionalProperties: {}` and keeps them. One intent, two wire shapes.
     const codec = compile(val(v.looseObject({ a: v.string() })));
     expect(codec.decode(codec.encode({ a: "x", b: 1 } as never))).toEqual({ a: "x", b: 1 });
-  });
-
-  it("gives one recursive type one fingerprint, whichever vendor wrote it", () => {
-    // Same bytes, different signature: zod refs its definition from the use site while
-    // valibot inlines one unrolling there and refs from inside it. `toWireShape` folds
-    // only a *root* that duplicates a definition, so a recursive type reached through a
-    // wrapper keeps two spellings, and `fingerprinted()` then rejects bytes it can
-    // decode, which is the false positive it exists to not produce.
-    const zodCodec = compile(z.object({ roots: z.array(zodTree) }));
-    const valibotCodec = compile(val(v.object({ roots: v.array(valibotTree) })));
-    const value = { roots: [{ value: "a", children: [{ value: "b", children: [] }] }] };
-    expect([...valibotCodec.encode(value as never)]).toEqual([...zodCodec.encode(value as never)]);
-    expect(valibotCodec.signature).toBe(zodCodec.signature);
   });
 });
