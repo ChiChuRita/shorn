@@ -106,6 +106,34 @@ const vectors: readonly Vector[] = [
   },
   {
     row: "Objects",
+    name: "nine absent optionals are two zero bitmap bytes",
+    schema: m.object(Object.fromEntries([..."abcdefghi"].map((key) => [key, m.uint().optional()]))),
+    value: {},
+    expected: [0, 0],
+  },
+  {
+    row: "Objects",
+    name: "nine present optionals fill one bitmap byte and one bit of the next",
+    schema: m.object(Object.fromEntries([..."abcdefghi"].map((key) => [key, m.uint().optional()]))),
+    value: Object.fromEntries([..."abcdefghi"].map((key) => [key, 1])),
+    expected: [255, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  },
+  {
+    row: "Objects",
+    name: "a present optional sets its bit, and every field follows in key order",
+    schema: m.object({ a: m.uint().optional(), b: m.uint() }),
+    value: { a: 1, b: 2 },
+    expected: [1, 1, 2],
+  },
+  {
+    row: "Objects",
+    name: "an absent optional clears its bit and writes nothing",
+    schema: m.object({ a: m.uint().optional(), b: m.uint() }),
+    value: { b: 2 },
+    expected: [0, 2],
+  },
+  {
+    row: "Objects",
     name: "optional rank follows canonical key order",
     schema: m.object({ id: m.uint(), nickname: m.string().optional(), email: m.string().optional() }),
     value: { id: 7, email: "a@b.co" },
@@ -190,6 +218,20 @@ const vectors: readonly Vector[] = [
   },
   {
     row: "BigInts",
+    name: "one is header 2 and a single magnitude byte",
+    schema: m.bigint(),
+    value: 1n,
+    expected: [2, 1],
+  },
+  {
+    row: "BigInts",
+    name: "a negative two-byte magnitude is header 5",
+    schema: m.bigint(),
+    value: -256n,
+    expected: [5, 0, 1],
+  },
+  {
+    row: "BigInts",
     name: "past 64 bits, where the varint reader stops",
     schema: m.bigint(),
     value: 2n ** 64n,
@@ -232,6 +274,13 @@ const vectors: readonly Vector[] = [
   },
   {
     row: "Tuples",
+    name: "each element in its own layout, side by side",
+    schema: m.tuple([m.uint(), m.boolean()]),
+    value: [7, true],
+    expected: [7, 1],
+  },
+  {
+    row: "Tuples",
     name: "positions are never reordered",
     schema: m.tuple([m.string(), m.boolean(), m.int()]),
     value: ["hi", true, -1],
@@ -258,6 +307,13 @@ const vectors: readonly Vector[] = [
     schema: m.array(m.uint()),
     value: [1, 2],
     expected: [2, 1, 2],
+  },
+  {
+    row: "Arrays",
+    name: "three one-byte elements after a one-byte count",
+    schema: m.array(m.uint()),
+    value: [1, 2, 3],
+    expected: [3, 1, 2, 3],
   },
   {
     row: "Arrays",
@@ -321,6 +377,13 @@ const vectors: readonly Vector[] = [
     schema: m.string(),
     value: "\u{1F600}",
     expected: [4, 240, 159, 152, 128],
+  },
+  {
+    row: "Strings and bytes",
+    name: "a string is its UTF-8 length, then its UTF-8",
+    schema: m.string(),
+    value: "ab",
+    expected: [2, 97, 98],
   },
   {
     row: "Integers",
@@ -393,6 +456,20 @@ const vectors: readonly Vector[] = [
     expected: [199, 1],
   },
   {
+    row: "Integers",
+    name: "zigzag 63 is the last one-byte signed value",
+    schema: m.int(),
+    value: 63,
+    expected: [126],
+  },
+  {
+    row: "Integers",
+    name: "zigzag 64 takes the two bytes a uint spends on 128",
+    schema: m.int(),
+    value: 64,
+    expected: [128, 1],
+  },
+  {
     row: "Booleans",
     name: "false is zero",
     schema: m.boolean(),
@@ -412,6 +489,13 @@ const vectors: readonly Vector[] = [
     schema: m.enum(["M", "F", "X"]),
     value: "M",
     expected: [1],
+  },
+  {
+    row: "Enums",
+    name: "declaration order does not matter, so viewer sorts last",
+    schema: m.enum(["viewer", "editor", "admin"]),
+    value: "viewer",
+    expected: [2],
   },
   {
     row: "Enums",
@@ -508,6 +592,13 @@ const vectors: readonly Vector[] = [
     expected: [1, 1, 120],
   },
   {
+    row: "Nullable",
+    name: "a present uint is the marker and its one byte",
+    schema: m.uint().nullable(),
+    value: 5,
+    expected: [1, 5],
+  },
+  {
     row: "Floats",
     name: "float64 little-endian",
     schema: m.float64(),
@@ -541,6 +632,13 @@ const vectors: readonly Vector[] = [
     schema: m.bytes(),
     value: new Uint8Array([]),
     expected: [0],
+  },
+  {
+    row: "Strings and bytes",
+    name: "bytes are written as they are, after the same length",
+    schema: m.bytes(),
+    value: new Uint8Array([9, 9]),
+    expected: [2, 9, 9],
   },
   {
     row: "Optional marker",
