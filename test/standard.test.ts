@@ -520,6 +520,19 @@ describe("Standard Schema adapter", () => {
       const Huge = compile(z.array(z.string()).length(1_000_000));
       expect(() => Huge.decode(new Uint8Array([1, 2, 3]))).toThrow(/remaining input/);
     });
+
+    it("carries the slot bound when a compiled codec sits inside an m container", () => {
+      // The codec copied every fact of its structural half but `_slots`, so an `m`
+      // array around it saw zero slots and skipped the ceiling: this built, and turned
+      // an empty payload into 2,000,000 slots. At a million a level it is the OOM the
+      // bound exists for. `examples/02-rpc.ts` nests compiled codecs in `m` this way.
+      const inner = compile(z.array(z.literal(true)).length(1000));
+      expect(inner._slots).toBe(unchecked(inner)._slots);
+      const refusal = /or a fixed count of them must stay under the collection limit/;
+      expect(() => m.array(inner, 2000)).toThrow(refusal);
+      expect(() => m.array(unchecked(inner), 2000)).toThrow(refusal);
+      expect(m.array(inner, 900).decode(new Uint8Array(0))).toHaveLength(900);
+    });
   });
 
   it("keeps the selected library's validation behavior", () => {
