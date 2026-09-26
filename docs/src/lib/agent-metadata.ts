@@ -35,7 +35,7 @@ export const AGENT_RESOURCES: readonly { href: string; label: string; note: stri
   {
     href: "/api/overview/",
     label: "API reference",
-    note: "encode, decode, compile, codec, fingerprinted, the m builders, and the error types.",
+    note: "encode, decode, compile, unchecked, fingerprinted, the m builders, and the error types.",
   },
   {
     href: "/llms.txt",
