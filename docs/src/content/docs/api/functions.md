@@ -152,7 +152,7 @@ codec.fingerprintHex;  // "39fe6326", the Map key for dispatch
 
 `fingerprint` returns a copy so that a caller cannot change the codec's internal bytes. Use `fingerprintHex` as a `Map` key.
 
-Throws `EncodeError` for a codec without a signature, and for `bytes` outside 1 to 4. The default is 3 bytes. Use 4 for persistent data. See [Wire fingerprints](/versioning/fingerprinting/).
+Throws `EncodeError` for a codec without a signature, and for `bytes` outside 1 to 4. The default is 4 bytes, the width for persistent data. See [Wire fingerprints](/versioning/fingerprinting/).
 
 ## `Schema<T>`
 

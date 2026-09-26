@@ -55,7 +55,7 @@ Every entry point decodes through the same structural path, `Schema.decode`, so 
 
 ```ts
 interface FingerprintOptions {
-  readonly bytes?: 1 | 2 | 3 | 4; // default 3
+  readonly bytes?: 1 | 2 | 3 | 4; // default 4
 }
 
 type SafeResult<T> =

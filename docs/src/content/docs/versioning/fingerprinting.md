@@ -28,7 +28,7 @@ Recursive schemas get the same guarantee, although validators spell them differe
 
 ## Choose a width
 
-shorn supports 1 to 4 bytes and defaults to 3. Each width is cut from one 32-bit hash of the signature: FNV-1a, finished with murmur3's `fmix32` so that every bit depends on every character. Without that last step, an edit that only reorders the signature, such as two fields swapping types, left three bits of every fingerprint unchanged. A 1-byte fingerprint then caught it no more often than a 5-bit one would.
+shorn supports 1 to 4 bytes and defaults to 4. Each width is cut from one 32-bit hash of the signature: FNV-1a, finished with murmur3's `fmix32` so that every bit depends on every character. Without that last step, an edit that only reorders the signature, such as two fields swapping types, left three bits of every fingerprint unchanged. A 1-byte fingerprint then caught it no more often than a 5-bit one would.
 
 | Bytes | Possible fingerprints | Approx. collision chance at 1,000 registered shapes |
 | ---: | ---: | ---: |
@@ -39,7 +39,7 @@ shorn supports 1 to 4 bytes and defaults to 3. Each width is cut from one 32-bit
 
 These figures use the birthday approximation and assume the hash spreads evenly, which the mixing step is there to make true at every width. It is still not a cryptographic hash, and a collision is deterministic: two shapes either collide or they do not, and every decode gives the same answer.
 
-**Use 4 bytes for persistent data.** The 3-byte default favors small payloads and small, controlled registries. No width is collision-proof, so reject duplicate `fingerprintHex` values when you build a registry, and carry an application version when identity has to be unambiguous.
+**The default of 4 bytes is the width for persistent data.** Choose 3 or fewer only for very small payloads in a small, controlled registry. Keep one width per registry: the width is part of what is hashed, so a schema's 3-byte fingerprint is not the start of its 4-byte one. No width is collision-proof, so reject duplicate `fingerprintHex` values when you build a registry, and carry an application version when identity has to be unambiguous.
 
 ## Carry it separately
 

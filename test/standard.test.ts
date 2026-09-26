@@ -1591,7 +1591,7 @@ describe("Standard Schema adapter", () => {
       expect(Person.signature).toBe(
         '{"object":[{"key":"age","optional":false,"value":"int"},{"key":"name","optional":false,"value":"string"}]}',
       );
-      expect(fingerprinted(Person).fingerprintHex).toBe("e6682f");
+      expect(fingerprinted(Person).fingerprintHex).toBe("450f8b8d");
     });
 
     it("inlines a shared subtree instead of making it a definition", () => {
