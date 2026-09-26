@@ -1,5 +1,5 @@
 import { runInNewContext } from "node:vm";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ObjectSchema } from "../src/core.js";
 import { DecodeError, EncodeError, encodeInto, m, Writer } from "../src/index.js";
 
@@ -1059,5 +1059,109 @@ describe("Date, bigint, Set and Map", () => {
       },
     });
     expect(schema.decode(schema.encode(set)).size).toBe(1);
+  });
+});
+
+// A browser, a worker, or Deno without its Node shim has no `Buffer.prototype.utf8Slice`,
+// so strings decode through `TextDecoder` alone; a runtime older than
+// `String.prototype.isWellFormed` checks for lone surrogates with a regex instead. Both
+// are chosen once, when the module loads, so a Node run never reaches either. This loads
+// a second copy of the library with both missing for the length of the import.
+describe("without Buffer or String.prototype.isWellFormed, as in a browser", () => {
+  let fresh: typeof import("../src/index.js");
+
+  beforeAll(async () => {
+    const isWellFormed = Object.getOwnPropertyDescriptor(String.prototype, "isWellFormed");
+    // Hidden rather than removed. vite-node, which loads the copy, calls `Buffer.from` to
+    // attach a source map to every module it runs, and with the global gone the worker ran
+    // out of memory. The library reads `Buffer.prototype.utf8Slice` and nothing else, so an
+    // empty `prototype` leaves it exactly where a missing `Buffer` would.
+    vi.stubGlobal(
+      "Buffer",
+      new Proxy(Buffer, {
+        get: (target, key, receiver) =>
+          key === "prototype" ? {} : Reflect.get(target, key, receiver),
+      }),
+    );
+    delete (String.prototype as { isWellFormed?: unknown }).isWellFormed;
+    try {
+      vi.resetModules();
+      fresh = await import("../src/index.js");
+    } finally {
+      vi.unstubAllGlobals();
+      if (isWellFormed !== undefined) {
+        Object.defineProperty(String.prototype, "isWellFormed", isWellFormed);
+      }
+    }
+  });
+
+  it("really runs on the two fallbacks, not on what Node provides", () => {
+    // Without this, a stub that failed to take would leave every test below passing
+    // against the Node paths. On Node a well-formed non-ASCII string never reaches
+    // `TextDecoder`, and the surrogate check calls the native method.
+    const decode = vi.spyOn(TextDecoder.prototype, "decode");
+    const wellFormed = vi.spyOn(
+      String.prototype as unknown as { isWellFormed(): boolean },
+      "isWellFormed",
+    );
+    try {
+      const value = "héllo wörld";
+      fresh.m.string().decode(fresh.m.string().encode(value));
+      expect(decode).toHaveBeenCalled();
+      expect(wellFormed).not.toHaveBeenCalled();
+
+      decode.mockClear();
+      m.string().decode(m.string().encode(value));
+      expect(decode).not.toHaveBeenCalled();
+      expect(wellFormed).toHaveBeenCalled();
+    } finally {
+      decode.mockRestore();
+      wellFormed.mockRestore();
+    }
+  });
+
+  it("round-trips ASCII, non-ASCII, surrogate pairs and U+FFFD", () => {
+    const string = fresh.m.string();
+    for (const value of [
+      "",
+      "hi",
+      "x".repeat(200),
+      "héllo",
+      "Grüße 👋 राहुल",
+      "\u{1F600}\u{10FFFF}",
+      "\uFFFD",
+      `a\uFFFDb${"\uFFFD".repeat(40)}`,
+    ]) {
+      expect(string.decode(string.encode(value))).toBe(value);
+      // The same bytes the Node path writes, which is what lets either read the other.
+      expect([...string.encode(value)]).toEqual([...m.string().encode(value)]);
+    }
+  });
+
+  it("refuses malformed UTF-8 rather than substituting a replacement character", () => {
+    for (const bad of [
+      [0xff],
+      [0x61, 0xff, 0x62],
+      [0xc3], // truncated two-byte sequence
+      [0xe2, 0x82], // truncated three-byte sequence
+      [0xed, 0xa0, 0x80], // surrogate half encoded as UTF-8
+      [0xc0, 0x80], // overlong NUL
+    ]) {
+      const payload = new Uint8Array([bad.length, ...bad]);
+      expect(() => fresh.m.string().decode(payload)).toThrow(fresh.DecodeError);
+      expect(() => fresh.m.string().decode(payload)).toThrow(/Invalid UTF-8/);
+    }
+  });
+
+  it("refuses a lone surrogate, alone, paired wrongly, or after a long ASCII run", () => {
+    for (const value of ["\ud800", "\udc00", "\udc00\ud800", `${"a".repeat(100)}\ud800`]) {
+      expect(() => fresh.m.string().encode(value)).toThrow(fresh.EncodeError);
+      expect(() => fresh.m.string().encode(value)).toThrow(/unpaired surrogate/);
+    }
+  });
+
+  // Bug: TextDecoder strips a leading U+FEFF by default, and here every string goes through it.
+  it.fails("keeps a leading U+FEFF", () => {
+    expect(fresh.m.string().decode(fresh.m.string().encode("\uFEFFabc"))).toBe("\uFEFFabc");
   });
 });
