@@ -61,7 +61,7 @@ wire.encode(person); // byte-identical to compile(Person).encode(person)
 wire.decode(bytes);  // no refinements run
 ```
 
-The bytes do not change, so a validated decoder reads what an unchecked encoder wrote, and the other way round. Only the checks go away, and they are most of the cost. On the Person fixture that is roughly 2.5× on encode and 5× on decode; see [Throughput](/performance/throughput/#validation-included) for the measured figures.
+The bytes do not change, so a validated decoder reads what an unchecked encoder wrote, and the other way round. Only the checks go away, and they are most of the cost. On the Person fixture that is roughly 2.1× on encode and 3.8× on decode; see [Throughput](/performance/throughput/#validation-included) for the measured figures.
 
 What you give up:
 

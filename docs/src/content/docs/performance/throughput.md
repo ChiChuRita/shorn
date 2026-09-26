@@ -85,7 +85,7 @@ Validation is most of the end-to-end cost, and it narrows the field. On Person, 
 
 On the Person fixture the raw codec runs at 23.07M encodes/s and 66.26M decodes/s. Adding Zod brings those down to 8.49M and 11.92M.
 
-Between services you own, `unchecked(compile(schema))` writes the same bytes at the raw-codec speed, giving up every refinement on both sides in exchange. See [Skipping validation](/core-concepts/validation/#skipping-validation).
+Between services you own, `unchecked(compile(schema))` writes the same bytes without the validator, giving up every refinement on both sides in exchange. In [`bench/baseline.json`](https://github.com/ChiChuRita/shorn/blob/main/bench/baseline.json), a separate run from these tables, Person through `unchecked()` encodes 2.1× and decodes 3.8× as fast as with Zod, and reaches 88% and 71% of the raw codec's rates. See [Skipping validation](/core-concepts/validation/#skipping-validation).
 
 ## Reproduce these numbers
 
