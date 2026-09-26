@@ -74,7 +74,10 @@ function hasTag(value: unknown, tag: string): boolean {
 }
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder("utf-8", { fatal: true });
+// `ignoreBOM`, or the decoder strips a leading U+FEFF as a byte-order mark: the string
+// would come back one character short, and `[4, ef, bb, bf, 61]` would decode to the
+// same "a" as `[1, 61]`. This decoder is the only one browsers, workers and Deno use.
+const textDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 /**
  * Node's own UTF-8 decoder, when there is one: 45% cheaper than `TextDecoder` at every
