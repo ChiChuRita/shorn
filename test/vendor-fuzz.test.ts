@@ -1,25 +1,27 @@
 import { type, scope } from "arktype";
 import { describe, expect, it } from "vitest";
 import * as v from "valibot";
-import { toStandardJsonSchema } from "@valibot/to-json-schema";
+import { toJsonSchema, toStandardJsonSchema } from "@valibot/to-json-schema";
 import { z } from "zod";
 import {
   DecodeError,
   EncodeError,
   compile,
   type EncodableStandardSchema,
+  valibotOverride,
 } from "../src/index.js";
 import { containsNaN } from "./generate.js";
 
 /**
  * The cross-vendor fuzz matrix.
  *
- * `vendors.test.ts` proves one case per wire shape agrees across vendors; this file is
- * the wide version: every shape a vendor can spell, especially the ones whose bytes
- * depend on the payload rather than on the schema (unions, `any`, records, recursion) , 
- * crossed with the decoder contract from `fuzz.test.ts`: truncate it, extend it, flip
- * every byte, and it either throws a `DecodeError` or decodes to something that
- * re-encodes to exactly those bytes.
+ * Each vendor spells the same JSON Schema its own way (valibot through
+ * @valibot/to-json-schema, arktype through its own emitter), so a shape can compile from
+ * zod's output and still fail from another's. This is every shape a vendor can spell,
+ * especially the ones whose bytes depend on the payload rather than on the schema
+ * (unions, `any`, records, recursion), crossed with the decoder contract from
+ * `fuzz.test.ts`: truncate it, extend it, flip every byte, and it either throws a
+ * `DecodeError` or decodes to something that re-encodes to exactly those bytes.
  *
  * A missing vendor on a case means that vendor cannot spell the shape, and the comment
  * on the case says which and why. Do not fill one in without checking it emits the same
@@ -155,6 +157,16 @@ const cases: readonly Case[] = [
     arktype: type("string.uuid"),
     values: [UUID, "00000000-0000-0000-0000-000000000000"],
     invalid: ["not-a-uuid", ""],
+  },
+  {
+    // ArkType spells `string.uuid` as three branches and adds `null` as a fourth, so this
+    // reaches the nullable end of the uuid collapse, which the case above cannot.
+    name: "nullable uuid",
+    zod: z.uuid().nullable(),
+    valibot: val(v.nullable(v.pipe(v.string(), v.uuid()))),
+    arktype: type("string.uuid | null"),
+    values: [UUID, null, "00000000-0000-0000-0000-000000000000"],
+    invalid: ["not-a-uuid", undefined],
   },
   {
     name: "any",
@@ -419,6 +431,23 @@ const cases: readonly Case[] = [
       meta: { n: "number.integer", inner: { f: "boolean" } },
     }),
     values: [{ user: { name: "r", tags: [] }, meta: { n: 0, inner: { f: false } } }],
+  },
+  {
+    name: "every scalar side by side in an object",
+    zod: z.object({ s: z.string(), i: z.int(), u: z.int().nonnegative(), f: z.number(), b: z.boolean() }),
+    valibot: val(v.object({ s: v.string(), i: vint, u: vuint, f: v.number(), b: v.boolean() })),
+    arktype: type({ s: "string", i: "number.integer", u: "number.integer >= 0", f: "number", b: "boolean" }),
+    values: [
+      { s: "hi", i: -3, u: 7, f: 1.5, b: true },
+      { s: "", i: 0, u: 0, f: -0.25, b: false },
+    ],
+  },
+  {
+    name: "a null field beside an int",
+    zod: z.object({ error: z.null(), n: z.int() }),
+    valibot: val(v.object({ error: v.null(), n: vint })),
+    arktype: type({ error: "null", n: "number.integer" }),
+    values: [{ error: null, n: 7 }],
   },
   {
     name: "object whose only field is a literal, so it writes no bytes",
@@ -1020,6 +1049,72 @@ describe("refusals are the same from every vendor", () => {
       expect(refusal.valibot).toThrow(refusal.message);
     });
   }
+});
+
+// The rich types cannot join `cases` above: Valibot reaches them only through the raw
+// converter and a plain structure, not through `toStandardJsonSchema`, and ArkType has
+// element types for none of its Set or Map. So each vendor gets the pairing it supports,
+// and the bytes are still held equal across all of them.
+describe("Date, bigint, Set and Map agree across vendors", () => {
+  const when = new Date("2026-09-03T12:00:00.000Z");
+  const valibotRich = (schema: v.GenericSchema) =>
+    toJsonSchema(schema, { overrideSchema: valibotOverride(toJsonSchema) });
+
+  it("Zod and ArkType write the same bytes for a Date and a bigint", () => {
+    const value = { when, id: 5n };
+    const zod = compile(z.object({ when: z.date(), id: z.bigint() }));
+    const ark = compile(type({ when: "Date", id: "bigint" }));
+    expect([...ark.encode(value)]).toEqual([...zod.encode(value)]);
+    expect(ark.decode(ark.encode(value))).toEqual(value);
+  });
+
+  it("Valibot reaches all four through valibotOverride and a plain structure", () => {
+    const schema = v.object({
+      when: v.date(),
+      id: v.bigint(),
+      tags: v.set(v.string()),
+      scores: v.map(v.string(), v.number()),
+      nested: v.set(v.set(v.string())),
+    });
+    const codec = compile(schema, valibotRich(schema));
+    const value = {
+      when,
+      id: -7n,
+      tags: new Set(["a"]),
+      scores: new Map([["k", 1.5]]),
+      nested: new Set([new Set(["x"])]),
+    };
+    expect(codec.decode(codec.encode(value))).toEqual(value);
+    const zod = compile(
+      z.object({
+        when: z.date(),
+        id: z.bigint(),
+        tags: z.set(z.string()),
+        scores: z.map(z.string(), z.number()),
+        nested: z.set(z.set(z.string())),
+      }),
+    );
+    expect([...codec.encode(value)]).toEqual([...zod.encode(value)]);
+  });
+
+  it("refuses a Valibot lazy type reached through a Set as a refusal, not a stack overflow", () => {
+    const Node: v.GenericSchema = v.object({
+      get kids() {
+        return v.set(v.lazy(() => Node));
+      },
+    });
+    expect(() => valibotRich(Node)).toThrow(/recursive type inside a Set or Map/);
+  });
+
+  it("refuses ArkType's untyped Set and Map by name", () => {
+    expect(() => compile(type({ s: "Set" }))).toThrow(/ArkType's Set carries no element type/);
+    expect(() => compile(type({ m: "Map" }))).toThrow(/ArkType's Map carries no element type/);
+  });
+
+  it("keeps Valibot's rich types refused without the override, with the remedy appended", () => {
+    const schema = v.object({ d: v.date() });
+    expect(() => compile(schema, toStandardJsonSchema(schema))).toThrow(/convert it at the edge/);
+  });
 });
 
 /**
