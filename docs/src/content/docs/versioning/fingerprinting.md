@@ -22,6 +22,8 @@ A `Set` and an array of the same element type write byte-identical payloads and 
 
 The fingerprint does not change for refinements, property declaration order, strictness, which validator you used, or conversion functions. So a stricter `.max()` can start rejecting old data without changing the fingerprint. If validation behavior is part of your data version, carry an application version separately in a header, column, or envelope. A wire fingerprint is not a complete schema version.
 
+Nor does the fingerprint change with how a union is written: flat or nested, as `anyOf` or a `type` array, as literals or as an enum, with `.nullable()` or a `null` branch. One union type has one wire shape, so it has one fingerprint.
+
 Validator independence holds for recursive schemas too, even though validators spell them differently (Zod points the cycle at the root; Valibot inlines the root and repeats it under `$defs`), because a root that merely duplicates a definition is folded back onto it.
 
 **One known exception:** two *mutually* recursive definitions are not deduplicated, so a mutually recursive type may fingerprint differently across validators. Keep both codecs, or write that type in one validator only.

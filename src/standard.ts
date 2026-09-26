@@ -364,10 +364,75 @@ function discriminant(
 }
 
 /**
+ * The values a node names outright: a `const`, or an `enum` whose members are all
+ * scalars. Such a node is a set of values whatever its `type` says, because each value
+ * names its own type. The vendors disagree about the keyword beside it: zod writes a
+ * `type` next to a literal, valibot and arktype often write none, and valibot writes a
+ * `type` array beside a mixed picklist. Reading the values alone is what gives
+ * `{ enum: [x] }` and `{ const: x }`, the same JSON Schema, the same wire shape.
+ */
+function literalValues(schema: JsonSchema): readonly EnumValue[] | undefined {
+  if ("const" in schema) return isEnumValue(schema.const) ? [schema.const] : undefined;
+  return Array.isArray(schema.enum) && schema.enum.every(isEnumValue) ? schema.enum : undefined;
+}
+
+/**
+ * A set of values as a wire shape: nothing for one value, an index for more. `null` is
+ * never a member here: every caller has taken it out to become a marker or a type of its
+ * own, so an enum shape never holds `null` and never needs `admitsNull`'s answer.
+ *
+ * `true` and `false` together are `boolean` by another name, and write the same bytes as
+ * it, so they get its shape and its fingerprint rather than a second one.
+ */
+function literalSet(values: readonly EnumValue[]): WireShape {
+  const members = canonicalEnumOrder([...new Set(values)]);
+  if (members.length === 2 && members[0] === false && members[1] === true) return "boolean";
+  return members.length === 1 ? { literal: members[0]! } : { enum: members };
+}
+
+/**
+ * A node's branches when it is a union: `anyOf`, `oneOf`, or a `type` array, which is the
+ * same union written short. Zod 4.5 compacts an `anyOf` over bare types to one, so
+ * `z.union([z.string(), z.number()])` arrives that way from 4.5 and as `anyOf` from 4.4
+ * and from every other vendor. Each type becomes a branch carrying every other keyword,
+ * and each branch reads only the ones that belong to its own type.
+ *
+ * Not a `$ref`: a pointer is followed by `refShape` and never opened up here, so a cycle
+ * is still found where it closes. Not a set of values either, whose `type` array only
+ * restates what the values already say.
+ */
+function unionBranches(schema: JsonSchema): readonly unknown[] | undefined {
+  if (typeof schema.$ref === "string" || schema[RICH_KEYWORD] !== undefined) return undefined;
+  const union =
+    schema.anyOf ??
+    schema.oneOf ??
+    (literalValues(schema) === undefined && Array.isArray(schema.type)
+      ? schema.type.map((type) => ({ ...schema, type }))
+      : undefined);
+  return Array.isArray(union) ? union : undefined;
+}
+
+/**
+ * Every branch of a union, with any branch that is itself a union opened into its own.
+ * A nested union is the same type as the flat one, and the vendors nest where they
+ * please: zod compacts a union of bare types into a `type` array but nests an `anyOf`
+ * as soon as one branch carries a keyword such as `.min(1)`, and `v.nullable(v.union())`
+ * always nests. Classified as nested, one type had two wire shapes that could not read
+ * each other's bytes.
+ */
+function flatBranches(branches: readonly unknown[], into: JsonSchema[] = []): JsonSchema[] {
+  for (const branch of branches.map(asSchema)) {
+    const nested = unionBranches(branch);
+    if (nested === undefined) into.push(branch);
+    else flatBranches(nested, into);
+  }
+  return into;
+}
+
+/**
  * The JSON type a branch declares, taken from `type` or from the `const` standing in for
- * it. valibot writes a literal union as bare consts where zod puts a `type` beside each
- * one, and a const names its own type as plainly as the keyword does: without this the
- * same union compiled from one vendor and was refused from the other.
+ * it. Only a `$ref`'s target can still be a const by the time this is asked: a branch
+ * that is a set of values is grouped by its values' types before any branch is typed.
  */
 function branchType(branch: JsonSchema): string | undefined {
   if (typeof branch.type === "string") return branch.type;
@@ -381,9 +446,9 @@ function branchType(branch: JsonSchema): string | undefined {
  * the value names its branch, so nothing is tried and nothing is guessed.
  *
  * `integer` folds into `number` because no value carries which of the two it was declared
- * as, so a union of the pair is not disjoint and stays refused. A branch with a `type`
- * array, or none at all, `z.any()`, a bare `{}`, is refused for the same reason: it
- * overlaps whatever sits beside it.
+ * as, so a union of the pair is not disjoint and stays refused. A branch with no `type`
+ * at all, `z.any()`, a bare `{}`, is refused for the same reason: it overlaps whatever
+ * sits beside it.
  */
 function disjointTypes(
   branches: readonly JsonSchema[],
@@ -406,6 +471,108 @@ function disjointTypes(
   return types.length === 0 ? undefined : types;
 }
 
+const UNION_REFUSAL =
+  "Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported; give the branches one property that is a distinct const in each, or make no two branches share a JSON type";
+
+/**
+ * One wire shape per union type, however the vendor spelled it. The branches arrive
+ * flattened; this takes the `null`s out, reads what is left, and puts `null` back in
+ * the one form that fits.
+ *
+ * `null` is a branch typed `null`, a `const: null`, or a `null` among an enum's values.
+ * The rest is read in order:
+ *
+ * - nothing left: the union is `null` itself, which is what zod 4.4's
+ *   `z.null().nullable()`, `anyOf: [{type:"null"}, {type:"null"}]`, amounts to;
+ * - only sets of values: one merged set, so `z.union([z.literal("a"), z.literal("b")])`,
+ *   which used to be refused, writes what `z.enum(["a", "b"])` writes;
+ * - one branch: that branch, and no index to pick it;
+ * - arktype's three spellings of a uuid, or a discriminant: those shapes, as before.
+ *
+ * For all of those `null` is a marker in front. For a type-disjoint union it is one of
+ * the types instead, since `null` has a JSON type of its own: that is the form zod 4.5
+ * and arktype already produced for `a | b | null`, and it costs the index byte the
+ * union writes anyway where a marker would add one.
+ */
+function unionShape(branches: readonly JsonSchema[], ctx: RefContext): WireShape {
+  let hasNull = false;
+  // Every branch that holds something besides `null`, and of those, the ones that are
+  // not sets of values. The sets are pooled instead, by the JSON type of their members,
+  // which is also the whole merged set when nothing else is left. Pooled rather than
+  // refused, so that arktype's `"'a' | 'b' | number"`, two consts beside a number,
+  // reads as zod's enum beside one.
+  const rest: JsonSchema[] = [];
+  const typed: JsonSchema[] = [];
+  const literals = new Map<string, EnumValue[]>();
+  for (const branch of branches) {
+    const values = literalValues(branch);
+    if (values === undefined ? branch.type === "null" : values.includes(null)) hasNull = true;
+    if (values === undefined ? branch.type === "null" : values.every((value) => value === null)) {
+      continue;
+    }
+    rest.push(branch);
+    if (values === undefined) typed.push(branch);
+    for (const value of values ?? []) {
+      if (value === null) continue;
+      const pool = literals.get(typeof value);
+      if (pool === undefined) literals.set(typeof value, [value]);
+      else pool.push(value);
+    }
+  }
+  const marked = (shape: WireShape): WireShape => (hasNull ? nullableOf(shape) : shape);
+  if (rest.length === 0) {
+    // An empty `anyOf` holds no value at all, which is not a shape anyone meant.
+    if (hasNull) return { literal: null };
+    throw new EncodeError(UNION_REFUSAL);
+  }
+  if (typed.length === 0) return marked(literalSet([...literals.values()].flat()));
+  if (rest.length === 1) return marked(wireShape(rest[0]!, ctx));
+
+  // ArkType spells `string.uuid` as three branches: the lowercase pattern, plus
+  // the nil and max UUIDs as consts: every branch tagged `format: "uuid"`. One
+  // wire shape already covers all three, so the union collapses to it.
+  if (
+    rest.every(
+      (branch) =>
+        branch.format === "uuid" && (branch.type === "string" || typeof branch.const === "string"),
+    )
+  ) {
+    return marked("uuid");
+  }
+
+  const found = discriminant(rest);
+  if (found !== undefined) {
+    // Ordered by discriminant, so the branch index survives a reordering of the
+    // schema. `canonicalEnumOrder` refuses the members with no JSON text of their
+    // own, which is why `indexOf`'s strict equality is enough here.
+    const cases = canonicalEnumOrder(found.cases);
+    return marked({
+      on: found.on,
+      cases,
+      union: cases.map((value) => wireShape(rest[found.cases.indexOf(value)]!, ctx)),
+    });
+  }
+
+  // No discriminant, but possibly no ambiguity either: branches separated by JSON type
+  // need nothing on the wire beyond the index a discriminated union already writes.
+  // Each pooled set and the `null` become branches of their own, written as the JSON
+  // Schema they are, so that a type they share with another branch is refused by the
+  // same test as any other overlap.
+  for (const [type, values] of literals) typed.push({ type, enum: values });
+  if (hasNull) typed.push({ type: "null" });
+  const byType = disjointTypes(typed, ctx);
+  if (byType !== undefined) {
+    // Ordered by type name, so the branch index survives a reordering of the schema.
+    const types = canonicalKeyOrder(byType);
+    return {
+      types,
+      union: types.map((type) => wireShape(typed[byType.indexOf(type)]!, ctx)),
+    };
+  }
+
+  throw new EncodeError(UNION_REFUSAL);
+}
+
 /**
  * Whether a shape already decodes to `null` without a marker of its own: exactly the set
  * `Schema.nullable()` declines to put a second marker on.
@@ -413,9 +580,10 @@ function disjointTypes(
 function admitsNull(shape: WireShape, defNulls?: readonly boolean[]): boolean {
   if (typeof shape === "string") return shape === "any";
   if ("literal" in shape) return shape.literal === null;
-  if ("enum" in shape) return shape.enum.includes(null);
-  // Only the undiscriminated form can carry a `null` branch: a discriminated one is all
-  // objects, but reading the branches keeps both forms on a single rule.
+  // No `enum` case: `literalSet` takes `null` out of every set of values before it
+  // becomes one. Only the undiscriminated union can carry a `null` branch: a
+  // discriminated one is all objects, but reading the branches keeps both forms on a
+  // single rule.
   if ("union" in shape) return shape.union.some((branch) => admitsNull(branch, defNulls));
   // Unanswerable while the cycle is still open, which is every call from `nullableOf`.
   // `defNulls` settles it later, and `LazySchema` carries the answer to the check.
@@ -428,10 +596,11 @@ function admitsNull(shape: WireShape, defNulls?: readonly boolean[]): boolean {
  * above where `Schema.nullable()` would deal with it, which is the level the signature
  * is taken at, and that turns out to matter.
  *
- * Two cases arrive here, and both reached the caller wrong. `any`, `null` and a
- * null-bearing `enum` made `Schema.nullable()` throw "already decodes to null", blaming a
- * `.nullable()` the caller did write for a marker this compiler added: `z.any().nullable()`
- * is the plain one, since tag 0 is already `null`. A nested `{nullable:{nullable:…}}` did
+ * Two cases arrive here, and both reached the caller wrong. `any` and `null` made
+ * `Schema.nullable()` throw "already decodes to null", blaming a `.nullable()` the caller
+ * did write for a marker this compiler added: `z.any().nullable()` is the plain one, since
+ * tag 0 is already `null`. A null-bearing enum used to be a third, and no longer arrives:
+ * its `null` is taken out to become this marker. A nested `{nullable:{nullable:…}}` did
  * *not* throw, because `Schema.nullable()` collapses a repeat and returns itself, but it
  * collapsed below the signature: two schemas writing byte-identical payloads carried
  * different fingerprints and so rejected each other's bytes, which is the false positive
@@ -647,82 +816,21 @@ function wireShape(schema: JsonSchema, ctx: RefContext): WireShape {
   // `anyOf` and `oneOf` differ in whether the branches may overlap, which is a
   // validation question the vendor has already answered by the time shorn runs.
   // Zod writes a plain union as `anyOf` and a discriminated one as `oneOf`; both
-  // arrive here as the same list of branches.
-  //
-  // A `type` array is the same union written short. Zod 4.5 compacts an `anyOf` over
-  // bare types to one, so `z.union([z.string(), z.number()])` and `z.string().nullable()`
-  // arrive this way from 4.5 and as `anyOf` from 4.4 and from every other vendor. It is
-  // expanded back into the branches it abbreviates and read by the same rules, so both
-  // spellings give one wire shape and one fingerprint. Every other keyword stays on
-  // every branch, and each branch reads only the ones that belong to its own type.
-  const union =
-    schema.anyOf ??
-    schema.oneOf ??
-    (Array.isArray(schema.type) ? schema.type.map((type) => ({ ...schema, type })) : undefined);
-  if (Array.isArray(union)) {
-    const branches = union.map(asSchema);
-    const nonNull = branches.filter((branch) => branchType(branch) !== "null");
-    // `z.null().nullable()` writes `anyOf: [{type:"null"}, {type:"null"}]`. Every branch
-    // is the same one value, so the union is that value, and refusing it as "not a
-    // nullable union" named the one thing it unmistakably was.
-    if (nonNull.length === 0 && branches.length > 0) return { literal: null };
-    if (branches.length === 2 && nonNull.length === 1) {
-      return nullableOf(wireShape(nonNull[0]!, ctx));
-    }
+  // arrive here as the same list of branches, and a `type` array as the branches it
+  // abbreviates.
+  const union = unionBranches(schema);
+  if (union !== undefined) return unionShape(flatBranches(union), ctx);
 
-    // ArkType spells `string.uuid` as three branches: the lowercase pattern, plus
-    // the nil and max UUIDs as consts: every branch tagged `format: "uuid"`. One
-    // wire shape already covers all three, so the union collapses to it.
-    if (
-      nonNull.length > 0 &&
-      nonNull.every(
-        (branch) =>
-          branch.format === "uuid" && (branch.type === "string" || typeof branch.const === "string"),
-      )
-    ) {
-      return nonNull.length === branches.length ? "uuid" : nullableOf("uuid");
-    }
-
-    const found = discriminant(branches);
-    if (found !== undefined) {
-      // Ordered by discriminant, so the branch index survives a reordering of the
-      // schema. `canonicalEnumOrder` refuses the members with no JSON text of their
-      // own, which is why `indexOf`'s strict equality is enough here.
-      const cases = canonicalEnumOrder(found.cases);
-      return {
-        on: found.on,
-        cases,
-        union: cases.map((value) => wireShape(branches[found.cases.indexOf(value)]!, ctx)),
-      };
-    }
-
-    // No discriminant, but possibly no ambiguity either: branches separated by JSON type
-    // need nothing on the wire beyond the index a discriminated union already writes.
-    const byType = disjointTypes(branches, ctx);
-    if (byType !== undefined) {
-      // Ordered by type name, so the branch index survives a reordering of the schema.
-      const types = canonicalKeyOrder(byType);
-      return {
-        types,
-        union: types.map((type) => wireShape(branches[byType.indexOf(type)]!, ctx)),
-      };
-    }
-
-    throw new EncodeError(
-      "Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported; give the branches one property that is a distinct const in each, or make no two branches share a JSON type",
-    );
-  }
-
-  if ("const" in schema) {
-    if (isEnumValue(schema.const)) return { literal: schema.const };
-    throw new EncodeError("Unsupported JSON Schema literal");
-  }
-
-  if (Array.isArray(schema.enum) && schema.enum.every(isEnumValue)) {
-    const values = canonicalEnumOrder([...new Set(schema.enum)]);
+  // A set of values standing alone is read by the union's rule, as the one-branch union
+  // it is: `z.literal(["a", "b", null])` is `z.enum(["a", "b"]).nullable()` spelled
+  // another way, and writes the same marker and index; `z.enum(["a"])` is `z.literal("a")`
+  // and writes nothing.
+  const values = literalValues(schema);
+  if (values !== undefined) {
     if (values.length === 0) throw new EncodeError("Empty enums are unsupported");
-    return { enum: values };
+    return unionShape([schema], ctx);
   }
+  if ("const" in schema) throw new EncodeError("Unsupported JSON Schema literal");
 
   switch (schema.type) {
     case "string":

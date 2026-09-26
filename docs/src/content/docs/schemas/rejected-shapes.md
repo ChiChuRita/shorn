@@ -30,11 +30,14 @@ shorn refuses any schema it cannot encode exactly. Unless a section says otherwi
 
 > Only nullable, discriminated and type-disjoint JSON Schema unions are currently supported; give the branches one property that is a distinct const in each, or make no two branches share a JSON type
 
-Three kinds of union are supported. In each one the encoder can name the branch without trying any of them:
+Four kinds of union are supported. In each one the encoder can name the branch without trying any of them:
 
-- **nullable**: two branches, one of them `null`. One marker byte, no index.
+- **literals**: every branch is a literal, so the union is an enum of their values. One index. See [Enums](/wire-format/layout/#enums).
+- **nullable**: `null` beside one other branch, beside only literals, or beside a discriminated union. One marker byte in front.
 - **discriminated**: one property that is a distinct `const` in every branch. See [Discriminated unions](/schemas/supported-types/#discriminated-unions).
-- **type-disjoint**: no two branches share a JSON type, so the type of the value names its branch. See [Type-disjoint unions](/schemas/supported-types/#type-disjoint-unions).
+- **type-disjoint**: no two branches share a JSON type, so the type of the value names its branch. A `null` beside them is one more type, and literals of one type count as one branch. See [Type-disjoint unions](/schemas/supported-types/#type-disjoint-unions).
+
+A union nested inside another is read as the flat union it amounts to. `z.union([z.string(), z.number()]).nullable()` is one union of three types, whether the validator nests it or not.
 
 What stays refused is a union where two branches could both hold the same value:
 
@@ -46,7 +49,7 @@ z.union([z.string(), z.any()]);                                      // any over
 
 Picking a branch there would mean trying each in turn and keeping the first that fits. Where two fit, the wrong choice decodes silently into a valid-looking value. Give the branches a discriminant, or give each variant its own codec and pick one by [fingerprint](/versioning/schema-evolution/).
 
-`integer` and `number` count as one type here, because nothing about `5` says which one it was declared as. A branch with a `type` array, or with no `type` at all, is refused for the same reason: it overlaps whatever sits next to it.
+`integer` and `number` count as one type here, because nothing about `5` says which one it was declared as. A branch with no `type` at all is refused for the same reason: it overlaps whatever sits next to it.
 
 Extra properties are a separate question from open objects, which are [supported](/schemas/supported-types/#records-open-objects-and-dynamic-values). When a validator leaves out `additionalProperties` entirely, as ArkType and Valibot's `looseObject` do, the object is closed and has no tail to hold extras. The codec builds, and encoding a value with an extra property throws `Unknown object property "x"`.
 
@@ -176,6 +179,7 @@ The first three build a codec that refuses every value it is given. Decoding the
 
 ```ts
 z.array(z.literal("x"));  // literal encodes to 0 bytes
+z.array(z.enum(["x"]));   // a one-member enum is that literal
 z.array(z.tuple([]));
 z.array(z.object({}));
 ```

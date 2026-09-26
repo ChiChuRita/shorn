@@ -72,7 +72,8 @@ function leaf(rng: Rng): ZodGen {
       const values = Array.from({ length: 1 + below(rng, 40) }, (_, index) => `e${index}`);
       return {
         schema: z.enum(values as [string, ...string[]]),
-        zeroWidth: false,
+        // A one-member enum is the literal it names, and writes nothing either.
+        zeroWidth: values.length === 1,
         yieldsNull: false,
         sample: (r) => pick(r, values),
       };

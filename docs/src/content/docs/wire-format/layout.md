@@ -120,6 +120,8 @@ Zero bytes. The schema already knows the value.
 m.literal("x") with "x" -> []
 ```
 
+An enum with one member names one value too, so `z.enum(["x"])` is this literal and writes nothing.
+
 ### Enums
 
 The index of the value in sorted order, as a varint. Members are sorted first, so declaration order does not matter. `compile()` drops a member that a JSON Schema `enum` lists twice, while `m.enum` refuses one with `Enum values must be unique`.
@@ -130,6 +132,8 @@ m.enum(["viewer", "editor", "admin"])  // sorted to ["admin", "editor", "viewer"
 ```
 
 Members do not have to be strings. An all-string enum sorts by value. Any other enum sorts by each member's JSON text, because `<` cannot order mixed types consistently. Either way a member costs one byte until there are 128 of them: a numeric enum is an index, not a number.
+
+A union of literals is an enum, however it is written. `z.union([z.literal("a"), z.literal("b")])`, `z.literal(["a", "b"])` and `z.enum(["a", "b"])` write the same index. A `null` among the values is not a member: it becomes the [nullable](#nullable) marker in front, so `z.literal(["a", "b", null])` writes what `z.enum(["a", "b"]).nullable()` writes.
 
 An index past the last member is a `DecodeError`. Adding a member shifts every index at or after it; see [Wire fingerprints](/versioning/fingerprinting/).
 
@@ -267,7 +271,9 @@ null -> [0]
 5    -> [1, 5]
 ```
 
-A marker over a shape that already holds `null` (`z.any()`, `z.null()`, an enum with a `null` member, or a second `.nullable()`) is dropped when the codec is built, so no payload carries two ways to spell one `null`. The dropped marker is not in the [fingerprint](/versioning/schema-evolution/) either, so a redundant wrapper changes neither the bytes nor the identifier.
+The marker is how `null` joins one other type, a set of literals, or a discriminated union. Beside a [type-disjoint union](#type-disjoint-unions), `null` is one of the types instead.
+
+A marker over a shape that already holds `null` (`z.any()`, `z.null()`, or a second `.nullable()`) is dropped when the codec is built, so no payload carries two ways to spell one `null`. The dropped marker is not in the [fingerprint](/versioning/schema-evolution/) either, so a redundant wrapper changes neither the bytes nor the identifier.
 
 ### Discriminated unions
 
@@ -304,6 +310,21 @@ z.union([z.string(), z.number()])
 Branches are ordered by type name (`array`, `boolean`, `null`, `number`, `object`, `string`), so declaration order does not reach the wire, exactly as with a discriminant. The decoder cannot tell the two union forms apart and does not need to. Both read an index and then the branch.
 
 `integer` is not a name on that list. It folds into `number`, because nothing about a value says which of the two it was declared as. A union that would need to tell them apart is refused rather than given an index it cannot assign.
+
+A `null` beside the branches is one more type, with a branch that writes nothing, rather than a marker in front of the union:
+
+```ts
+z.union([z.string(), z.number()]).nullable()
+
+"s"  -> [2, 1, 115]
+        │  └─ the string
+        └─ branch index: `null` is 0, `number` 1, `string` 2
+null -> [0]
+```
+
+The bytes are the same whichever way the schema says it: `.nullable()` on the union, a `z.null()` branch, or a union nested inside another, which is read as the flat union it amounts to. A marker would add a byte to every value that is not `null`. The index costs nothing extra, because the union writes one anyway.
+
+Literals of one JSON type count as one branch, an enum of their values. `z.union([z.literal("a"), z.literal("b"), z.number()])` writes what `z.union([z.enum(["a", "b"]), z.number()])` writes: the `string` index, then the enum index.
 
 ### Recursive schemas
 

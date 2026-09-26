@@ -692,6 +692,9 @@ const cases: readonly Case[] = [
         v.variant("k", [v.object({ k: v.literal("a"), n: vint }), v.object({ k: v.literal("b") })]),
       ),
     ),
+    // arktype writes the null beside the branches, one flat `anyOf`, where the other two
+    // nest the union under it. Refused until nested unions were opened before reading.
+    arktype: type({ k: "'a'", n: "number.integer" }).or({ k: "'b'" }).or("null"),
     values: [null, { k: "a", n: 1 }, { k: "b" }],
   },
   {
@@ -1047,7 +1050,7 @@ describe("wire digest over the whole matrix", () => {
    * That is the point: decide whether any byte moved, then update the digest in the same
    * commit as whatever answers it.
    */
-  const VENDOR_WIRE_DIGEST = "2c211590e038b345";
+  const VENDOR_WIRE_DIGEST = "6e7b68faf3e0676d";
 
   it("hashes to a pinned value", () => {
     const lines: string[] = [];
