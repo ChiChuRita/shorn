@@ -293,6 +293,25 @@ describe("shorn core", () => {
     }
   });
 
+  it("refuses to encode an array the decoder would refuse, and only that", () => {
+    // The decoder stops at a million elements, so the encoder has to stop there too, or it
+    // writes a payload no reader will accept. Both sides of the limit, so the two halves
+    // cannot drift apart by one.
+    const schema = m.array(m.uint());
+    const atLimit = new Array<number>(1_000_000).fill(0);
+    expect(schema.decode(schema.encode(atLimit))).toHaveLength(1_000_000);
+    // Caught once rather than asserted twice: every refusal walks the million elements
+    // looking for one to blame, and the exact message says it found none.
+    let thrown: unknown;
+    try {
+      schema.encode([...atLimit, 0]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(EncodeError);
+    expect((thrown as EncodeError).message).toBe("Array is too large");
+  });
+
   it("bounds the slots a fixed-count array of zero-width elements can allocate", () => {
     // A fixed count comes from the schema, so no input-length budget bounds it: that
     // is the documented exemption, and one level of it still stands. Nesting a second
@@ -1046,6 +1065,42 @@ describe("Date, bigint, Set and Map", () => {
       },
     });
     expect(schema.decode(schema.encode(set)).size).toBe(1);
+  });
+
+  it("refuses a Set that an element getter shrinks mid-encode", () => {
+    // The mirror of the case above. The count is written first, so a Set that loses an
+    // element partway through leaves a payload one element short of what it declares,
+    // which would decode as a truncated one or swallow the next field's bytes.
+    const schema = m.set(m.object({ n: m.uint() }));
+    const shrinking = () => {
+      const second = { n: 2 };
+      const set = new Set<{ n: number }>([
+        {
+          get n() {
+            set.delete(second);
+            return 1;
+          },
+        },
+        second,
+      ]);
+      return set;
+    };
+    expect(() => schema.encode(shrinking())).toThrow(EncodeError);
+    expect(() => schema.encode(shrinking())).toThrow("Set changed size during encode");
+  });
+
+  it("refuses to encode a Set past the collection limit", () => {
+    // The decoder refuses a count over a million for a Set as for an array, so a larger
+    // Set has to be refused before it is written.
+    const set = new Set(Array.from({ length: 1_000_001 }, (_, index) => index));
+    let thrown: unknown;
+    try {
+      m.set(m.uint()).encode(set);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(EncodeError);
+    expect((thrown as EncodeError).message).toBe("Set is too large");
   });
 });
 
