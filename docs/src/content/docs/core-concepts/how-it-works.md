@@ -10,21 +10,21 @@ This page covers where the bytes go, then the four steps between a JavaScript va
 Start with one small record as minified JSON:
 
 ```text
-{"name":"Grace","age":45,"sex":"F"}   35 bytes
+{"name":"Grace","age":45,"role":"admin"}   40 bytes
 ```
 
 The schema already knows the field names, so there is no need to send them:
 
 ```text
-["Grace",45,"F"]                      16 bytes
+["Grace",45,"admin"]                       20 bytes
 ```
 
-The schema also knows the order and the type of each field, so the brackets, commas, and quotes can go too. And `"F"` is one of three known enum values, so an index replaces the string:
+The schema also knows the order and the type of each field, so the brackets, commas, and quotes can go too. And `"admin"` is one of three known enum values, so an index replaces the string:
 
 ```text
-2d 05 47 72 61 63 65 00               8 bytes
+2d 05 47 72 61 63 65 00                    8 bytes
 │  │  └─────┬──────┘ │
-│  │        │        └── sex, index 0 of the enum
+│  │        │        └── role, index 0 of the enum
 │  │        └── "Grace"
 │  └── string length, 5
 └── age, 45
@@ -32,7 +32,7 @@ The schema also knows the order and the type of each field, so the brackets, com
 
 The middle step is the familiar one: an array carries the same information as the object, because the reader knows what each position means. shorn applies the same idea to every byte, and the schema is what makes that safe.
 
-Two bytes deserve a second look. `2d` is age 45, and it comes first even though `name` was declared first, because fields are written in [canonical order](/core-concepts/canonical-bytes/), not declaration order. `00` is the index of `"F"` in the sorted enum `["F", "M", "X"]`. [Byte layout](/wire-format/layout/) covers every wire type this way.
+Two bytes deserve a second look. `2d` is age 45, and it comes first even though `name` was declared first, because fields are written in [canonical order](/core-concepts/canonical-bytes/), not declaration order. `00` is the index of `"admin"` in the sorted enum `["admin", "editor", "viewer"]`. [Byte layout](/wire-format/layout/) covers every wire type this way.
 
 ## The four steps
 

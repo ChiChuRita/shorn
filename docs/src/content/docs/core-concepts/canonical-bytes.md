@@ -11,9 +11,9 @@ shorn writes fields in the order of their names, compared as UTF-16 code units, 
 
 ```ts
 const Person = z.object({
-  name: z.string(),             // rank 1
-  age: z.int().nonnegative(),   // rank 0
-  sex: z.enum(["M", "F", "X"]), // rank 2
+  name: z.string(),                            // rank 1
+  age: z.int().nonnegative(),                  // rank 0
+  role: z.enum(["viewer", "editor", "admin"]), // rank 2
 });
 ```
 
@@ -26,10 +26,10 @@ The encoder applies the sort. The [`m` API](/api/m/) cannot override it, because
 The same rule orders enum members, so the index of a member never depends on where you declared it:
 
 ```ts
-z.enum(["M", "F", "X"]); // sorted: ["F", "M", "X"] → 0, 1, 2
+z.enum(["viewer", "editor", "admin"]); // sorted: ["admin", "editor", "viewer"] → 0, 1, 2
 ```
 
-Declaring `["X", "F", "M"]` gives identical bytes. Adding a member shifts the index of every member that sorts after it, which is why versioned payloads need a [wire fingerprint](/versioning/fingerprinting/).
+Declaring `["admin", "viewer", "editor"]` gives identical bytes. Adding a member shifts the index of every member that sorts after it, which is why versioned payloads need a [wire fingerprint](/versioning/fingerprinting/).
 
 ## The same bytes from every validator
 

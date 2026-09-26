@@ -10,11 +10,15 @@ import "../styles/strips.css";
 // varint: `34` is one byte, drawn as a box per digit so each character of the JSON has
 // somewhere of its own to land. A box is therefore not always a byte, and the count
 // beside the lane is the byte count. Both totals come from this table, so neither the
-// 35 nor the 8 can drift away from what is drawn.
+// 40 nor the 8 can drift away from what is drawn.
+//
+// The enum goes the other way: all five characters of `admin` land in one box, drawn as
+// `0`, its index in the sorted members. That is the byte the encoder writes (checked
+// below), and five letters collapsing into one digit is the enum rule, shown.
 const fields = [
   { key: "name", raw: "Alice", quoted: true, cells: ["5", "A", "l", "i", "c", "e"], lengthCells: 1, bytes: 6 },
   { key: "age", raw: "34", quoted: false, cells: ["3", "4"], lengthCells: 0, bytes: 1 },
-  { key: "sex", raw: "F", quoted: true, cells: ["F"], lengthCells: 0, bytes: 1 },
+  { key: "role", raw: "admin", quoted: true, cells: ["0"], lengthCells: 0, bytes: 1 },
 ];
 
 // The JSON as tokens rather than one string: the strip inks value characters differently
@@ -22,12 +26,12 @@ const fields = [
 // staggers the shearing from the left instead of dropping the strip all at once.
 //
 // A surviving character also carries `to`: the wire cell it becomes, so the script can
-// fly it there. One character, one cell, all the way through, which is what the varint
-// getting a box per digit above buys.
+// fly it there. One character, one cell, which is what the varint getting a box per digit
+// above buys, except for the enum, whose characters all land on its one index.
 //
 // Broken into lines where a formatter would break, one field per line. The breaks and
 // the indent are layout only: `n` still counts every character in order, so the strip
-// is one cell per byte and the 35 is still 35.
+// is one cell per byte and the 40 is still 40.
 let n = 0;
 type Char = { c: string; i: number; to?: string };
 type Line = { indent: boolean; tokens: { chars: Char[]; lift: boolean }[] };
@@ -68,8 +72,8 @@ const wireFields = [...fields].sort((a, b) => (a.key < b.key ? -1 : 1));
 // above, or a change to the sort, fails the build instead of shipping a figure that
 // disagrees with the bytes.
 const real = m
-  .object({ age: m.uint(), name: m.string(), sex: m.enum(["M", "F", "X"]) })
-  .encode({ name: "Alice", age: 34, sex: "F" });
+  .object({ age: m.uint(), name: m.string(), role: m.enum(["viewer", "editor", "admin"]) })
+  .encode({ name: "Alice", age: 34, role: "admin" });
 if (real.length !== wireBytes) {
   throw new Error(`hero figure claims ${wireBytes} bytes, the encoder writes ${real.length}`);
 }
@@ -79,12 +83,16 @@ for (const f of wireFields) {
   if (f.key === "name" && real[offset] !== f.raw.length) {
     throw new Error(`hero draws name at byte ${offset}, where the encoder writes ${real[offset]}`);
   }
+  // The enum's box shows its index, so it has to be the index the encoder writes.
+  if (f.key === "role" && real[offset] !== Number(f.cells[0])) {
+    throw new Error(`hero draws role as ${f.cells[0]}, where the encoder writes ${real[offset]}`);
+  }
   offset += f.bytes;
 }
 
 // The whole panel is one labelled image rather than 43 single characters for a screen
 // reader to spell out, and the run is decoration on top of it.
-const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} bytes of JSON. The same record is ${wireBytes} bytes of shorn, in the encoder's canonical field order: 34, then a length byte, then Alice, then F.`;
+const label = `The record {"name":"Alice","age":34,"role":"admin"} is ${jsonBytes} bytes of JSON. The same record is ${wireBytes} bytes of shorn, in the encoder's canonical field order: 34, then a length byte, then Alice, then 0, the index of admin among the enum's sorted members.`;
 ---
 
 <figure class="hero-bytes">
@@ -336,7 +344,7 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
   }
 
   /* Staggered by position, so the strip goes faint from the left rather than all at once.
-     35 cells at 14ms apart is ~490ms of stagger, finishing while the copies are still in
+     40 cells at 14ms apart is ~560ms of stagger, finishing while the copies are still in
      the air. Eased rather than linear, so each cell settles into its dim instead of
      stopping on it. */
   .hero-bytes .json i {

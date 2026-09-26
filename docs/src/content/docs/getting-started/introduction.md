@@ -14,14 +14,14 @@ import { decode, encode } from "@chichurita/shorn";
 const Person = z.object({
   name: z.string(),
   age: z.int().nonnegative(),
-  sex: z.enum(["M", "F", "X"]),
+  role: z.enum(["viewer", "editor", "admin"]),
 });
 
-const bytes = encode(Person, { name: "Grace", age: 45, sex: "F" }); // 8 bytes
+const bytes = encode(Person, { name: "Grace", age: 45, role: "admin" }); // 8 bytes
 const decoded = decode(Person, bytes);
 ```
 
-As minified JSON, that value is 35 bytes. shorn writes 8, because the field names and type markers stay in the schema instead of being repeated in every payload. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) walks from 35 down to 8 in three steps.
+As minified JSON, that value is 40 bytes. shorn writes 8, because the field names and type markers stay in the schema instead of being repeated in every payload. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) walks from 35 down to 8 in three steps.
 
 In every case:
 

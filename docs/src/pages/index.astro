@@ -14,7 +14,7 @@ const demo = [
   "const Person = z.object({",
   "  name: z.string(),",
   "  age: z.int().nonnegative(),",
-  '  sex: z.enum(["M", "F", "X"]),',
+  '  role: z.enum(["viewer", "editor", "admin"]),',
   "});",
   "",
   "// It is also the wire format.",
@@ -22,16 +22,16 @@ const demo = [
   "// → 8 canonical bytes, validated before encoding",
   "",
   "const back = decode(Person, bytes);",
-  '// → { name: string; age: number; sex: "M" | "F" | "X" }',
+  '// → { name: string; age: number; role: "viewer" | "editor" | "admin" }',
 ];
 
 const payloads = [
   { label: "shorn", note: "", bytes: 8, self: true },
   { label: "Avro", note: "own schema", bytes: 8, self: false },
-  { label: "SchemaPack", note: "own builder", bytes: 9, self: false },
   { label: "Protobuf", note: ".proto + codegen", bytes: 11, self: false },
-  { label: "msgpackr plain", note: "field names", bytes: 25, self: false },
-  { label: "JSON", note: "field names + text", bytes: 35, self: false },
+  { label: "SchemaPack", note: "own builder", bytes: 13, self: false },
+  { label: "msgpackr plain", note: "field names", bytes: 30, self: false },
+  { label: "JSON", note: "field names + text", bytes: 40, self: false },
 ];
 
 ---
@@ -64,7 +64,7 @@ const payloads = [
         src={bytesPicture}
         width="720"
         height="336"
-        alt='{"name":"Grace","age":45,"sex":"F"} is 35 bytes as JSON, 16 as a positional array, and 8 bytes through shorn: 2d is age 45, 05 is the string length, 47 to 65 is Grace, 00 is the enum index of "F"'
+        alt='{"name":"Grace","age":45,"role":"admin"} is 40 bytes as JSON, 20 as a positional array, and 8 bytes through shorn: 2d is age 45, 05 is the string length, 47 to 65 is Grace, 00 is the enum index of "admin"'
       />
     </figure>
     <p class="quiet">

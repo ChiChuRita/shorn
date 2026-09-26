@@ -20,7 +20,7 @@
      out by hand as `2 * (1.6ch + 2.5px)` it measured 37.64px against two real slots at
      47.81px, a 10.17px drift in a figure whose whole conceit is byte-exactness.
 
-     2.5px: 35 cells share 34 gaps, so every extra half-pixel costs the strip 17px, and
+     2.5px: 40 cells share 39 gaps, so every extra half-pixel costs the strip 19.5px, and
      the JSON run is what has to fit its column without clipping. */
   --cell-gap: 2.5px;
 
@@ -153,7 +153,7 @@
 
 /* The playground draws whatever you paste, so its strips wrap rather than run off the
    edge: a 98-byte payload is 98 cells and there is no column width that fits them on
-   one line. The hero's fixed 35 do fit, so it stays a single run. */
+   one line. The hero's fixed 40 do fit, so it stays a single run. */
 .bytes.wrap .strip,
 .bytes.wrap .tok {
   flex-wrap: wrap;
@@ -163,7 +163,7 @@
 }
 
 /* The hero draws the same figure at the size of a hero. It wraps too, which is what
-   buys the size: nothing has to fit 35 cells on one line any more, so the cells can be
+   buys the size: nothing has to fit 40 cells on one line any more, so the cells can be
    read at arm's length instead of being shrunk to make the row fit its column. `ch`
    scales with font-size, so the cells grow with it and only the height needs restating. */
 .bytes.lg {
@@ -181,7 +181,7 @@
 /* Pretty-printed: the strip breaks where a formatter would break, one field per line.
    The break and the indent are layout, not cells: no byte is spent on them, so the
    figure is still one cell per byte and the count beside the lane is still the count.
-   Reading it is the point: `{"name":"Alice","age":34,"sex":"F"}` as a single 35-cell run
+   Reading it is the point: `{"name":"Alice","age":34,"role":"admin"}` as a single 40-cell run
    is a wall, and the wrap point was wherever the column happened to end. */
 .bytes .strip.lines {
   flex-direction: column;

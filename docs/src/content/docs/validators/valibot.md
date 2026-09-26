@@ -13,12 +13,12 @@ import { decode, encode } from "@chichurita/shorn";
 const Person = v.object({
   name: v.string(),
   age: v.pipe(v.number(), v.integer(), v.minValue(0)),
-  sex: v.picklist(["M", "F", "X"]),
+  role: v.picklist(["viewer", "editor", "admin"]),
 });
 
 const structure = toStandardJsonSchema(Person);
 
-const person = { name: "Grace", age: 45, sex: "F" } as const;
+const person = { name: "Grace", age: 45, role: "admin" } as const;
 const bytes = encode(Person, person, structure); // 8 bytes
 const decoded = decode(Person, bytes, structure);
 ```
