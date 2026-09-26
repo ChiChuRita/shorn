@@ -65,7 +65,7 @@ PersonWire.decode(bytes);                // rejects a different wire shape
 
 ## Use another validator
 
-Zod 4.2 or newer and ArkType 2.1.28 or newer work as they are: pass the schema. Valibot 1.x keeps its JSON Schema conversion in a separate package, so create the structure once with `toStandardJsonSchema(schema)`, next to the schema, and pass it as the last argument. shorn reads validation through [Standard Schema](https://standardschema.dev/schema) and structure through [Standard JSON Schema](https://standardschema.dev/json-schema).
+Zod 4.2 or newer and ArkType 2.1.28 or newer work as they are: pass the schema. Valibot 1.5 or newer keeps its JSON Schema conversion in a separate package, `@valibot/to-json-schema` 1.8 or newer, so create the structure once with `toStandardJsonSchema(schema)`, next to the schema, and pass it as the last argument. shorn reads validation through [Standard Schema](https://standardschema.dev/schema) and structure through [Standard JSON Schema](https://standardschema.dev/json-schema).
 
 Valibot's wrapper takes no options, so for `Date`, `bigint`, `Map` and `Set` use the raw converter together with `valibotOverride`:
 
