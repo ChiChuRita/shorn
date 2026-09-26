@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { type } from "arktype";
 import { describe, expect, it } from "vitest";
 import * as v from "valibot";
@@ -6,6 +7,24 @@ import { z } from "zod";
 import { compile, m, type Schema } from "../src/index.js";
 
 const bytes = (value: Uint8Array) => [...value];
+
+/**
+ * The `###` headings of docs/src/content/docs/wire-format/layout.md, which is where every
+ * vector's `row` comes from. A parenthetical is dropped: "Records (keys the schema does
+ * not name)" is the "Records" row.
+ */
+const layoutPage = new URL("../docs/src/content/docs/wire-format/layout.md", import.meta.url);
+const documentedSections = [
+  ...readFileSync(layoutPage, "utf8").matchAll(/^### (.+?)(?: \(.*\))?$/gm),
+].map((match) => match[1]!);
+
+/** The recursive example on the byte layout page: a tree through a `$ref` to the root. */
+const Node = z.object({
+  value: z.string(),
+  get children() {
+    return z.array(Node);
+  },
+});
 
 interface Vector {
   readonly row: string;
@@ -218,6 +237,21 @@ const vectors: readonly Vector[] = [
     value: ["hi", true, -1],
     expected: [2, 104, 105, 1, 1],
   },
+  // `m.tuple` takes no rest element, so these come through `compile`.
+  {
+    row: "Tuples",
+    name: "a rest element is written as an array after the fixed items",
+    schema: compile(z.tuple([z.string()], z.int())),
+    value: ["a", 1, 2],
+    expected: [1, 97, 2, 2, 4],
+  },
+  {
+    row: "Tuples",
+    name: "an empty rest still writes its count",
+    schema: compile(z.tuple([z.string()], z.int())),
+    value: ["a"],
+    expected: [1, 97, 0],
+  },
   {
     row: "Arrays",
     name: "count then tagless elements",
@@ -238,6 +272,27 @@ const vectors: readonly Vector[] = [
     schema: m.array(m.string()),
     value: ["a", "bb"],
     expected: [2, 1, 97, 2, 98, 98],
+  },
+  {
+    row: "Arrays",
+    name: "a fixed count is left out, as a tuple's is",
+    schema: m.array(m.uint(), 3),
+    value: [1, 2, 3],
+    expected: [1, 2, 3],
+  },
+  {
+    row: "Arrays",
+    name: "a fixed count from minItems equal to maxItems",
+    schema: compile(z.array(z.uint32()).length(3)),
+    value: [1, 2, 3],
+    expected: [1, 2, 3],
+  },
+  {
+    row: "Arrays",
+    name: "a fixed count of zero-width elements writes nothing",
+    schema: m.array(m.literal("x"), 2),
+    value: ["x", "x"],
+    expected: [],
   },
   {
     row: "Strings and bytes",
@@ -365,6 +420,51 @@ const vectors: readonly Vector[] = [
     value: "B",
     expected: [0],
   },
+  // A numeric enum is ordered by each member's JSON text, not by `<`: "10" sorts before
+  // "9", so the larger number takes the smaller index.
+  {
+    row: "Enums",
+    name: "a numeric enum orders by JSON text, so 9 is index 1",
+    schema: m.enum([9, 10]),
+    value: 9,
+    expected: [1],
+  },
+  {
+    row: "Enums",
+    name: "a numeric enum orders by JSON text, so 10 is index 0",
+    schema: m.enum([9, 10]),
+    value: 10,
+    expected: [0],
+  },
+  // A mixed enum, the same rule: `"ok"` (a quote), `200`, `false`, `null`.
+  {
+    row: "Enums",
+    name: "a mixed enum puts a string member first, by its quote",
+    schema: m.enum([200, "ok", null, false]),
+    value: "ok",
+    expected: [0],
+  },
+  {
+    row: "Enums",
+    name: "a mixed enum puts a number before the keywords",
+    schema: m.enum([200, "ok", null, false]),
+    value: 200,
+    expected: [1],
+  },
+  {
+    row: "Enums",
+    name: "a mixed enum puts false before null",
+    schema: m.enum([200, "ok", null, false]),
+    value: false,
+    expected: [2],
+  },
+  {
+    row: "Enums",
+    name: "a mixed enum puts null last",
+    schema: m.enum([200, "ok", null, false]),
+    value: null,
+    expected: [3],
+  },
   {
     row: "Literals",
     name: "a literal contributes no bytes",
@@ -463,6 +563,198 @@ const vectors: readonly Vector[] = [
     value: ["x", undefined],
     expected: [2, 1, 1, 120, 0],
   },
+  // Records, open objects, unions and dynamic values have no `m` builder, so everything
+  // from here down comes through `compile`.
+  {
+    row: "Records",
+    name: "count, then each key as a string before its value, keys sorted",
+    schema: compile(z.record(z.string(), z.int())),
+    value: { b: 2, a: 1 },
+    expected: [2, 1, 97, 2, 1, 98, 4],
+  },
+  {
+    row: "Records",
+    name: "an empty record is the count alone",
+    schema: compile(z.record(z.string(), z.int())),
+    value: {},
+    expected: [0],
+  },
+  {
+    row: "Open objects",
+    name: "nothing extra still pays the one-byte count",
+    schema: compile(z.looseObject({ a: z.string() })),
+    value: { a: "x" },
+    expected: [1, 120, 0],
+  },
+  {
+    row: "Open objects",
+    name: "declared fields first, then the extras as a record of dynamic values",
+    schema: compile(z.looseObject({ a: z.string() })),
+    value: { a: "x", n: 5 },
+    expected: [1, 120, 1, 1, 110, 3, 10],
+  },
+  {
+    row: "Open objects",
+    name: "extras are sorted like any record's keys",
+    schema: compile(z.looseObject({ a: z.string() })),
+    value: { a: "x", z: null, n: [true] },
+    expected: [1, 120, 2, 1, 110, 6, 1, 2, 1, 122, 0],
+  },
+  {
+    row: "Open objects",
+    name: "a catchall's extras carry no tag, only their keys",
+    schema: compile(z.object({ a: z.string() }).catchall(z.int())),
+    value: { a: "x", n: 5 },
+    expected: [1, 120, 1, 1, 110, 10],
+  },
+  {
+    row: "Discriminated unions",
+    name: "the branch index stands in for the discriminant, which writes nothing",
+    schema: compile(
+      z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("click"), x: z.int() }),
+        z.object({ kind: z.literal("key"), code: z.string() }),
+      ]),
+    ),
+    value: { kind: "click", x: 3 },
+    expected: [0, 6],
+  },
+  {
+    row: "Discriminated unions",
+    name: "branches are ordered by discriminant value, not declaration",
+    schema: compile(
+      z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("key"), code: z.string() }),
+        z.object({ kind: z.literal("click"), x: z.int() }),
+      ]),
+    ),
+    value: { kind: "key", code: "a" },
+    expected: [1, 1, 97],
+  },
+  {
+    row: "Type-disjoint unions",
+    name: "the index names the JSON type, and string sorts after number",
+    schema: compile(z.union([z.string(), z.number()])),
+    value: "hi",
+    expected: [1, 2, 104, 105],
+  },
+  {
+    row: "Type-disjoint unions",
+    name: "a number branch is index 0, then its float64",
+    schema: compile(z.union([z.string(), z.number()])),
+    value: 42,
+    expected: [0, 0, 0, 0, 0, 0, 0, 69, 64],
+  },
+  {
+    row: "Type-disjoint unions",
+    name: "every type name has its rank: array, boolean, null, object, string",
+    schema: compile(
+      z.union([z.object({ a: z.int() }), z.array(z.int()), z.string(), z.null(), z.boolean()]),
+    ),
+    value: null,
+    expected: [2],
+  },
+  // The page shows `[1, 97, 0]` here, `value` first. Fields go in canonical key order and
+  // `children` sorts before `value`, so the child count leads: these are the bytes the
+  // encoder writes, and the ones every payload already stored holds.
+  {
+    row: "Recursive schemas",
+    name: "a leaf writes only its own fields, children first",
+    schema: compile(Node),
+    value: { value: "a", children: [] },
+    expected: [0, 1, 97],
+  },
+  {
+    row: "Recursive schemas",
+    name: "each level is inlined where its parent holds it",
+    schema: compile(Node),
+    value: { value: "a", children: [{ value: "b", children: [] }] },
+    expected: [1, 0, 1, 98, 1, 97],
+  },
+  {
+    row: "Dynamic values",
+    name: "tag 0 is null",
+    schema: compile(z.any()),
+    value: null,
+    expected: [0],
+  },
+  {
+    row: "Dynamic values",
+    name: "tag 1 is false",
+    schema: compile(z.any()),
+    value: false,
+    expected: [1],
+  },
+  {
+    row: "Dynamic values",
+    name: "tag 2 is true",
+    schema: compile(z.any()),
+    value: true,
+    expected: [2],
+  },
+  {
+    row: "Dynamic values",
+    name: "tag 3 is a safe integer, ZigZag",
+    schema: compile(z.any()),
+    value: 5,
+    expected: [3, 10],
+  },
+  {
+    row: "Dynamic values",
+    name: "tag 4 is any other number, float64",
+    schema: compile(z.any()),
+    value: 1.5,
+    expected: [4, 0, 0, 0, 0, 0, 0, 248, 63],
+  },
+  {
+    row: "Dynamic values",
+    name: "-0 takes tag 4, since tag 3 has no sign to keep",
+    schema: compile(z.any()),
+    value: -0,
+    expected: [4, 0, 0, 0, 0, 0, 0, 0, 128],
+  },
+  {
+    row: "Dynamic values",
+    name: "an integer past the safe range takes tag 4",
+    schema: compile(z.any()),
+    value: 2 ** 53,
+    expected: [4, 0, 0, 0, 0, 0, 0, 64, 67],
+  },
+  {
+    row: "Dynamic values",
+    name: "tag 5 is a string",
+    schema: compile(z.any()),
+    value: "hi",
+    expected: [5, 2, 104, 105],
+  },
+  {
+    row: "Dynamic values",
+    name: "tag 6 is an array of tagged values",
+    schema: compile(z.any()),
+    value: [1, "a"],
+    expected: [6, 2, 3, 2, 5, 1, 97],
+  },
+  {
+    row: "Dynamic values",
+    name: "an array nested in an array",
+    schema: compile(z.any()),
+    value: [[]],
+    expected: [6, 1, 6, 0],
+  },
+  {
+    row: "Dynamic values",
+    name: "tag 7 is an object, as a record of tagged values",
+    schema: compile(z.any()),
+    value: { a: 1 },
+    expected: [7, 1, 1, 97, 3, 2],
+  },
+  {
+    row: "Dynamic values",
+    name: "nested objects and arrays, keys sorted at every level",
+    schema: compile(z.any()),
+    value: { b: [null], a: {} },
+    expected: [7, 2, 1, 97, 7, 0, 1, 98, 6, 1, 0],
+  },
 ];
 
 describe("golden vectors", () => {
@@ -474,25 +766,14 @@ describe("golden vectors", () => {
     });
   }
 
-  it("covers every row of the documented wire format", () => {
+  // The sections are read off the page rather than listed here, so a section added there
+  // without a vector fails, and so does a vector filed under a heading the page no longer
+  // has. "Optional marker" is the one row outside it: a standalone `m.string().optional()`,
+  // which no JSON Schema can produce and which the page has no section for.
+  it("covers every section of the byte layout page, and files every vector under one", () => {
     const covered = new Set(vectors.map((vector) => vector.row));
-    expect([...covered].sort()).toEqual([
-      "Arrays",
-      "BigInts",
-      "Booleans",
-      "Dates",
-      "Enums",
-      "Floats",
-      "Integers",
-      "Literals",
-      "Maps",
-      "Nullable",
-      "Objects",
-      "Optional marker",
-      "Sets",
-      "Strings and bytes",
-      "Tuples",
-    ]);
+    expect(documentedSections).toContain("Records");
+    expect([...covered].sort()).toEqual([...documentedSections, "Optional marker"].sort());
   });
 });
 
