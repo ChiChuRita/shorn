@@ -1422,7 +1422,10 @@ export function safeEncode(
   value: unknown,
   structure?: Structure,
 ): SafeResult<Uint8Array> {
-  return safely(() => codecOf(schema, structure).encode(value));
+  // Built outside `safely`: a schema shorn refuses is a bug in the program, not a bad
+  // value, and returned as a result it answered every request with a 400.
+  const codec = codecOf(schema, structure);
+  return safely(() => codec.encode(value));
 }
 
 export function safeDecode<T>(codec: Schema<T>, value: Uint8Array): SafeResult<T>;
@@ -1440,7 +1443,10 @@ export function safeDecode(
   value: Uint8Array,
   structure?: Structure,
 ): SafeResult<unknown> {
-  return safely(() => codecOf(schema, structure).decode(value));
+  // Outside `safely` for `safeEncode`'s reason. The payload is the only input a caller
+  // does not control, so every failure of the bytes is still a result.
+  const codec = codecOf(schema, structure);
+  return safely(() => codec.decode(value));
 }
 
 /**
