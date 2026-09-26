@@ -1,14 +1,17 @@
+import { type } from "arktype";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   DecodeError,
   EncodeError,
+  FingerprintedSchema,
   compile,
   decodeAsync,
   encode,
   encodeAsync,
   fingerprinted,
   m,
+  type EncodableStandardSchema,
 } from "../src/index.js";
 
 const Person = z.object({
@@ -26,6 +29,25 @@ describe("fingerprint envelope", () => {
   // rather than a support ticket.
   it("pins the canonical fingerprint bytes", () => {
     expect([...fingerprinted(compile(Person)).fingerprint]).toEqual([114, 54, 209]);
+  });
+
+  // The retained width seeds the hash, so a narrower prefix is not a truncation of a wider
+  // one and each width is a value of its own to pin. Stored data carries whichever of
+  // these it was written with.
+  it("pins the fingerprint at every retained width", () => {
+    expect(
+      ([1, 2, 3, 4] as const).map((bytes) => fingerprinted(compile(Person), { bytes }).fingerprintHex),
+    ).toEqual(["e3", "da68", "7236d1", "a3b4e3de"]);
+  });
+
+  // What the four values above are a hash of. Held apart from them, so a failure says
+  // whether the text moved or the hash over it did.
+  it("pins the signature the fingerprint is taken over", () => {
+    expect(compile(Person).signature).toBe(
+      '{"object":[{"key":"age","optional":false,"value":"uint"},' +
+        '{"key":"name","optional":false,"value":"string"},' +
+        '{"key":"sex","optional":false,"value":{"enum":["F","M","X"]}}]}',
+    );
   });
 
   it("prefixes the fingerprint and leaves the payload byte-identical", () => {
@@ -206,4 +228,109 @@ describe("fingerprint envelope", () => {
       "Fingerprint bytes must be 1, 2, 3 or 4, received object",
     );
   });
+});
+
+const Tree = z.object({
+  value: z.string(),
+  get children() {
+    return z.array(Tree);
+  },
+});
+
+/**
+ * One representative of every `WireShape` variant in `src/standard.ts`, with the signature
+ * text it compiles to and the 4-byte fingerprint of that text.
+ *
+ * A fingerprint is the only thing tying stored payloads to the codec that can read them, and
+ * the Person vectors above reach four variants of the twenty-odd. A reordered property in
+ * any other variant's object literal, or a keyword read differently, would reissue every
+ * fingerprint holding that shape without a test noticing.
+ */
+const SHAPES: ReadonlyArray<
+  readonly [shape: string, schema: EncodableStandardSchema, signature: string, fingerprint: string]
+> = [
+  ["any", z.any(), '"any"', "57afa32f"],
+  ["bigint", z.bigint(), '"bigint"', "d338e9a6"],
+  ["boolean", z.boolean(), '"boolean"', "c91ef37d"],
+  ["date", z.date(), '"date"', "9f559ff5"],
+  ["datetime", z.iso.datetime(), '"datetime"', "f97e5f68"],
+  ["float64", z.number(), '"float64"', "75674723"],
+  ["int", z.int(), '"int"', "4ac0f25a"],
+  ["string", z.string(), '"string"', "1c4b3a6c"],
+  ["uint", z.int().nonnegative(), '"uint"', "0d32320f"],
+  ["uuid", z.uuid(), '"uuid"', "cafa68bc"],
+  ["array", z.array(z.string()), '{"array":"string"}', "a12970c1"],
+  ["fixed-length array", z.array(z.int()).length(3), '{"array":"int","length":3}', "b915467e"],
+  ["enum", z.enum(["M", "F", "X"]), '{"enum":["F","M","X"]}', "4d2b335b"],
+  ["literal", z.literal("x"), '{"literal":"x"}', "3bee31f6"],
+  ["set", z.set(z.string()), '{"set":"string"}', "a2a91dba"],
+  ["map", z.map(z.string(), z.int()), '{"map":["string","int"]}', "d7ac61dd"],
+  ["nullable", z.string().nullable(), '{"nullable":"string"}', "59f3dd99"],
+  // `rejectUnknown` is kept out of the signature: it decides whether shorn or the vendor
+  // turns an extra key away, which moves no byte. Zod writes `additionalProperties: false`
+  // and ArkType writes nothing, so the two land on either side of it with one signature.
+  [
+    "object with an optional, rejectUnknown false",
+    z.object({ a: z.string(), b: z.int().optional() }),
+    '{"object":[{"key":"a","optional":false,"value":"string"},{"key":"b","optional":true,"value":"int"}]}',
+    "6dd70a94",
+  ],
+  [
+    "object with an optional, rejectUnknown true",
+    type({ a: "string", "b?": "number.integer" }),
+    '{"object":[{"key":"a","optional":false,"value":"string"},{"key":"b","optional":true,"value":"int"}]}',
+    "6dd70a94",
+  ],
+  [
+    "open object with extras",
+    z.object({ a: z.string() }).catchall(z.int()),
+    '{"object":[{"key":"a","optional":false,"value":"string"}],"extras":"int"}',
+    "4406804d",
+  ],
+  ["record", z.record(z.string(), z.int()), '{"record":"int"}', "5d37a393"],
+  ["tuple", z.tuple([z.string(), z.int()]), '{"tuple":["string","int"]}', "6d4c96c9"],
+  ["tuple with rest", z.tuple([z.string()], z.int()), '{"tuple":["string"],"rest":"int"}', "4d41861b"],
+  [
+    "discriminated union",
+    z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("click"), x: z.int() }),
+      z.object({ kind: z.literal("key"), code: z.string() }),
+    ]),
+    '{"on":"kind","cases":["click","key"],"union":[' +
+      '{"object":[{"key":"kind","optional":false,"value":{"literal":"click"}},' +
+      '{"key":"x","optional":false,"value":"int"}]},' +
+      '{"object":[{"key":"code","optional":false,"value":"string"},' +
+      '{"key":"kind","optional":false,"value":{"literal":"key"}}]}]}',
+    "15f48c1b",
+  ],
+  [
+    "type-disjoint union",
+    z.union([z.string(), z.number()]),
+    '{"types":["number","string"],"union":["float64","string"]}',
+    "6f66368a",
+  ],
+  [
+    "recursive document",
+    Tree,
+    '{"defs":[{"object":[{"key":"children","optional":false,"value":{"array":{"ref":0}}},' +
+      '{"key":"value","optional":false,"value":"string"}]}],"root":{"ref":0}}',
+    "2d154c8c",
+  ],
+];
+
+describe("the signature and fingerprint of every wire shape", () => {
+  for (const [shape, schema, signature] of SHAPES) {
+    it(`signature: ${shape}`, () => {
+      expect(compile(schema).signature).toBe(signature);
+    });
+  }
+
+  // Hashed from the pinned text rather than from a fresh compile, so a moved signature fails
+  // only its row above and a moved hash fails only the rows here. `fingerprinted()` hands
+  // the codec's signature to this same constructor, which the Person widths pin end to end.
+  for (const [shape, , signature, fingerprint] of SHAPES) {
+    it(`fingerprint: ${shape}`, () => {
+      expect(new FingerprintedSchema(m.string(), signature, 4).fingerprintHex).toBe(fingerprint);
+    });
+  }
 });
