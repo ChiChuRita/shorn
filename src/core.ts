@@ -1002,11 +1002,6 @@ export abstract class Schema<T> {
    */
   optional(): OptionalSchema<T> {
     if (this instanceof OptionalSchema) return this as unknown as OptionalSchema<T>;
-    if (this._yieldsUndefined) {
-      throw new EncodeError(
-        "This schema already decodes to undefined; wrapping it in optional() would give undefined two encodings",
-      );
-    }
     return new OptionalSchema(this);
   }
 
@@ -1016,11 +1011,6 @@ export abstract class Schema<T> {
    */
   nullable(): NullableSchema<T> {
     if (this instanceof NullableSchema) return this as unknown as NullableSchema<T>;
-    if (this._yieldsNull) {
-      throw new EncodeError(
-        "This schema already decodes to null; wrapping it in nullable() would give null two encodings",
-      );
-    }
     return new NullableSchema(this);
   }
 }
@@ -1165,6 +1155,13 @@ export class OptionalSchema<T> extends Schema<T | undefined> {
 
   constructor(readonly inner: Schema<T>) {
     super();
+    // The refusal lives here rather than in `optional()`, so a wrapper built with `new`,
+    // which `index.ts` exports, cannot stack a second marker around one either.
+    if (inner._yieldsUndefined) {
+      throw new EncodeError(
+        "This schema already decodes to undefined; wrapping it in optional() would give undefined two encodings",
+      );
+    }
     this._yieldsUndefined = true;
     this._yieldsNull = inner._yieldsNull;
   }
@@ -1196,6 +1193,12 @@ export class OptionalSchema<T> extends Schema<T | undefined> {
 export class NullableSchema<T> extends Schema<T | null> {
   constructor(readonly inner: Schema<T>) {
     super();
+    // In the constructor for `OptionalSchema`'s reason.
+    if (inner._yieldsNull) {
+      throw new EncodeError(
+        "This schema already decodes to null; wrapping it in nullable() would give null two encodings",
+      );
+    }
     this._yieldsNull = true;
     this._yieldsUndefined = inner._yieldsUndefined;
   }

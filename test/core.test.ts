@@ -1,7 +1,16 @@
 import { runInNewContext } from "node:vm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ObjectSchema, OpenObjectSchema, RecordSchema } from "../src/core.js";
-import { DecodeError, EncodeError, encodeInto, m, type Schema, Writer } from "../src/index.js";
+import {
+  DecodeError,
+  EncodeError,
+  encodeInto,
+  m,
+  NullableSchema,
+  OptionalSchema,
+  type Schema,
+  Writer,
+} from "../src/index.js";
 import { buildUnderCsp } from "./csp.js";
 
 /**
@@ -42,6 +51,22 @@ describe("shorn core", () => {
     const encoded = User.encode({ id: 7, email: "a@b.co" });
     expect(encoded[0]).toBe(0b01);
     expect(User.decode(encoded)).toEqual({ id: 7, email: "a@b.co" });
+  });
+
+  it("refuses a second marker, however the wrapper was built", () => {
+    // `[0]` and `[1, 0]` would both decode to absent. The methods always refused this,
+    // but the classes are exported and `new` skipped the check: a doubled optional
+    // built that way decoded both payloads to `{}`.
+    expect(() => new OptionalSchema(m.string().optional())).toThrow(/already decodes to undefined/);
+    expect(() => new OptionalSchema(m.string().optional().nullable())).toThrow(
+      /already decodes to undefined/,
+    );
+    expect(() => new NullableSchema(m.literal(null))).toThrow(/already decodes to null/);
+    expect(() => new NullableSchema(m.string().nullable())).toThrow(/already decodes to null/);
+    // The methods still collapse an immediate repeat, and refuse through the other wrapper.
+    const once = m.string().optional();
+    expect(once.optional()).toBe(once);
+    expect(() => m.string().optional().nullable().optional()).toThrow(/already decodes to undefined/);
   });
 
   it("reads each optional property only once", () => {
