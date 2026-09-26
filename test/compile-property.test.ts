@@ -170,9 +170,8 @@ function zodGen(rng: Rng, depth: number): ZodGen {
  * `toString` and friends. Both exclusions are zod's limits, not shorn's, and
  * generating them would assert against zod rather than against the seam:
  *
- * - `__proto__` never arrives. zod builds its JSON Schema `properties` on a plain
- *   object literal, so the key sets that object's prototype instead of becoming a
- *   property, and shorn is handed a schema with no such field.
+ * - `__proto__` is refused at compile: zod's validator drops the key from every
+ *   value it returns, so no value could carry the field to the encoder.
  * - An `Object.prototype` member name cannot be an optional property at all.
  *   `z.object({ valueOf: z.array(z.string()).optional() }).parse({})` throws on its
  *   own, reading the inherited function as the field's value.
