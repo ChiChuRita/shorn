@@ -24,11 +24,13 @@ const codec = compile(schema, structure); // cached by the identity of both obje
 ## `encode`
 
 ```ts
-encode<S extends EncodableStandardSchema>(schema: S, value: InferOutput<S>): Uint8Array;
-encode<S extends StandardSchemaV1>(schema: S, value: InferOutput<S>, structure: StandardJSONSchemaV1 | JsonSchemaDocument): Uint8Array;
+encode<S extends EncodableStandardSchema>(schema: S, value: InferInput<S>): Uint8Array;
+encode<S extends StandardSchemaV1>(schema: S, value: InferInput<S>, structure: StandardJSONSchemaV1 | JsonSchemaDocument): Uint8Array;
 ```
 
 Validates, then writes bytes. Throws `EncodeError` if validation fails or the schema cannot be encoded.
+
+`value` has the validator's input type, because the validator runs before a byte is written. A field with a default can be left out, and a branded field takes a plain string. `safeEncode` and `encodeAsync` type a schema's value the same way. A codec from `compile()` carries only the output type, so `codec.encode()` wants every field filled in.
 
 The returned `Uint8Array` is an exact-size copy, not a view into a reused buffer, so you can keep it as long as you like. The wire plan is cached per schema object.
 

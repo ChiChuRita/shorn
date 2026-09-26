@@ -1419,13 +1419,18 @@ export function unchecked(
 
 export function encode<S extends EncodableStandardSchema>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
 ): Uint8Array;
 export function encode<S extends StandardSchemaV1>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
   structure: StructureFor<S>,
 ): Uint8Array;
+// The validator's input type, not its output, here and on the schema overloads of
+// `safeEncode` and `encodeAsync`: the value is validated before a byte is written, so
+// whatever the validator accepts is a valid argument, a branded field as a plain string,
+// a coerced field as its raw text, a defaulted field left out. A codec overload keeps
+// its output type, since that is the only type a `Schema<T>` carries.
 export function encode(
   schema: StandardSchemaV1,
   value: unknown,
@@ -1454,11 +1459,11 @@ export function decode(
 export function safeEncode<T>(codec: Schema<T>, value: T): SafeResult<Uint8Array>;
 export function safeEncode<S extends EncodableStandardSchema>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
 ): SafeResult<Uint8Array>;
 export function safeEncode<S extends StandardSchemaV1>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
   structure: StructureFor<S>,
 ): SafeResult<Uint8Array>;
 export function safeEncode(
@@ -1520,11 +1525,11 @@ function asyncParts(
 export async function encodeAsync<T>(codec: Schema<T>, value: T): Promise<Uint8Array>;
 export async function encodeAsync<S extends EncodableStandardSchema>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
 ): Promise<Uint8Array>;
 export async function encodeAsync<S extends StandardSchemaV1>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
   structure: StructureFor<S>,
 ): Promise<Uint8Array>;
 export async function encodeAsync(
