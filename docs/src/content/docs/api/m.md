@@ -58,7 +58,7 @@ Any width up to a 64 MiB magnitude, the same ceiling `m.bytes()` has. Zero is on
 m.literal<const T extends string | number | boolean | null>(value: T): Schema<T>;
 ```
 
-A literal uses zero bytes. Literals cannot be array elements, because the decoder could not check the declared element count against the payload length.
+A literal uses zero bytes. A literal cannot be the element of a variable-length array, because the decoder could not check the declared element count against the payload length. A fixed-count array of literals builds; see `m.array` below.
 
 ## `m.enum(values)`
 
@@ -66,7 +66,7 @@ A literal uses zero bytes. Literals cannot be array elements, because the decode
 m.enum<const T extends readonly [EnumValue, ...EnumValue[]]>(values: T): Schema<T[number]>;
 ```
 
-A varint index into the sorted, deduplicated member list, so declaration order has no effect on the bytes. At least one member is required. An index past the last member is a `DecodeError`.
+A varint index into the sorted member list, so declaration order has no effect on the bytes. At least one member is required, and a repeated one throws `Enum values must be unique`. An index past the last member is a `DecodeError`.
 
 Members may be any scalar (string, number, boolean, or null), so `m.enum([200, 404])` is a one-byte index rather than two floats. An all-string enum sorts by value. Any other enum sorts by each member's JSON text, because `<` cannot order mixed types consistently. An enum that lists `null` cannot be wrapped in `nullable()`, since that would give null two encodings.
 
@@ -114,7 +114,7 @@ An entry must occupy at least one byte, counting key and value together. So `m.m
 m.tuple<const S extends readonly Schema<unknown>[]>(items: S): Schema<TupleOutput<S>>;
 ```
 
-Elements only. The length comes from the schema and positions are never reordered. A tuple may contain zero-width elements, unlike `m.array`.
+Elements only. The length comes from the schema and positions are never reordered. A tuple may contain zero-width elements, unlike a variable-length `m.array`.
 
 ## `m.object(shape)`
 
@@ -138,7 +138,7 @@ m.object({
 });
 ```
 
-`optional()` only means something as an object field: it *is* the bitmap bit. `nullable()` works anywhere and always costs one byte.
+As an object field, `optional()` *is* the bitmap bit. Anywhere else it writes a marker byte of its own: `m.array(m.uint().optional())` writes `[1, undefined]` as `[2, 1, 1, 0]`. `nullable()` works anywhere and always costs one byte.
 
 ### Markers never stack
 
@@ -206,7 +206,7 @@ class Pair extends Schema<[number, number]> {
 }
 ```
 
-Set `_minWidth` if the schema may be used as an array element. It is what lets `m.array` reject an impossible count before allocating. A schema with width 0 cannot be an array element.
+Set `_minWidth` if the schema may be used as an array element. It is what lets `m.array` reject an impossible count before allocating. A schema with width 0 can be an array element only when the array's count is fixed.
 
 `reader.bytes(n)` returns a view over the input, not a copy. It aliases the caller's `Uint8Array`, so copy anything a custom codec returns first with `new Uint8Array(reader.bytes(n))`, which is what `m.bytes()` does. If you only need the values, read them with `byte()` instead and skip the view entirely.
 

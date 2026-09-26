@@ -18,7 +18,7 @@ A decoder with no type tags relies on the schema to interpret every byte. That m
 | Enum index past the last member | `DecodeError` |
 | Unknown object property | `EncodeError` on the way in |
 | Input that is not a `Uint8Array` | `DecodeError`, not a raw `TypeError` |
-| `__proto__` as a decoded key | handled; the decode target has a null prototype |
+| `__proto__` as a decoded key | handled; stored as an own property with `Object.defineProperty`, so it never sets the prototype |
 | Record keys out of order, or repeated | `DecodeError` |
 | Dynamic value nested past 64 levels | `DecodeError` |
 | Recursive schema nested past 256 levels | `DecodeError` |
@@ -49,7 +49,7 @@ A variable-length container around a fixed one is still yours to bound, because 
 Four things shorn does not defend against:
 
 - **No security audit or coverage-guided fuzzing**: property-based and mutation tests are not a substitute for either.
-- **No depth limit from the schema**: a deeply nested schema exhausts the JavaScript stack while the codec is built and throws `RangeError`, at about 1,400 levels through `compile()` and 1,600 through `m`, measured on Node 22 and not re-measured since. That takes a hostile schema, not hostile bytes, and a `RangeError` is recoverable. Limit depth if schemas come from untrusted input. Depth chosen by the payload is capped: 64 levels for a dynamic value, 256 for a recursive schema.
+- **No depth limit from the schema**: a deeply nested schema exhausts the JavaScript stack. On Node 24.18.0 that happens while a `compile()` codec is built, at about 1,300 to 1,400 levels depending on the validator. An `m` codec builds at any depth, and its encode overflows at about 1,600. [Errors](/api/errors/#one-error-that-is-not-a-decodeerror) says what each path throws. That takes a hostile schema, not hostile bytes, and the error is recoverable. Limit depth if schemas come from untrusted input. Depth chosen by the payload is capped: 64 levels for a dynamic value, 256 for a recursive schema.
 - **Not a sandbox**: validation code runs with the same privileges as your application.
 - **Not authentication or encryption**: fingerprints are unkeyed, and payloads are readable by anyone with the schema.
 

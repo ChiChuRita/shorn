@@ -58,7 +58,7 @@ for (const event of events) end = encodeInto(codec, event, frame, end);
 socket.send(frame.subarray(0, end));
 ```
 
-The bytes are exactly what `codec.encode(value)` would return. What you save is the output array and the copy into the frame that would follow it, which together are about half the cost of a small encode: on the Person fixture, 48 ns down to 23 ns, and a 100-message frame in 40% of the time. For a message that goes straight to `send()`, `encode()` is simpler and no slower.
+The bytes are exactly what `codec.encode(value)` would return. What you save is the output array and the copy into the frame that would follow it. Skipping the array alone takes a Person-fixture encode from 46 ns to 28 ns in [`bench/baseline.json`](https://github.com/ChiChuRita/shorn/blob/main/bench/baseline.json), a 39% saving. For a message that goes straight to `send()`, `encode()` is simpler and no slower.
 
 Takes any codec: from `compile()`, `fingerprinted()`, `unchecked()`, or `m`, and refuses a schema that is not one yet. Throws `EncodeError` when the value does not fit, when `offset` is outside `target`, or when `target` is not a `Uint8Array`, and names the failing field as `encode()` does. After a too-small target, the bytes from `offset` onward are unspecified.
 

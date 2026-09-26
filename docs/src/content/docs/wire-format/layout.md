@@ -65,7 +65,7 @@ ZigZag doubles the magnitude, so a signed integer crosses every size boundary at
 
 ### Dates
 
-A `Date` is its epoch milliseconds as a ZigZag varint, exactly what an `int` writes. That is six bytes for any date this century, fewer near 1970, and exact, since a `Date` holds nothing finer than a millisecond.
+A `Date` is its epoch milliseconds as a ZigZag varint, exactly what an `int` writes. That is at most six bytes for any date from 1900-04-26T08:12:24.448Z through 2039-09-07T15:47:35.551Z, fewer near 1970, and seven or more outside that range. It is exact, since a `Date` holds nothing finer than a millisecond.
 
 ```text
 new Date("2026-09-03T12:00:00.000Z") -> [128, 136, 159, 242, 140, 104]
@@ -122,7 +122,7 @@ m.literal("x") with "x" -> []
 
 ### Enums
 
-The index of the value in sorted order, as a varint. Members are deduplicated and sorted first, so declaration order does not matter.
+The index of the value in sorted order, as a varint. Members are sorted first, so declaration order does not matter. `compile()` drops a member that a JSON Schema `enum` lists twice, while `m.enum` refuses one with `Enum values must be unique`.
 
 ```text
 m.enum(["viewer", "editor", "admin"])  // sorted to ["admin", "editor", "viewer"]
@@ -159,7 +159,7 @@ Elements only. The length comes from the schema.
 m.tuple([m.uint(), m.boolean()]) with [7, true] -> [7, 1]
 ```
 
-Because the length is not on the wire, a tuple *may* contain zero-width elements where an array may not.
+Because the length is not on the wire, a tuple *may* contain zero-width elements where a variable-length array may not.
 
 A rest element is the part whose count is not in the schema, so it is written the way an array would be: the fixed items bare, then a varint count and the remainder.
 
@@ -312,11 +312,13 @@ Nothing of their own. A cycle lives in the schema, so each level writes what its
 ```ts
 const Node = z.object({ value: z.string(), get children() { return z.array(Node); } });
 
-{ value: "a", children: [] }                               -> [1, 97, 0]
-                                                               │      └─ no children
-                                                               └─ "a"
-{ value: "a", children: [{ value: "b", children: [] }] }   -> [1, 97, 1, 1, 98, 0]
-                                                                       └─ one child, inline
+{ value: "a", children: [] }                               -> [0, 1, 97]
+                                                               │  └─ "a"
+                                                               └─ no children
+{ value: "a", children: [{ value: "b", children: [] }] }   -> [1, 0, 1, 98, 1, 97]
+                                                               │  └──┬───┘  └─ "a"
+                                                               │     └─ the child, inline
+                                                               └─ one child
 ```
 
 The recursion is bounded by whatever lets it stop: an empty array here, a `null` back edge in a linked list. Depth is capped at 256 levels on both sides, since a recursive schema takes its nesting from the payload rather than from the schema; see [Hostile input](/hostile-input/).
