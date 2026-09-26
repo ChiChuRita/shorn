@@ -33,6 +33,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The two suites that check the site itself: the landing playground's byte counts,
+      # and the pages written for machine readers. CI runs them too, but this workflow
+      # deploys on the same push without waiting for CI, so a site they fail would ship.
+      - name: Test the docs site
+        run: pnpm test test/docs-agent-readiness.test.ts test/toy.test.ts
+
       - name: Build docs
         run: pnpm docs:build
 
