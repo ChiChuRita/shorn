@@ -23,7 +23,9 @@ shorn needs two things from a validator: Standard Schema for validation and Stan
 | --- | --- | --- | --- |
 | [Zod](/validators/zod/) | 4.2+ | none | `encode(Person, value)` |
 | [ArkType](/validators/arktype/) | 2.1.28+ | none | `encode(Person, value)` |
-| [Valibot](/validators/valibot/) | 1.x | `@valibot/to-json-schema` | `encode(Person, value, structure)` |
+| [Valibot](/validators/valibot/) | 1.5+ | `@valibot/to-json-schema` 1.8+ | `encode(Person, value, structure)` |
+
+These are the versions CI installs and tests, next to each vendor's latest release. For Valibot the pair matters: `toStandardJsonSchema` first shipped in `@valibot/to-json-schema` 1.5, and nothing older has it.
 
 Any other validator that implements both interfaces works with no adapter.
 
