@@ -2,6 +2,12 @@
 import Landing from "../layouts/Landing.astro";
 import Playground from "../components/Playground.astro";
 import HeroShear from "../components/HeroShear.astro";
+import { Code } from "@astrojs/starlight/components";
+// The README's picture, imported from the file the README points at rather than copied,
+// so the site and the README cannot show two different versions of the same bytes.
+// `?url` so it renders as an image: inlined, its <style> block (`.code`, `.n`, `.wire`)
+// would apply to the whole page.
+import bytesPicture from "../../../assets/hero-dark.svg?url";
 
 const demo = [
   "// The validator you already use.",
@@ -46,6 +52,27 @@ const payloads = [
   {/* The argument itself, not a table about it: the same record as text and as bytes,
       and the shearing of one into the other. */}
   <HeroShear slot="figure" />
+
+  <section slot="after" class="plain" aria-labelledby="bytes">
+    <h2 id="bytes">Where the bytes go</h2>
+    <p>
+      Your schema already knows the field names, their order, and the enum members, so
+      shorn sends only the values.
+    </p>
+    <figure class="picture">
+      <img
+        src={bytesPicture}
+        width="720"
+        height="336"
+        alt='{"name":"Grace","age":45,"sex":"F"} is 35 bytes as JSON, 16 as a positional array, and 8 bytes through shorn: 2d is age 45, 05 is the string length, 47 to 65 is Grace, 00 is the enum index of "F"'
+      />
+    </figure>
+    <p class="quiet">
+      <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/core-concepts/how-it-works/#where-the-bytes-go`}
+        >How it works</a
+      > walks through the eight bytes one at a time.
+    </p>
+  </section>
 
   <section slot="after" class="plain drop-in" aria-labelledby="drop-in">
     <h2 id="drop-in">Install it. Keep your schema.</h2>
@@ -124,35 +151,23 @@ const payloads = [
     <h2 id="fit">Built for shared TypeScript schemas</h2>
     <div class="fit">
       <p class="in">
-        Use it where both ends are TypeScript and share the schema: caches, RPC, worker
-        messages, job queues, and compact application storage.
+        For caches, RPC, worker messages, job queues, and storage, where both ends share
+        the schema.
       </p>
       <p class="out">
-        Use something else when a reader is in another language, when a payload has to
-        describe itself, or when the two ends need to change schemas independently.
-        <code>fingerprinted()</code> stamps the wire shape into the bytes, so a payload
-        written by an older shape is rejected instead of decoded into the wrong value.
+        Not for readers in other languages, self-describing payloads, or schemas that
+        change independently. <code>fingerprinted()</code> rejects bytes written by an
+        older shape.
       </p>
     </div>
-  </section>
-
-  <section slot="after" class="plain" aria-labelledby="wire-safety">
-    <h2 id="wire-safety">Safe to put on the wire</h2>
     <div class="proofs">
       <article>
         <h3>Canonical bytes</h3>
-        <p>
-          The same value always encodes to exactly the same bytes, so a payload can serve
-          as a cache key or a content hash.
-        </p>
+        <p>The same value always encodes to the same bytes, so a payload can be a cache key.</p>
       </article>
       <article>
         <h3>Defensive decoding</h3>
-        <p>
-          Decoding bytes you did not write is where binary formats get exploited. The
-          decoder checks every length against the input before it allocates, and rejects
-          invalid UTF-8 and leftover bytes.
-        </p>
+        <p>Every length is checked before allocating. Invalid UTF-8 and leftover bytes are rejected.</p>
       </article>
     </div>
   </section>
@@ -166,9 +181,14 @@ const payloads = [
 
     {/* "100-event payload" meant nothing without the shape behind it. This is the
         literal fixture from bench/fixtures.mjs, so keep the two in step. */}
-    <pre class="fixture"><code>{`Person  { age, name, sex }
+    <div class="fixture">
+      <Code
+        lang="txt"
+        code={`Person  { age, name, sex }
 Event   { active, actor: Person, id,
-          metrics: { cpu, memory }, tags[], timestamp }`}</code></pre>
+          metrics: { cpu, memory }, tags[], timestamp }`}
+      />
+    </div>
     <p class="quiet fixture-note">
       Four fixtures: a Person, the same Person with non-ASCII text, one Event, and a
       batch of 100 Events in an array.
@@ -291,6 +311,21 @@ Event   { active, actor: Person, id,
     }
   }
 
+  /* The README's picture, at its own size and never wider. On a phone it scales down to
+     fit rather than scrolling: held at a readable width it scrolled the byte counts off
+     the right edge, and "8 bytes" is the point of the picture.
+     TODO: its labels are ~6.5px at 390px wide; a phone needs a re-laid-out drawing. */
+  .picture {
+    margin: 24px 0 0;
+    max-width: 720px;
+  }
+
+  .picture img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
   /* The boundary drawn as a boundary: one rule down the side, lit where shorn belongs
      and dim where it does not. The sentences name their own side, so no headings. */
   .fit {
@@ -342,16 +377,13 @@ Event   { active, actor: Person, id,
     color: inherit;
   }
 
-  /* The fixture shapes, so "100-event payload" means something. A plain block, not the
-     hero's code treatment: it is a shape sketch, not runnable source. */
+  /* The fixture shapes, so "100-event payload" means something. The docs' code block,
+     so it sits on the same panel as the hero's, but as plain text: it is a shape sketch,
+     not TypeScript, and TS highlighting coloured `actor` and `metrics` and not their
+     siblings, which reads as meaning something it does not. */
   .fixture {
     margin: 18px 0 0;
-    padding: 0;
-    overflow-x: auto;
-    font-family: var(--mono, ui-monospace), monospace;
-    font-size: 13.5px;
-    line-height: 1.7;
-    color: var(--shorn-ink-2);
+    max-width: 68ch;
   }
 
   .fixture-note {

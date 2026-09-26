@@ -8,6 +8,10 @@ import "starlight-theme-next/fonts/geist-mono/index.css";
 // the Starlight shell, so it has to ask for the tokens itself.
 import "../styles/tokens.css";
 import { structuredData } from "../lib/agent-metadata";
+// The docs' own code block: the same expressive-code renderer, theme, and contrast
+// correction as every snippet in the docs, so the landing page's code is coloured
+// exactly like theirs rather than by a second highlighter configured to look alike.
+import { Code } from "@astrojs/starlight/components";
 
 /**
  * The minimalist landing shell, extracted so the message can vary without the
@@ -31,28 +35,6 @@ interface Props {
 
 const { title, description, headline, size = "lg", cta = "Get started", code } = Astro.props;
 
-/**
- * Split each line at its comment so the two can be inked differently.
- *
- * Deliberately not Shiki: syntax highlighting would put five hues on a page whose
- * whole palette is grey, and the comments here *are* the message, and dimming them
- * against bright code says "annotation" without spending a colour on it. Safe as a
- * plain `indexOf` because the content is authored here, not user input, and
- * contains no `//` inside a string or URL.
- */
-const lines = (code ?? []).map((line) => {
-  const at = line.indexOf("//");
-  const source = at === -1 ? line : line.slice(0, at);
-  const comment = at === -1 ? "" : line.slice(at);
-  // Each line is its own block element rather than a newline text node, so a blank
-  // line has to be given something to hold its height open.
-  //
-  // The `<pre>` that renders these keeps every child on ONE source line on purpose:
-  // `.ln` is `white-space: pre`, so any newline or indentation in the markup becomes
-  // a rendered blank line. Reformatting that JSX across lines inflated the block
-  // from ~300px to 1316px.
-  return { source, comment, blank: line === "" };
-});
 
 // Astro's BASE_URL carries the configured `base` ("/shorn") with a trailing
 // slash. Strip it so the helper below never emits a doubled separator.
@@ -110,7 +92,6 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
       </a>
       <nav>
         <a href={p("getting-started/introduction/")}>Docs</a>
-        <a href={p("api/overview/")}>API</a>
         <a href="https://github.com/ChiChuRita/shorn">GitHub</a>
       </nav>
     </header>
@@ -122,11 +103,9 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
           to the figure's. `display: contents` below dissolves it again when the hero
           stacks, so the reading order there stays code, figure, actions. */}
       <div class="demo">
-        {
-          lines.length > 0 && (
-            <pre>{lines.map((line) => <span class="ln">{line.blank ? " " : line.source}<span class="cm">{line.comment}</span></span>)}</pre>
-          )
-        }
+        {/* `wrap`: on a phone the payoff comments are wider than the block, and they carry
+            the argument, so they wrap under a hanging indent rather than scroll away. */}
+        {code && code.length > 0 && <Code code={code.join("\n")} lang="ts" wrap hangingIndent={2} />}
         <div class="actions">
           <a class="btn" href={p("getting-started/quick-start/")}>{cta}</a>
           <span class="cmd">
@@ -135,7 +114,7 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
                 thing in here that ever changes is this label, and it only changes on
                 click, so nothing is announced on load or on hover. Without it the swap to
                 "copied" is silent and the button reads as having done nothing. */}
-            <button type="button" data-copy={install} aria-live="polite">copy</button>
+            <button type="button" data-copy={install} aria-live="polite">Copy</button>
           </span>
         </div>
       </div>
@@ -157,14 +136,14 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
           // Unhandled, the label never changes and the button reads as broken.
           try {
             await navigator.clipboard.writeText(btn.dataset.copy ?? "");
-            btn.textContent = "copied";
+            btn.textContent = "Copied";
           } catch {
             // Not a keyboard hint: the shortcut differs per platform, and the command
             // is right there in the `<code>` beside it to select by hand.
-            btn.textContent = "copy failed";
+            btn.textContent = "Copy failed";
           }
           setTimeout(() => {
-            btn.textContent = "copy";
+            btn.textContent = "Copy";
           }, 1600);
         });
       });
@@ -176,8 +155,9 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
          decoration is deleted rather than flattened.
 
          Monochrome: true neutral greys, no accent hue anywhere. Emphasis comes
-         from size and from inversion (the button is ink-on-ground). Nothing here
-         is coloured.
+         from size and from inversion (the button is ink-on-ground). The one
+         exception is the code block, which is syntax-coloured exactly as the docs
+         are, because it is the same component.
 
          Greys checked against --shorn-bg: ink-2 is 7.66:1 and ink-3 is 4.61:1, so
          both clear 4.5:1 at normal text size. */
@@ -312,7 +292,7 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
         display: contents;
       }
 
-      main > .demo > pre {
+      main > .demo > :global(.expressive-code) {
         order: 1;
       }
 
@@ -376,7 +356,7 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
           align-self: stretch;
         }
 
-        .demo > pre {
+        .demo > :global(.expressive-code) {
           flex: 1;
         }
 
@@ -402,7 +382,7 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
            two-column column would carry a 40px tail under the button. */
         main > h1,
         main > p,
-        .demo > pre,
+        .demo > :global(.expressive-code),
         main > .demo > .actions,
         main > :global(figure) {
           margin-bottom: 0;
@@ -455,56 +435,42 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
       }
 
       /* ---------- the demonstration ---------- */
-      /* One element, and the only one that earns a container: code needs to read
-         as code. Bright source against dim comments is the whole treatment. No
-         syntax colours, no window chrome, no tabs, no filename bar. */
-      pre {
-        margin: 0 0 clamp(28px, 4vh, 40px);
-        padding: 20px 22px;
-        /* 64ch, not 60ch: `box-sizing: border-box` means the cap includes the 44px of
-           padding, so 60ch left the 56-character comment with zero slack, so it fit in
-           Geist Mono and would have clipped in the fallback face. */
+      /* The docs' code block on the docs' panel. The first three are the overrides
+         custom.css gives every snippet inside Starlight, and the rest are what Starlight
+         itself hands expressive-code there; this page loads neither, so both are
+         restated. Without them the panel lost its border and fell back to the system
+         monospace. */
+      :root {
+        --ec-codeBg: var(--shorn-surface);
+        --ec-frm-edBg: var(--shorn-surface);
+        --ec-brdRad: var(--shorn-radius);
+        --ec-brdCol: var(--shorn-rule);
+        --ec-codeFontFml: var(--mono);
+        --ec-codeFontSize: 0.875rem;
+        --ec-codeLineHt: 1.75;
+      }
+
+      .demo > :global(.expressive-code) {
+        /* 64ch, not 60ch: the cap includes the block's padding, and 60ch left the
+           56-character comment with zero slack in Geist Mono. */
         max-width: 64ch;
-        overflow-x: auto;
-        background: var(--shorn-surface);
-        border: 1px solid var(--shorn-rule);
-        border-radius: var(--shorn-radius);
-        font-family: var(--mono);
-        font-size: 13px;
-        line-height: 1.75;
-        color: var(--shorn-ink);
-        tab-size: 2;
+        margin: 0 0 clamp(28px, 4vh, 40px);
       }
 
-      pre .ln {
-        display: block;
-        white-space: pre;
-      }
-
-      /* Measured at 390px: the block is 333px wide against 459px of content, so 126px
-         (27%) of the two longest lines was clipped with no scroll affordance, and those
-         two lines are `// -> 8 canonical bytes, validated before...` and `// -> { name:
-         string; age: number; sex: ...`, the payoff annotations. Wrapping rather than a
-         fade, because these comments carry the argument and so have to be read, not
-         scrolled to. `pre-wrap` breaks at spaces only and preserves the single space that
-         holds a blank line open, and `overflow-x: auto` above stays as the backstop for a
-         token longer than the box.
-
-         The hanging indent is what keeps the tail of a wrapped comment from reading as a
-         new line of code. It costs the continuation 2ch and the first line nothing. */
-      @media (max-width: 640px) {
-        pre .ln {
-          white-space: pre-wrap;
-          padding-left: 2ch;
-          text-indent: -2ch;
+      /* Side by side, the block is stretched to the figure's height (see `.demo` above),
+         so the frame and the pre inside it have to stretch with it, or the panel ends
+         at its last line and the slack shows as bare page under it. */
+      @media (min-width: 1240px) {
+        .demo > :global(.expressive-code),
+        .demo > :global(.expressive-code .frame) {
+          display: flex;
+          flex-direction: column;
         }
-      }
 
-      /* Not ink-3: that clears 4.5:1 on the page ground but only 4.22:1 on this
-         lighter surface. These comments carry the actual argument, so they use the
-         raised-surface dim instead, at 5.25:1 where they are really drawn. */
-      pre .cm {
-        color: var(--shorn-ink-dim-raised);
+        .demo > :global(.expressive-code .frame),
+        .demo > :global(.expressive-code pre) {
+          flex: 1;
+        }
       }
 
       /* ---------- the one primary action ---------- */
@@ -528,33 +494,51 @@ const jsonLd = JSON.stringify(structuredData(Astro.site?.origin));
         filter: brightness(0.92);
       }
 
+      /* The install command as a field with its copy button attached, the height of the
+         primary button beside it. It used to be bare text with a 12px ink-3 "copy" after
+         it, which read as a caption rather than as something to press. */
       .cmd {
         display: inline-flex;
-        align-items: baseline;
-        gap: 12px;
+        align-items: stretch;
+        /* The primary button's height when they share a row, and never under the 44px a
+           touch target wants when the row wraps and it sits alone. */
+        align-self: stretch;
+        min-height: 44px;
+        max-width: 100%;
+        background: var(--shorn-surface);
+        border: 1px solid var(--shorn-rule);
+        border-radius: var(--shorn-radius);
         font-family: var(--mono);
         font-size: 13.5px;
         color: var(--shorn-ink-2);
       }
 
+      /* Scrolls rather than pushing the button off a narrow phone. */
+      .cmd code {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        padding: 0 14px;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+
       .cmd button {
+        flex: none;
+        /* Wide enough for "Copied" too, so the label change does not move the edge. */
+        min-width: 9ch;
+        padding: 0 14px;
         border: 0;
+        border-left: 1px solid var(--shorn-rule);
+        border-radius: 0 var(--shorn-radius) var(--shorn-radius) 0;
         background: none;
-        /* Measured 29x16, under the 24x24 WCAG 2.5.8 floor, and unlike the nav it has no
-           spacing exception to fall back on: it is the only way to grab the install
-           command on touch. The padding takes the target to 45x28 and the matching
-           negative margin gives the space back, so the flex row and the glyph do not
-           move. */
-        padding: 6px 8px;
-        margin: -6px -8px;
         cursor: pointer;
         font-family: var(--mono);
-        font-size: 12px;
-        color: var(--shorn-ink-3);
+        font-size: 12.5px;
+        color: var(--shorn-ink);
       }
       .cmd button:hover {
-        color: var(--shorn-ink);
-        text-decoration: underline;
+        background: var(--shorn-rule);
       }
 
       footer {

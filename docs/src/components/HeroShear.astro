@@ -108,7 +108,7 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
     The field names stay in your schema, so only the values go on the wire. A field is
     identified by its position, not by its name. <span class="gag">Nothing was lost: the
     names are still in your schema, where they were the whole time.</span>
-    <button type="button" class="again" data-again>↻ shear it again</button>
+    <button type="button" class="again" data-again>Shear it again</button>
   </figcaption>
 </figure>
 
@@ -121,30 +121,38 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
   // an argument is made once. Scrolling it away and back, or the button under the
   // caption, is what asks for it again.
   const fig = document.querySelector<HTMLElement>(".hero-bytes");
+  const box = fig?.querySelector<HTMLElement>(".bytes") ?? null;
   const still = matchMedia("(prefers-reduced-motion: reduce)");
 
   // The beats, in milliseconds from the moment the figure is asked to play. Held here
   // rather than in the stylesheet because the flight is measured in JS anyway, and
   // splitting the timing across two files is how one of them drifts. The stylesheet reads
-  // the two it needs back off the figure as custom properties, so these are the only copy.
+  // the ones it needs back off the figure as custom properties, so these are the only copy.
   //
-  // Retimed from a 5300ms run. Sampled live at 400ms, that one held the JSON cells at
-  // opacity 0 from 1600ms to 4500ms and inked the whole wire strip at once at 4500ms, so
-  // 2.9 of the first 5 seconds were an unlabelled row of empty boxes, 1.07s of it dead air
-  // between the last byte landing and the wire lighting up. The resting state is the same
-  // one; it now arrives at ~1450ms.
+  // Slowed and smoothed from a 1.1s run. Filmed at 50ms a frame, that one lifted the
+  // survivors out of the JSON (leaving holes), sent them 40ms apart so they crossed in a
+  // cloud, and snapped each back into its old slot in one frame as it landed. Now a copy
+  // makes the trip and the original never moves, and the copies leave in the order they
+  // land, so the wire fills left to right.
   //
   // LEAD is a beat of nothing: the record has to be read as JSON before anything is taken
-  // off it. DEPART is when the first survivor leaves, STEP the space between survivors,
-  // FLIGHT how long one is in the air. COUNT is how long the delta on the divider takes to
-  // run up, which wants to be roughly how long the shorn cells take to go faint.
-  const LEAD = 350;
-  const DEPART = 80;
-  const STEP = 40;
-  const FLIGHT = 440;
-  const COUNT = 700;
+  // off it. DEPART is when the first copy leaves, STEP the space between copies, FLIGHT
+  // how long one is in the air. COUNT is how long the delta on the divider takes to run
+  // up, roughly how long the shorn cells take to go faint.
+  const LEAD = 400;
+  const DEPART = 120;
+  const STEP = 90;
+  const FLIGHT = 760;
+  const COUNT = 900;
+  // A soft start and a long settle: at full speed off the mark a copy looks thrown, and
+  // one that stops dead looks dropped.
+  const EASE = "cubic-bezier(0.5, 0, 0.2, 1)";
+  // How long before a copy lands its wire cell starts inking underneath it, so lifting
+  // the copy off reveals a finished cell rather than one still being drawn.
+  const INK = 160;
 
   const timers: ReturnType<typeof setTimeout>[] = [];
+  const fliers: HTMLElement[] = [];
 
   // Server-rendered with the total already in it, which is what the static figure needs.
   // Zeroed whenever the run takes over, in `play` and on arming, because the run is what
@@ -157,49 +165,67 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
   };
 
   const play = () => {
-    if (!fig || still.matches) return;
+    if (!fig || !box || still.matches) return;
 
     for (const t of timers) clearTimeout(t);
     timers.length = 0;
+    for (const f of fliers) f.remove();
+    fliers.length = 0;
 
     // Restart from the top on a replay. `reset` kills transitions for one frame first:
-    // without it, dropping `playing` starts everything animating back, and the rects
-    // measured below would be of cells still most of the way to where they landed.
+    // without it, dropping `playing` starts everything fading back while the next run
+    // begins on top of it.
     fig.classList.add("reset");
     fig.classList.remove("playing", "done");
     void fig.offsetWidth;
 
     zero();
 
-    // The two beats the stylesheet needs: how long one flight lasts, and when the first
-    // byte is on the wire, which is when the shorn lane earns its label.
-    fig.style.setProperty("--flight", `${FLIGHT}ms`);
+    // When the first byte is on the wire, which is when the shorn lane earns its label.
     fig.style.setProperty("--in", `${DEPART + FLIGHT}ms`);
 
-    // Where each surviving character is going: one character, one cell. Measured every
-    // play rather than cached, because the strips wrap and the column width moves the
-    // targets.
-    let order = 0;
-    fig.querySelectorAll<HTMLElement>("[data-to]").forEach((cell) => {
-      const target = fig.querySelector<HTMLElement>(`[data-wire="${cell.dataset.to}"]`);
-      if (!target) return;
-      const r = cell.getBoundingClientRect();
-      const d = target.getBoundingClientRect();
-      cell.style.setProperty("--dx", `${d.left - r.left}px`);
-      cell.style.setProperty("--dy", `${d.top - r.top}px`);
-      // The survivors leave one at a time, in reading order. The shorn cells no longer
-      // move, so there is nothing to wait to be clear of.
-      const depart = DEPART + order++ * STEP;
-      cell.style.setProperty("--d", `${depart}ms`);
-      // The same instant written on both ends of one trip: the flier is back in the strip
-      // on the frame the cell it fed inks. Two properties beat one number guessed twice.
-      target.style.setProperty("--wd", `${depart + FLIGHT}ms`);
+    // One trip per surviving character, from its cell to the wire cell it becomes.
+    // Measured every play rather than cached, because the strips wrap and the column width
+    // moves the targets. Sorted by where they land, so they leave in wire order.
+    const origin = box.getBoundingClientRect();
+    const trips = [...fig.querySelectorAll<HTMLElement>("[data-to]")]
+      .map((cell) => ({ cell, target: fig.querySelector<HTMLElement>(`[data-wire="${cell.dataset.to}"]`) }))
+      .filter((t): t is { cell: HTMLElement; target: HTMLElement } => t.target !== null)
+      .map((t) => ({ ...t, from: t.cell.getBoundingClientRect(), to: t.target.getBoundingClientRect() }))
+      .sort((a, b) => a.to.top - b.to.top || a.to.left - b.to.left);
+
+    trips.forEach(({ cell, target, from, to }, k) => {
+      const depart = DEPART + k * STEP;
+      // `--wd` counts from `playing`, which is LEAD after now; the flight below counts
+      // from now, hence the LEAD on one and not the other.
+      target.style.setProperty("--wd", `${depart + FLIGHT - INK}ms`);
+
+      const flier = document.createElement("i");
+      flier.className = "flier";
+      flier.textContent = cell.textContent;
+      flier.style.left = `${from.left - origin.left + box.scrollLeft}px`;
+      flier.style.top = `${from.top - origin.top + box.scrollTop}px`;
+      flier.style.width = `${from.width}px`;
+      flier.style.height = `${from.height}px`;
+      box.append(flier);
+      fliers.push(flier);
+
+      flier
+        .animate(
+          [{ transform: "none" }, { transform: `translate(${to.left - from.left}px, ${to.top - from.top}px)` }],
+          { duration: FLIGHT, delay: LEAD + depart, easing: EASE, fill: "both" },
+        )
+        .finished.then(
+          () => flier.remove(),
+          // Cancelled by a replay, which has already removed it.
+          () => {},
+        );
     });
 
-    // When the last byte is on the wire, measured from the survivors that were actually
-    // found rather than from a hardcoded 8. `done` is this instant, which is what the
-    // length byte's pop hangs off.
-    const landed = DEPART + Math.max(0, order - 1) * STEP + FLIGHT;
+    // When the last byte is on the wire, measured from the trips that were actually found
+    // rather than from a hardcoded 8. `done` is this instant, which is what the length
+    // byte hangs off.
+    const landed = DEPART + Math.max(0, trips.length - 1) * STEP + FLIGHT;
 
     fig.classList.remove("reset");
     fig.classList.add("armed");
@@ -207,12 +233,14 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
     timers.push(
       setTimeout(() => {
         fig.classList.add("playing");
-        // The count runs with the cells that are going faint, not after them.
+        // The count runs with the cells that are going faint, not after them, and eases
+        // out with them rather than ticking at a constant rate and stopping dead.
         if (!counter) return;
         const from = performance.now();
         const tick = (now: number) => {
           const p = Math.min(1, (now - from) / COUNT);
-          counter.textContent = tpl.replace("{n}", String(Math.round(p * total)));
+          const eased = 1 - (1 - p) ** 3;
+          counter.textContent = tpl.replace("{n}", String(Math.round(eased * total)));
           if (p < 1 && fig.classList.contains("playing")) requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
@@ -254,16 +282,16 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
      given. `.bytes` owns its own overflow.
 
      One run, not a loop. The 27 cells that carry no information go faint where they
-     stand, the 8 that do fly down into the wire strip and each inks the cell it becomes
-     as it gets there, and the length byte arrives last.
+     stand, a copy of each of the 8 that do flies down into the wire strip and inks the
+     cell it becomes as it gets there, and the length byte arrives last.
 
      Nothing here goes dark and stays dark. The shorn cells fade straight to the 0.42 they
      rest at instead of dropping to 0 and being brought back a beat later, which is what
      left the figure illegible for 2.9 of its first 5 seconds.
 
-     Custom properties rather than fixed numbers because the flight distances and delays
-     are measured at play time: the script writes `--dx`/`--dy`/`--d` per flier and `--wd`
-     on the cell it feeds, and a class change is what runs them. Everything here is a state
+     Custom properties rather than fixed numbers because the delays are measured at play
+     time: the script writes `--wd` on each wire cell and `--in` on the figure, and a class
+     change is what runs them. The flights themselves are Web Animations in the script. Everything here is a state
      on top of the resting figure, so with the script never running this is simply the
      static figure. */
   .hero-bytes {
@@ -281,7 +309,7 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
     }
   }
 
-  /* One frame with nothing moving, so a replay can measure real positions. */
+  /* One frame with nothing moving, so a replay starts from the resting figure. */
   .hero-bytes.reset *,
   .hero-bytes.reset *::before,
   .hero-bytes.reset *::after {
@@ -308,11 +336,12 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
   }
 
   /* Staggered by position, so the strip goes faint from the left rather than all at once.
-     35 cells at 11ms apart is 374ms of it; at the old 34ms it was a full second, and the
-     cells were still at the far end of it when the fifth second started. */
+     35 cells at 14ms apart is ~490ms of stagger, finishing while the copies are still in
+     the air. Eased rather than linear, so each cell settles into its dim instead of
+     stopping on it. */
   .hero-bytes .json i {
-    transition: opacity 340ms linear;
-    transition-delay: calc(var(--i) * 11ms);
+    transition: opacity 600ms ease-out;
+    transition-delay: calc(var(--i) * 14ms);
   }
 
   /* Straight to the value they rest at. They used to drop a line's height, rotate, and go
@@ -325,35 +354,30 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
     opacity: 0.42;
   }
 
-  /* The survivors travel further than anything else and pass over the divider on the way,
-     hence the stacking context. `--d` is written per cell so they leave in reading order
-     rather than all at once. */
-  .hero-bytes .run i {
+  /* The travelling copy of a survivor: the original stays in the JSON at full ink the
+     whole way through, so nothing up there leaves a hole or jumps back. Drawn like the
+     cell it copies, so it is indistinguishable from it at both ends of the trip. It
+     passes over the divider on the way, hence the stacking context, and `.bytes` is
+     what it is positioned against.
+
+     `:global` because the script creates it, so it never gets this file's scope class
+     and a scoped `.flier` silently matches nothing. */
+  .hero-bytes .bytes {
     position: relative;
+  }
+
+  .hero-bytes :global(.flier) {
+    position: absolute;
     z-index: 2;
-  }
-
-  /* An animation, not a transition, and with no forwards fill. The cell has to be home, in
-     the air, then home again, which is three values, one more than a transition holds. The
-     end of the animation is the trip home: with nothing filled forwards the cell reverts
-     to its untransformed slot on the frame after it arrives, which is the same frame the
-     wire cell it fed inks on, since both delays are written from one number. So no cell in
-     either strip is ever an empty box under an inked one, and the JSON survivor never
-     leaves at all: it is at full ink the whole way through.
-
-     The old handoff faded the flier out on arrival and brought it back at 4300ms, which
-     is where most of the dead air lived. */
-  .hero-bytes.playing .run i {
-    animation: fly var(--flight, 440ms) cubic-bezier(0.5, 0, 0.15, 1) var(--d, 0ms);
-  }
-
-  @keyframes fly {
-    from {
-      transform: none;
-    }
-    to {
-      transform: translate(var(--dx, 0), var(--dy, 0));
-    }
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 2px;
+    background: var(--shorn-surface);
+    color: var(--shorn-ink);
+    font-style: normal;
+    pointer-events: none;
+    will-change: transform;
   }
 
   /* Each cell inks as its own character gets there, on `--wd`. Inking the strip in one go
@@ -364,8 +388,8 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
     color: var(--shorn-ink);
     opacity: 1;
     transition:
-      color 140ms ease-out var(--wd, 0ms),
-      opacity 140ms ease-out var(--wd, 0ms);
+      color 160ms ease-out var(--wd, 0ms),
+      opacity 160ms ease-out var(--wd, 0ms);
   }
 
   /* `--in` is the first landing: the shorn line has nothing to say until one byte is on
@@ -373,7 +397,7 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
   .hero-bytes.armed.playing .field,
   .hero-bytes.armed.playing .lane.out {
     opacity: 1;
-    transition: opacity 280ms ease-out var(--in, 520ms);
+    transition: opacity 420ms ease-out var(--in, 880ms);
   }
 
   /* Held back through `playing`, because the rule that inks the wire progressively also
@@ -385,23 +409,23 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
 
   /* The one byte nothing flew into: the string's length, the whole cost of the format.
      It arrives last, on its own, which is the only way to notice it. `done` is the last
-     landing, so the pop needs no delay of its own any more.
+     landing, so it needs no delay of its own.
 
-     A single overshoot, not a bounce: `pop` runs once, on one 34px chip, and settles.
-     Kept after a detector flagged the easing as elastic, so that the next scan has this
-     line rather than the question. Nothing here oscillates and nothing else uses it.
+     It fades and grows in slightly, with no overshoot. The overshoot it used to have was
+     the one springy motion in a run that is otherwise all glides, and it read as a jolt
+     at the end.
 
      `i.len` for the same reason as above, and this one was losing its dim ink to the rule
      that inks the wire, so the run ended on a length byte a shade brighter than the one
      the static figure draws. */
   .hero-bytes.armed.done .wire i.len {
     color: var(--shorn-ink-dim-raised);
-    animation: pop 300ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+    animation: settle 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  @keyframes pop {
+  @keyframes settle {
     from {
-      transform: scale(0.3);
+      transform: scale(0.8);
       opacity: 0;
     }
     to {
@@ -427,21 +451,25 @@ const label = `The record {"name":"Alice","age":34,"sex":"F"} is ${jsonBytes} by
     color: var(--shorn-ink-2);
   }
 
+  /* A button, on its own line under the caption, drawn like the copy button beside the
+     install command. It was an underlined "↻ shear it again" run on the end of the
+     caption's last sentence, where the glyph read as a stray character and the whole
+     thing as more caption. */
   .again {
-    display: inline-block;
-    margin-left: 4px;
-    padding: 0;
-    border: 0;
-    background: none;
+    display: block;
+    margin-top: 14px;
+    padding: 7px 14px;
+    background: var(--shorn-surface);
+    border: 1px solid var(--shorn-rule);
+    border-radius: var(--shorn-radius);
     cursor: pointer;
-    font: inherit;
-    color: var(--shorn-ink-3);
-    text-decoration: underline;
-    text-underline-offset: 3px;
+    font-family: var(--mono, ui-monospace), monospace;
+    font-size: 12.5px;
+    color: var(--shorn-ink);
   }
 
   .again:hover {
-    color: var(--shorn-ink);
+    background: var(--shorn-rule);
   }
 
   /* The run is decoration on a static figure: it reads the same without it, so the

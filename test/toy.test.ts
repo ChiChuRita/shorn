@@ -7,6 +7,7 @@ import {
   DEFAULT_SCHEMA,
   evaluate,
   measure,
+  tokenize,
 } from "../docs/src/components/toy.js";
 
 // The landing-page playground evaluates pasted text and reports two byte counts. Both
@@ -70,5 +71,42 @@ describe("landing playground", () => {
   it("throws rather than reporting a number it cannot back up", () => {
     expect(() => measure(z, codec, "", "{}")).toThrow(SyntaxError);
     expect(() => measure(z, codec, "z.object({ n: z.int() })", '{ "n": "nope" }')).toThrow();
+  });
+
+  // The highlight sits under the text box glyph for glyph, so a dropped or doubled
+  // character misaligns every one after it. The expected kinds are what Shiki's
+  // github-dark, the docs' theme, gives the same text.
+  it("highlights losslessly, in the docs' colours", () => {
+    const pick = (src: string, lang: "ts" | "json") => {
+      const runs = tokenize(src, lang);
+      expect(runs.map((r) => r.text).join("")).toBe(src);
+      return runs.filter((r) => r.kind !== "plain").map((r) => `${r.kind}:${r.text.trim()}`);
+    };
+    for (const src of [DEFAULT_SCHEMA, '"unterminated', "/* open", "a\n\n  b"]) pick(src, "ts");
+    for (const src of [DEFAULT_PAYLOAD, '{ "k": "v', "{ bare: 1 }"]) pick(src, "json");
+
+    expect(pick('// c\nconst P = z.enum(["a"]).min(0.5); z.null() || true', "ts")).toEqual([
+      "comment:// c",
+      "keyword:const",
+      "constant:P",
+      "keyword:=",
+      "function:enum",
+      'string:"a"',
+      "function:min",
+      "constant:0.5",
+      "function:null",
+      "keyword:||",
+      "constant:true",
+    ]);
+    expect(pick('{ "n": -2.5e3, "s": "v", "b": false, "z": null }', "json")).toEqual([
+      'constant:"n"',
+      "constant:-2.5e3",
+      'constant:"s"',
+      'string:"v"',
+      'constant:"b"',
+      "constant:false",
+      'constant:"z"',
+      "constant:null",
+    ]);
   });
 });

@@ -14,27 +14,31 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
   <p>Edit the Zod schema and the payload. The real encoder runs in your browser tab, and nothing you type leaves it.</p>
 
   <div class="io">
+    {/* Each box is a stack: the real text box, and over it a mirror of its text in the
+        docs' colours. The mirror only takes over once the script has run (`lit` on the
+        section), so without JS the box shows its own text as before. `aria-hidden`
+        because the text box already is the text. */}
     <label>
       Zod schema
-      <textarea
+      <span class="editor"><span class="mirror" aria-hidden="true" data-mirror="ts"></span><textarea
         data-schema
         aria-describedby="toy-keys"
         spellcheck="false"
         rows="8"
         autocomplete="off"
         autocorrect="off"
-        autocapitalize="off">{DEFAULT_SCHEMA}</textarea>
+        autocapitalize="off">{DEFAULT_SCHEMA}</textarea></span>
     </label>
     <label>
       payload
-      <textarea
+      <span class="editor"><span class="mirror" aria-hidden="true" data-mirror="json"></span><textarea
         data-payload
         aria-describedby="toy-keys"
         spellcheck="false"
         rows="8"
         autocomplete="off"
         autocorrect="off"
-        autocapitalize="off">{DEFAULT_PAYLOAD}</textarea>
+        autocapitalize="off">{DEFAULT_PAYLOAD}</textarea></span>
     </label>
   </div>
 
@@ -78,7 +82,7 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
 </section>
 
 <script>
-  import { compare, measure, type Codec } from "./toy";
+  import { compare, measure, tokenize, type Codec } from "./toy";
 
   const section = document.querySelector<HTMLElement>("[data-playground]");
   if (section) {
@@ -184,6 +188,32 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
       for (const el of boxes) el.style.height = `${tallest}px`;
     };
 
+    /** Redraw one box's coloured mirror from its text. */
+    const paint = (el: HTMLTextAreaElement) => {
+      const mirror = el.previousElementSibling as HTMLElement;
+      const lang = mirror.dataset.mirror === "json" ? "json" : "ts";
+      mirror.replaceChildren(
+        ...tokenize(el.value, lang).map(({ text, kind }) => {
+          if (kind === "plain") return document.createTextNode(text);
+          const span = document.createElement("span");
+          span.className = kind;
+          span.textContent = text;
+          return span;
+        }),
+      );
+      // A trailing newline opens a line the text box shows and an inline run collapses,
+      // so the mirror would end one line short.
+      if (el.value.endsWith("\n")) mirror.append(" ");
+      follow(el);
+    };
+
+    /** Scroll the mirror with its box. Once a box hits its height cap it scrolls. */
+    const follow = (el: HTMLTextAreaElement) => {
+      const mirror = el.previousElementSibling as HTMLElement;
+      mirror.scrollTop = el.scrollTop;
+      mirror.scrollLeft = el.scrollLeft;
+    };
+
     let deps: ReturnType<typeof load> | null = null;
 
     const load = () =>
@@ -277,7 +307,11 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
       el.addEventListener("input", schedule);
       el.addEventListener("keydown", onKeydown);
       el.addEventListener("input", fit);
+      el.addEventListener("input", () => paint(el));
+      el.addEventListener("scroll", () => follow(el));
+      paint(el);
     }
+    section.classList.add("lit");
     fit();
     // Wrapping changes with the width, so a resize changes how tall "fits" is.
     addEventListener("resize", fit);
@@ -332,6 +366,12 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
   }
 
   /* Plain bordered box. */
+  .editor {
+    position: relative;
+    display: block;
+    margin-top: 5px;
+  }
+
   textarea {
     display: block;
     /* The `* { box-sizing }` reset lives in Landing.astro, and Astro scopes it to that
@@ -339,7 +379,7 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
        made every viewport under ~530px scroll sideways. */
     box-sizing: border-box;
     width: 100%;
-    margin-top: 5px;
+    margin: 0;
     padding: 12px 14px;
     resize: vertical;
     /* The floor for the autosized height, and the size a no-JS reader gets. */
@@ -352,6 +392,63 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
     font-size: 13px;
     line-height: 1.7;
     tab-size: 2;
+    /* Reserve the scrollbar's width whether or not the box is scrolling, on the mirror
+       too, so a box that grows past its cap does not rewrap under its own mirror. */
+    scrollbar-gutter: stable;
+  }
+
+  /* The coloured copy of the text, laid exactly over the box's own. Every property that
+     decides where a glyph lands (padding, border width, font, line height, tab size,
+     wrapping) is the text box's, so the two wrap identically. On top, but transparent
+     everywhere except the glyphs and deaf to the pointer, so the caret, the selection and
+     the focus ring all show through from the box underneath. */
+  .mirror {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: none;
+    box-sizing: border-box;
+    overflow: hidden;
+    scrollbar-gutter: stable;
+    padding: 12px 14px;
+    border: 1px solid transparent;
+    pointer-events: none;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    tab-size: 2;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    /* github-dark's plain text, as the docs' code blocks draw it. */
+    color: #e1e4e8;
+  }
+
+  .lit .mirror {
+    display: block;
+  }
+
+  .lit textarea {
+    color: transparent;
+    caret-color: var(--shorn-ink);
+  }
+
+  /* github-dark, as the docs render it. The comment is expressive-code's contrast-corrected
+     grey rather than the theme's #6a737d, which is what the docs actually show. Classes
+     are added by the script, so `:global` or Astro's scoping would match none of them. */
+  .mirror :global(.keyword) {
+    color: #f97583;
+  }
+  .mirror :global(.string) {
+    color: #9ecbff;
+  }
+  .mirror :global(.constant) {
+    color: #79b8ff;
+  }
+  .mirror :global(.function) {
+    color: #b392f0;
+  }
+  .mirror :global(.comment) {
+    color: #99a0a6;
   }
 
   /* The UA ring is drawn outside the border box, so the next grid item paints over
