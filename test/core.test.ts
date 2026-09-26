@@ -1,7 +1,7 @@
 import { runInNewContext } from "node:vm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { ObjectSchema } from "../src/core.js";
-import { DecodeError, EncodeError, encodeInto, m, Writer } from "../src/index.js";
+import { ObjectSchema, OpenObjectSchema, RecordSchema } from "../src/core.js";
+import { DecodeError, EncodeError, encodeInto, m, type Schema, Writer } from "../src/index.js";
 import { buildUnderCsp } from "./csp.js";
 
 /**
@@ -921,6 +921,57 @@ describe("shorn core", () => {
       // Present values still shadow correctly, and the round trip stays canonical.
       const full = { constructor: 2, toString: "t", zip: 1 };
       expect(schema.decode(schema.encode(full))).toEqual(full);
+    });
+
+    it("stops at the container that refused, however deep it sits", () => {
+      // Each container re-derives in `_failingChild` which child to blame, so a value its
+      // `_encode` refuses outright has to end the walk there. Every row below used to go
+      // on and blame a child the caller got right, `Expected an object at a` for an
+      // array; the fixed count and the unknown key did it even with a child that really
+      // was wrong, because the container refuses first.
+      const refused: ReadonlyArray<readonly [Schema<unknown>, unknown, string]> = [
+        [m.object({ a: m.string() }), ["x"], "Expected an object"],
+        [new RecordSchema(m.uint()), ["x"], "Expected an object"],
+        [new OpenObjectSchema({ a: m.string() }, false, new RecordSchema(m.uint())), ["x"], "Expected an object"],
+        [m.tuple([m.uint(), m.string()]), [1], "Expected a tuple with 2 items"],
+        [m.array(m.string(), 2), ["a", 1, 2], "Expected an array with 2 items"],
+        [new ObjectSchema({ a: m.string() }, true), { a: 1, b: 2 }, 'Unknown object property "b"'],
+      ];
+      const failure = (encode: () => unknown): EncodeError => {
+        try {
+          encode();
+        } catch (thrown) {
+          return thrown as EncodeError;
+        }
+        throw new Error("expected a throw");
+      };
+      for (const [schema, value, message] of refused) {
+        const bare = failure(() => schema.encode(value as never));
+        expect([bare.message, bare.path]).toEqual([message, undefined]);
+        const field = failure(() => m.object({ k: schema }).encode({ k: value } as never));
+        expect([field.message, field.path]).toEqual([`${message} at k`, "k"]);
+        const element = failure(() => m.array(schema).encode([value] as never));
+        expect([element.message, element.path]).toEqual([`${message} at [0]`, "[0]"]);
+      }
+    });
+
+    it("walks into a Set or a Map from another realm", () => {
+      // `_encode` accepts them by their tag; the walk tested `instanceof` alone and stopped
+      // at the container, so the path named the Set but not the element inside it.
+      const set = runInNewContext("new Set([1, 'x'])") as Set<number>;
+      expect(() => m.object({ s: m.set(m.uint()) }).encode({ s: set })).toThrow(/ at s\[1\]$/);
+      const map = runInNewContext("new Map([['k', 'x']])") as Map<string, number>;
+      expect(() => m.object({ m: m.map(m.string(), m.uint()) }).encode({ m: map })).toThrow(
+        / at m\[0\]$/,
+      );
+    });
+
+    it("reads a field named like a prototype member the way the encoder does", () => {
+      // Once such a field exists the encoder reads own properties only; the walk read the
+      // inherited `constructor` function, refused it as a uint, and blamed that field
+      // for the `zip` the caller actually got wrong.
+      const schema = m.object({ constructor: m.uint().optional(), zip: m.uint() });
+      expect(() => schema.encode({ zip: "x" } as never)).toThrow(/ at zip$/);
     });
 
     it("appends the path exactly once through a re-entrant encode", () => {

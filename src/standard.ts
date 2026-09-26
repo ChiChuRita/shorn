@@ -176,19 +176,31 @@ function safely<T>(run: () => T): SafeResult<T> {
   }
 }
 
-/** The joined message is for a log line, the array for an HTTP handler. */
+/**
+ * An issue's path in the notation `EncodeError.path` uses for the wire, `tags[1].id`, so a
+ * field reads the same whichever side refused it. Valibot's segments are `{ key }` objects.
+ */
+function issuePath(issue: StandardSchemaV1.Issue): string {
+  let path = "";
+  for (const segment of issue.path ?? []) {
+    const key = typeof segment === "object" ? segment.key : segment;
+    path += typeof key === "number" ? `[${key}]` : `${path && "."}${String(key)}`;
+  }
+  return path;
+}
+
+/**
+ * The joined message is for a log line, the array for an HTTP handler. `path` is the
+ * first issue's, and is what `Schema.encode` would otherwise have guessed at by walking
+ * the value the validator was handed, which named the wrong field once it coerced one.
+ */
 function validationError(issues: ReadonlyArray<StandardSchemaV1.Issue>): EncodeError {
+  const paths = issues.map(issuePath);
   const error = new EncodeError(
-    issues
-      .map((issue) => {
-        const path = issue.path
-          ?.map((segment) => String(typeof segment === "object" ? segment.key : segment))
-          .join(".");
-        return path ? `${path}: ${issue.message}` : issue.message;
-      })
-      .join("; "),
+    issues.map((issue, index) => (paths[index] ? `${paths[index]}: ` : "") + issue.message).join("; "),
   );
   error.issues = issues;
+  if (paths[0]) error.path = paths[0];
   return error;
 }
 

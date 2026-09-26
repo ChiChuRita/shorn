@@ -37,7 +37,10 @@ To avoid exceptions, use `safeDecode`. It returns either `{ success: true, data 
 
 ## Locating the failure
 
-`EncodeError.path` names the value that failed, as `user.address.zip` or `tags[3]`, and is also appended to `message`. It is absent when no single field is at fault, for example when an array was passed where an object was expected.
+`EncodeError.path` names the value that failed, as `user.address.zip` or `tags[3]`. It is absent when the value as a whole was refused, for example an array passed where an object was expected.
+
+- When the validator refused the value, `path` is the first issue's path, and `message` starts each issue with its own path: `tags[1]: Invalid input: expected string, received number`.
+- When the validator passed the value and the encoder refused it, as it does a lone surrogate or an array over the size limit, the path is appended to `message`: `String contains an unpaired surrogate at user.note`. The same holds for everything the `m` API and `unchecked()` refuse.
 
 ```ts
 try {
@@ -47,15 +50,15 @@ try {
 }
 ```
 
-`issues` is set when a validator rejected the value. It holds the validator's own [Standard Schema issues](https://standardschema.dev) rather than the `; `-joined summary in `message`. Use it to build a field-keyed response without running the validator a second time. A `DecodeError` from a failed validation carries the same array.
+`issues` is set when a validator rejected the value. It holds the validator's own [Standard Schema issues](https://standardschema.dev) rather than the `; `-joined summary in `message`. Use it to build a field-keyed response without running the validator a second time. A `DecodeError` from a failed validation carries the same array. A path segment can be a key or a `{ key }` object, which is what Valibot writes, so read `key` off it:
 
 ```ts
 const result = safeDecode(Person, bytes);
 if (!result.success && result.error instanceof DecodeError) {
-  return Response.json(
-    { fields: result.error.issues?.map((issue) => issue.path?.join(".")) },
-    { status: 422 },
+  const fields = result.error.issues?.map((issue) =>
+    issue.path?.map((segment) => (typeof segment === "object" ? segment.key : segment)).join("."),
   );
+  return Response.json({ fields }, { status: 422 });
 }
 ```
 
