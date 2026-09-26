@@ -65,7 +65,7 @@ PersonWire.decode(bytes);                // rejects a different wire shape
 
 ## Use another validator
 
-Zod 4.2 or newer and ArkType 2.1.28 or newer work as they are: pass the schema. Valibot 1.x keeps its JSON Schema conversion in a separate package, so pass `toStandardJsonSchema(schema)` as the last argument. shorn reads validation through [Standard Schema](https://standardschema.dev/schema) and structure through [Standard JSON Schema](https://standardschema.dev/json-schema).
+Zod 4.2 or newer and ArkType 2.1.28 or newer work as they are: pass the schema. Valibot 1.x keeps its JSON Schema conversion in a separate package, so create the structure once with `toStandardJsonSchema(schema)`, next to the schema, and pass it as the last argument. shorn reads validation through [Standard Schema](https://standardschema.dev/schema) and structure through [Standard JSON Schema](https://standardschema.dev/json-schema).
 
 Valibot's wrapper takes no options, so for `Date`, `bigint`, `Map` and `Set` use the raw converter together with `valibotOverride`:
 
@@ -81,7 +81,7 @@ const codec = compile(schema, structure);
 
 shorn encodes strings, booleans, integers, floats, literals, enums, nullable values, arrays, tuples, records, recursive schemas, `z.any()`, and objects, closed or open, with optional fields. Unions need a literal tag in every branch, or branches that share no JSON type. `Date`, `bigint`, `Map`, and `Set` are supported natively.
 
-Not supported: overlapping unions, streaming, and schema migration. `undefined`, symbols, `RegExp`, and class instances have no wire form, so convert those first.
+Not supported: overlapping unions, one-way transforms, streaming, and schema migration. A field with a default in Zod or ArkType throws too, because its input and output shapes differ. `undefined`, symbols, `RegExp`, and class instances have no wire form, so convert those first.
 
 Against JSON bytes, encoding is up to 6.7× faster and decoding up to 13.0×, with no compressor involved. The `m` API is 6.45 KB gzip; `compile` with validation is 11.52 KB.
 
