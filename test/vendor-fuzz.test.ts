@@ -9,6 +9,7 @@ import {
   EncodeError,
   compile,
   type EncodableStandardSchema,
+  unchecked,
   valibotOverride,
 } from "../src/index.js";
 import { containsNaN } from "./generate.js";
@@ -39,6 +40,13 @@ interface Case {
   readonly values: readonly unknown[];
   /** Values `encode` must refuse: the validator half, which the bytes never see. */
   readonly invalid?: readonly unknown[];
+  /**
+   * The validator fills a default, so a payload with the field's bit clear decodes to the
+   * same value as its twin with the bit set, and the validated codec cannot re-encode
+   * both. The byte flips then check canonical form on the structural half, which is where
+   * a validator that rewrites values leaves it.
+   */
+  readonly fills?: true;
 }
 
 const val = (schema: v.GenericSchema): EncodableStandardSchema =>
@@ -284,6 +292,45 @@ const cases: readonly Case[] = [
     valibot: val(v.object({ a: v.optional(v.nullable(v.string())) })),
     arktype: type({ "a?": "string | null" }),
     values: [{}, { a: null }, { a: "x" }],
+  },
+  {
+    // Zod and ArkType describe a default as optional going in and required coming out,
+    // and that pair was refused while Valibot's one document, optional throughout,
+    // compiled. The field is now optional on the wire from all three. Every value
+    // carries it, because a validated encode always does: the validator fills it first.
+    name: "a default, compiled as the optional field its input side is",
+    zod: z.object({ a: z.string().default("x"), b: z.int() }),
+    valibot: val(v.object({ a: v.optional(v.string(), "x"), b: vint })),
+    arktype: type({ a: "string = 'x'", b: "number.integer" }),
+    values: [{ a: "x", b: 1 }, { a: "", b: -1 }],
+    invalid: [{ a: 1, b: 1 }],
+    fills: true,
+  },
+  {
+    // The same rule at depth: each vendor's sides differ at the nested field only.
+    name: "defaults inside an array element, an optional object and a nullable object",
+    zod: z.object({
+      list: z.array(z.object({ a: z.string().default("x") })),
+      opt: z.object({ n: z.int().default(7) }).optional(),
+      nul: z.object({ f: z.boolean().default(true) }).nullable(),
+    }),
+    valibot: val(
+      v.object({
+        list: v.array(v.object({ a: v.optional(v.string(), "x") })),
+        opt: v.optional(v.object({ n: v.optional(vint, 7) })),
+        nul: v.nullable(v.object({ f: v.optional(v.boolean(), true) })),
+      }),
+    ),
+    arktype: type({
+      list: type({ a: "string = 'x'" }).array(),
+      "opt?": { n: "number.integer = 7" },
+      nul: type({ f: "boolean = true" }).or("null"),
+    }),
+    values: [
+      { list: [], nul: null },
+      { list: [{ a: "x" }, { a: "y" }], opt: { n: 7 }, nul: { f: false } },
+    ],
+    fills: true,
   },
   {
     name: "nine optional fields, two bitmap bytes",
@@ -897,6 +944,7 @@ describe("cross-vendor fuzz", () => {
 
         it(`${vendor}: survives truncation, extension and every byte flip`, () => {
           const codec = compile(schema);
+          const canonical = c.fills ? unchecked(codec) : codec;
           for (const value of c.values) {
             const bytes = codec.encode(value as never);
 
@@ -914,7 +962,8 @@ describe("cross-vendor fuzz", () => {
                 continue;
               }
               // A shorter prefix is a legal encoding only if it re-encodes to itself.
-              expect([...codec.encode(decoded as never)]).toEqual([...prefix]);
+              if (canonical !== codec) decoded = canonical.decode(prefix);
+              expect([...canonical.encode(decoded as never)]).toEqual([...prefix]);
             }
 
             for (const suffix of [[0], [0xff], [0, 0]]) {
@@ -935,7 +984,8 @@ describe("cross-vendor fuzz", () => {
                   continue;
                 }
                 if (containsNaN(decoded)) continue;
-                expect([...codec.encode(decoded as never)]).toEqual([...mutated]);
+                if (canonical !== codec) decoded = canonical.decode(mutated);
+                expect([...canonical.encode(decoded as never)]).toEqual([...mutated]);
               }
             }
           }
@@ -997,7 +1047,7 @@ describe("wire digest over the whole matrix", () => {
    * That is the point: decide whether any byte moved, then update the digest in the same
    * commit as whatever answers it.
    */
-  const VENDOR_WIRE_DIGEST = "938a0bed05d5d9c5";
+  const VENDOR_WIRE_DIGEST = "2c211590e038b345";
 
   it("hashes to a pinned value", () => {
     const lines: string[] = [];
@@ -1060,14 +1110,6 @@ describe("refusals are the same from every vendor", () => {
       name: "a field named __proto__ that sets the prototype of properties",
       valibot: () => compile(val(v.object({ ["__proto__"]: v.string(), safe: vint }))),
       message: /"__proto__" property does not survive/,
-    },
-    {
-      // valibot has no entry: it writes the default as a `default` keyword on an
-      // optional property, identical on both sides, so the field simply compiles as
-      // optional and the validator fills it on the way in.
-      name: "a default, whose input and output shapes differ",
-      zod: () => compile(z.object({ a: z.string().default("x") })),
-      message: /different input and output wire shapes|bidirectional/,
     },
     {
       // Zod's refusal comes from shorn's own hook, in Zod's words and with no suffix;

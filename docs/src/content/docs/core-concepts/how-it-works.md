@@ -68,7 +68,7 @@ Two JSON Schema details decide most of what matters:
 - **`type: "integer"` with `minimum >= 0`** becomes `uint`, a plain varint: seven bits of value per byte, so a small number costs one byte. Without the bound it becomes `int`, which is ZigZag encoded first, interleaving negative and positive values, and so crosses every size boundary at half the value. [Integers](/wire-format/layout/#integers) shows both encodings byte by byte.
 - **`additionalProperties`** decides what happens to fields the schema does not name. `false` means the validator already rejects or strips them. If the keyword is absent, shorn refuses extras during encoding, and the object case records that as a `rejectUnknown` flag. `true` or a schema makes the object open.
 
-shorn converts both `jsonSchema.input()` and `.output()` and compares them. If the two sides differ, the schema would need a codec that runs in two directions, and shorn refuses it.
+shorn converts both `jsonSchema.input()` and `.output()` and compares them. A field that is optional on the input side and required on the output side, which is what a default looks like, compiles as optional. Any other difference would need a codec that runs in two directions, and shorn refuses it.
 
 ## From plan to codec
 

@@ -35,8 +35,9 @@ type JsonSchema = Record<string, unknown>;
 
 /**
  * A JSON Schema as a plain object, the form `structure` accepts beside a Standard JSON
- * Schema implementation. One document serves both sides, so a default or a transform
- * cannot be expressed this way, which is what Standard JSON Schema's two methods are for.
+ * Schema implementation. One document serves both sides, so a transform cannot be
+ * expressed this way, which is what Standard JSON Schema's two methods are for. A default
+ * can: its field is optional in the document, the shape shorn gives a default either way.
  *
  * Optional keywords and no index signature, deliberately. A converter's own document
  * type is an interface, and an interface never satisfies an index signature, so
@@ -943,6 +944,40 @@ function wireSignature(shape: WireDocument): string {
   return JSON.stringify(shape, (key, value) => (key === "rejectUnknown" ? undefined : value));
 }
 
+/**
+ * The output side's shape, with every object field the input side leaves optional made
+ * optional here too, at any depth. That is the whole of what a default changes:
+ * `z.string().default("x")` and ArkType's `"string = 'x'"` are optional going in and
+ * required coming out, while Valibot's `v.optional(v.string(), "x")` writes one document
+ * with the field optional on both sides. Taking the input side's optionality gives all
+ * three one shape, and so one signature and one set of bytes.
+ *
+ * Nothing is lost by it but a presence bit. Encode validates first, so the value always
+ * carries the field and the bit is always set; decode reads a missing field as absent and
+ * the validator fills it, as it would for any input without it.
+ *
+ * Everything else comes from the output side, `rejectUnknown` included: Zod's input side
+ * leaves out the `additionalProperties: false` its output side declares, and taking it
+ * from there would make an `unchecked()` codec refuse the extras it has always ignored.
+ * This walk decides nothing: the caller compares its result with the input side's
+ * signature, and any other difference, a field required going in and optional coming out
+ * among them, survives the walk and fails that comparison.
+ */
+function optionalAsInput(input: unknown, output: unknown): unknown {
+  if (!output || typeof output !== "object") return output;
+  // `Object()` so that a leaf, or a missing branch, on the input side reads as having no
+  // children: wherever the two sides disagree, the comparison refuses the result anyway.
+  const from = Object(input) as Record<string, unknown>;
+  const merged = (Array.isArray(output) ? [] : {}) as Record<string, unknown>;
+  for (const key of Object.keys(output)) {
+    const node = (output as Record<string, unknown>)[key];
+    // Optional if either side says so. A field optional only on the output side stays
+    // optional here, where the input side's signature then refuses it.
+    merged[key] = key === "optional" ? node || from[key] : optionalAsInput(from[key], node);
+  }
+  return merged;
+}
+
 function hasJsonSchema(value: StandardSchemaV1): value is EncodableStandardSchema {
   return "jsonSchema" in value["~standard"];
 }
@@ -1223,17 +1258,22 @@ function buildCodec(
     inputJsonSchema = outputJsonSchema = structuralSchema;
   }
   const inputShape = toWireShape(asSchema(inputJsonSchema));
-  const outputShape = toWireShape(asSchema(outputJsonSchema));
-  const signature = wireSignature(outputShape);
+  const shape = optionalAsInput(
+    inputShape,
+    toWireShape(asSchema(outputJsonSchema)),
+  ) as WireDocument;
+  const signature = wireSignature(shape);
   if (wireSignature(inputShape) !== signature) {
-    // Rarely reached: zod's `z.codec()` has a rich output type, so the conversion above
-    // throws before the shapes are compared. What survives here is a schema whose two
-    // sides are both JSON Schema representable and still differ: a default, say.
+    // A default no longer reaches this, and a `z.codec()` does not: Zod's hook refuses it
+    // by name during the conversion above. What is left is a schema whose two sides are
+    // both representable and differ in a way `optionalAsInput` does not reconcile: a pipe
+    // into a narrower wire type, `z.string().pipe(z.uuid())`, an ArkType morph from a
+    // numeric string to a number, a field that is optional only on the way out.
     throw new EncodeError(
       "Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported",
     );
   }
-  return new StandardBackedSchema(schema, compileShape(outputShape), signature);
+  return new StandardBackedSchema(schema, compileShape(shape), signature);
 }
 
 const directCache = new WeakMap<object, StandardBackedSchema<unknown>>();
