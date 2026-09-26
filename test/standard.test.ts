@@ -1584,10 +1584,14 @@ describe("Standard Schema adapter", () => {
     });
 
     it("leaves a non-recursive schema's signature exactly as it was", () => {
-      // The definition table is emitted only when a cycle is found, so no existing
-      // fingerprint moves. This pins the plain three-field shape.
-      const Person = fingerprinted(compile(z.object({ age: z.int(), name: z.string() })));
-      expect(Person.fingerprintHex).toBe("fee99f");
+      // The definition table is emitted only when a cycle is found, so a schema without
+      // one keeps the signature it always had. This pins the plain two-field shape, and
+      // the fingerprint that signature hashes to.
+      const Person = compile(z.object({ age: z.int(), name: z.string() }));
+      expect(Person.signature).toBe(
+        '{"object":[{"key":"age","optional":false,"value":"int"},{"key":"name","optional":false,"value":"string"}]}',
+      );
+      expect(fingerprinted(Person).fingerprintHex).toBe("e6682f");
     });
 
     it("inlines a shared subtree instead of making it a definition", () => {

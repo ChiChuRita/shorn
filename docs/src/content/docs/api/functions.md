@@ -141,13 +141,13 @@ const codec = compile(Person, structure);
 fingerprinted<T>(codec: Schema<T>, options?: FingerprintOptions): FingerprintedSchema<T>;
 ```
 
-Prefixes each payload with a short FNV-1a digest of the schema's canonical wire signature.
+Prefixes each payload with a short hash of the schema's canonical wire signature: FNV-1a, mixed with murmur3's `fmix32`.
 
 ```ts
 const codec = fingerprinted(compile(Person), { bytes: 4 });
 codec.encode(person);  // 4 + payload bytes
 codec.fingerprint;     // Uint8Array, a fresh copy every read
-codec.fingerprintHex;  // "7236d1", the Map key for dispatch
+codec.fingerprintHex;  // "39fe6326", the Map key for dispatch
 ```
 
 `fingerprint` returns a copy so that a caller cannot change the codec's internal bytes. Use `fingerprintHex` as a `Map` key.
