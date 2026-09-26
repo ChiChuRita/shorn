@@ -315,7 +315,7 @@ function asSchema(value: unknown): JsonSchema {
   return value as JsonSchema;
 }
 
-/** Said from two places, since two vendors lose a `__proto__` field two different ways. */
+/** Said from three places, since the vendors lose a `__proto__` field three different ways. */
 const PROTO_KEY_MESSAGE =
   'A "__proto__" property does not survive a JSON Schema; rename the field';
 
@@ -997,6 +997,7 @@ interface ZodOverrideContext {
         readonly keyType?: unknown;
         readonly valueType?: unknown;
         readonly reverseTransform?: unknown;
+        readonly shape?: object;
       };
     };
   };
@@ -1026,6 +1027,15 @@ function zodOverride(io: Side, converting: Set<unknown>): (context: ZodOverrideC
         json[RICH_KEYWORD] = "map";
         json[RICH_KEY_KEYWORD] = childJsonSchema(def.keyType, io, converting);
         json.items = childJsonSchema(def.valueType, io, converting);
+        return;
+      case "object":
+        // Zod 4.6 writes a `__proto__` field into `properties` as an own key, where 4.5
+        // left it out, but its validator still drops the key from every value it returns,
+        // so every encode failed on a field that looked declared. Refused here, with the
+        // message the other spellings get, because the document alone reads as valid.
+        if (def.shape !== undefined && Object.hasOwn(def.shape, "__proto__")) {
+          throw new EncodeError(PROTO_KEY_MESSAGE);
+        }
         return;
       case "pipe":
         // A `z.codec()` is the one pipe with a way back, and shorn cannot take it: encode

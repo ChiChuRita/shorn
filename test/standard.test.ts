@@ -803,6 +803,15 @@ describe("Standard Schema adapter", () => {
     expect(() => encode(Strict, extra as never)).toThrow(/Unrecognized key/);
   });
 
+  it("refuses a Zod field named __proto__, which Zod's own validator drops", () => {
+    // Zod 4.6 lists the field in `properties` as an own key, so the codec built, but every
+    // value Zod returns lacks the key: every encode failed with a bare "Expected a
+    // string". Refused by name now, as Valibot's spelling and Zod 4.5's already were. A
+    // hand-written document with a validator that keeps the key still works, below.
+    const Proto = z.object({ ["__proto__"]: z.string(), a: z.string() });
+    expect(() => compile(Proto)).toThrow(/"__proto__" property does not survive/);
+  });
+
   it("preserves a declared __proto__ field without mutating the decoded prototype", () => {
     const jsonSchema = JSON.parse(
       '{"type":"object","properties":{"__proto__":{"type":"string"}},"required":["__proto__"],"additionalProperties":false}',
