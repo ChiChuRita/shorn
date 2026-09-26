@@ -21,6 +21,28 @@ export function mulberry32(seed: number): () => number {
 
 type Rng = () => number;
 
+/**
+ * The seeds a property suite of `cases` cases draws: 1 to `cases`, unless
+ * `SHORN_PROPERTY_SEED` offsets them. A push run leaves it unset, so it replays exactly the
+ * cases every seed number in these suites refers to; the weekly soak sets it from its run id
+ * and explores cases no run has drawn.
+ *
+ * A suite multiplies each seed by a constant below 2^32 before seeding `mulberry32`, and past
+ * 2^53 the product loses its low bits, so neighbouring seeds would collide. An offset that
+ * could reach that is refused rather than quietly drawing the same cases twice. A failure
+ * names its seed, and `SHORN_PROPERTY_SEED=<seed - 1> SHORN_PROPERTY_CASES=1` replays it.
+ */
+export function propertySeeds(cases: number): readonly [first: number, last: number] {
+  const setting = process.env.SHORN_PROPERTY_SEED;
+  const offset = Number(setting ?? 0);
+  if (!Number.isSafeInteger(offset) || offset < 0 || (offset + cases) * 2 ** 32 > 2 ** 53) {
+    throw new Error(
+      `SHORN_PROPERTY_SEED must be a whole number from 0 to ${2 ** 21 - cases}, received ${setting}`,
+    );
+  }
+  return [offset + 1, offset + cases];
+}
+
 export const pick = <T>(rng: Rng, values: readonly T[]): T =>
   values[Math.floor(rng() * values.length)]!;
 export const below = (rng: Rng, limit: number): number => Math.floor(rng() * limit);

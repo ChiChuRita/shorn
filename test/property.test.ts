@@ -7,6 +7,7 @@ import {
   countArrayElements,
   mulberry32,
   pick,
+  propertySeeds,
   schemaGen,
 } from "./generate.js";
 
@@ -18,6 +19,9 @@ import {
 const CASES = Number(process.env.SHORN_PROPERTY_CASES ?? 400);
 // Scales with the soak size, so a deep run reports real failures instead of timeouts.
 const TIMEOUT = Math.max(10_000, CASES * 30);
+const [FIRST_SEED, LAST_SEED] = propertySeeds(CASES);
+/** In every title when the seeds are offset, so a failure says where they started. */
+const SEEDS = FIRST_SEED === 1 ? "" : ` (seeds ${FIRST_SEED} to ${LAST_SEED})`;
 
 /**
  * Hands the event loop back every so often, so a soak run can report progress.
@@ -39,9 +43,9 @@ const breathe = (seed: number): Promise<void> | undefined =>
 // Twice: over the corpus every seed here was found against, and over the one that also
 // draws Date, bigint, Set and Map. Each invariant has to hold for both.
 for (const rich of [false, true])
-describe(`property: generated schemas crossed with generated values${rich ? ", rich types included" : ""}`, { timeout: TIMEOUT }, () => {
+describe(`property: generated schemas crossed with generated values${rich ? ", rich types included" : ""}${SEEDS}`, { timeout: TIMEOUT }, () => {
   it("round-trips, and encode after decode is a fixed point", async () => {
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed);
       const gen = schemaGen(rng, 4, false, rich);
@@ -62,7 +66,7 @@ describe(`property: generated schemas crossed with generated values${rich ? ", r
   });
 
   it("is deterministic: the same value encodes to the same bytes every time", async () => {
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 7919);
       const gen = schemaGen(rng, 4, false, rich);
@@ -100,7 +104,7 @@ describe(`property: generated schemas crossed with generated values${rich ? ", r
       return clone;
     };
 
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 31);
       const gen = schemaGen(rng, 4, false, rich);
@@ -112,7 +116,7 @@ describe(`property: generated schemas crossed with generated values${rich ? ", r
   });
 
   it("never lets a non-DecodeError escape any corruption of a valid payload", async () => {
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 104_729);
       const gen = schemaGen(rng, 4, false, rich);
@@ -148,7 +152,7 @@ describe(`property: generated schemas crossed with generated values${rich ? ", r
   });
 
   it("never lets a non-DecodeError escape arbitrary bytes", async () => {
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 65_537);
       const gen = schemaGen(rng, 4, false, rich);
@@ -175,7 +179,7 @@ describe(`property: generated schemas crossed with generated values${rich ? ", r
     // byte, so a decoded value can never hold more elements than it was fed. This is
     // what stops seven bytes from becoming a million-slot allocation, and it has to
     // hold for generated shapes, not just the one reported payload.
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 999_983);
       const gen = schemaGen(rng, 4, true, rich);
@@ -226,7 +230,7 @@ describe(`property: generated schemas crossed with generated values${rich ? ", r
       return found;
     };
 
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 15_485_863);
       const gen = schemaGen(rng, 4, false, rich);

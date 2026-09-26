@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { DecodeError, compile, encode, type Schema } from "../src/index.js";
-import { below, mulberry32, pick, randomString } from "./generate.js";
+import { below, mulberry32, pick, propertySeeds, randomString } from "./generate.js";
 
 /**
  * The same generative pressure `property.test.ts` puts on the `m.*` builders,
@@ -14,6 +14,9 @@ import { below, mulberry32, pick, randomString } from "./generate.js";
  */
 const CASES = Number(process.env.SHORN_PROPERTY_CASES ?? 400);
 const TIMEOUT = Math.max(10_000, CASES * 30);
+const [FIRST_SEED, LAST_SEED] = propertySeeds(CASES);
+/** In the title when the seeds are offset, so a failure says where they started. */
+const SEEDS = FIRST_SEED === 1 ? "" : ` (seeds ${FIRST_SEED} to ${LAST_SEED})`;
 
 const breathe = (seed: number): Promise<void> | undefined =>
   seed % 500 === 0 ? new Promise<void>((resolve) => setTimeout(resolve, 0)) : undefined;
@@ -174,9 +177,9 @@ const KEY_POOL = ["id", "name", "a", "z", "kind", "über", "zzz", "_"] as const;
  */
 const codecFor = (schema: z.ZodType): Schema<unknown> => compile(schema) as Schema<unknown>;
 
-describe("property: generated vendor schemas through the compile seam", { timeout: TIMEOUT }, () => {
+describe(`property: generated vendor schemas through the compile seam${SEEDS}`, { timeout: TIMEOUT }, () => {
   it("round-trips, and encode after decode is a fixed point", async () => {
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 2_654_435_761);
       const gen = zodGen(rng, 4);
@@ -191,7 +194,7 @@ describe("property: generated vendor schemas through the compile seam", { timeou
   });
 
   it("is deterministic across separately compiled instances of the same schema", async () => {
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 40_503);
       const gen = zodGen(rng, 4);
@@ -205,7 +208,7 @@ describe("property: generated vendor schemas through the compile seam", { timeou
   });
 
   it("never lets a non-DecodeError escape any corruption of a valid payload", async () => {
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 15_485_863);
       const gen = zodGen(rng, 4);
@@ -240,7 +243,7 @@ describe("property: generated vendor schemas through the compile seam", { timeou
   });
 
   it("never lets a non-DecodeError escape arbitrary bytes", async () => {
-    for (let seed = 1; seed <= CASES; seed++) {
+    for (let seed = FIRST_SEED; seed <= LAST_SEED; seed++) {
       await breathe(seed);
       const rng = mulberry32(seed * 99_991);
       const gen = zodGen(rng, 4);
@@ -263,7 +266,7 @@ describe("property: generated vendor schemas through the compile seam", { timeou
 
   it("never pollutes Object.prototype from a decoded __proto__ key", async () => {
     const before = Object.getOwnPropertyNames(Object.prototype).length;
-    for (let seed = 1; seed <= Math.min(CASES, 5000); seed++) {
+    for (let seed = FIRST_SEED; seed < FIRST_SEED + Math.min(CASES, 5000); seed++) {
       const rng = mulberry32(seed * 7_919);
       const gen = zodGen(rng, 4);
       const codec = codecFor(gen.schema);
