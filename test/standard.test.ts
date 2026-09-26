@@ -1329,6 +1329,21 @@ describe("Standard Schema adapter", () => {
       expect(safeEncode(null as never, 1 as never)).toMatchObject({ success: false });
     });
 
+    it("takes a codec in the safe variants, as the async ones do", () => {
+      // The docs pair `safeDecode` for untrusted input with `fingerprinted(compile(...))`
+      // for stored data, and the two could not be combined: a good payload came back
+      // `success: false`, "received a shorn schema".
+      const Person = z.object({ name: z.string(), age: z.int().nonnegative() });
+      const stored = fingerprinted(compile(Person), { bytes: 4 });
+      const bytes = stored.encode({ name: "Ada", age: 36 });
+      expect(safeDecode(stored, bytes)).toEqual({ success: true, data: { name: "Ada", age: 36 } });
+      expect(safeEncode(stored, { name: "Ada", age: 36 })).toEqual({ success: true, data: bytes });
+      const other = fingerprinted(compile(z.object({ name: z.string() })), { bytes: 4 });
+      const mismatch = safeDecode(other, bytes);
+      expect(mismatch.success).toBe(false);
+      if (!mismatch.success) expect(mismatch.error).toBeInstanceOf(DecodeError);
+    });
+
     it("gates the structure argument too, naming the remedy rather than a TypeError", () => {
       // The structure wrapped in an options object, a `~standard` with no JSON Schema
       // half, a number: each used to surface as "Cannot read properties of undefined

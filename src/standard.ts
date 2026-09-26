@@ -164,9 +164,9 @@ type StructureFor<S extends StandardSchemaV1> =
 export type SafeResult<T> = { success: true; data: T } | { success: false; error: Error };
 
 /**
- * The whole body of `safeEncode` and `safeDecode`. The normalization is the part
- * worth having once: a vendor's validator may reject with something that is not an
- * `Error`, and `SafeResult` promises one.
+ * What `safeEncode` and `safeDecode` catch. The normalization is the part worth having
+ * once: a vendor's validator may reject with something that is not an `Error`, and
+ * `SafeResult` promises one.
  */
 function safely<T>(run: () => T): SafeResult<T> {
   try {
@@ -1326,6 +1326,11 @@ export function compile(
   return getCompiled(schema, structure);
 }
 
+/** A codec as given, or the cached one `compile()` builds, for the entry points taking either. */
+function codecOf(schemaOrCodec: StandardSchemaV1 | Schema<unknown>, structure?: Structure): Schema<unknown> {
+  return schemaOrCodec instanceof Schema ? schemaOrCodec : getCompiled(schemaOrCodec, structure);
+}
+
 /**
  * The same codec with the validator taken out. Identical bytes on the wire; the
  * refinements are simply not run, on either side. On the three-field zod person fixture
@@ -1356,9 +1361,7 @@ export function unchecked(
   schemaOrCodec: StandardSchemaV1 | Schema<unknown>,
   structure?: Structure,
 ): Schema<unknown> {
-  const codec =
-    schemaOrCodec instanceof Schema ? schemaOrCodec : getCompiled(schemaOrCodec, structure);
-  const bare = codec._structural;
+  const bare = codecOf(schemaOrCodec, structure)._structural;
   if (bare === undefined) {
     // Not a no-op return of the argument: an `m` schema really is already unchecked, but
     // `compile(schema).nullable()` reaches here too, and handing that back would keep
@@ -1404,6 +1407,7 @@ export function decode(
   return getCompiled(schema, structure).decode(value);
 }
 
+export function safeEncode<T>(codec: Schema<T>, value: T): SafeResult<Uint8Array>;
 export function safeEncode<S extends EncodableStandardSchema>(
   schema: S,
   value: StandardSchemaV1.InferOutput<S>,
@@ -1414,13 +1418,14 @@ export function safeEncode<S extends StandardSchemaV1>(
   structure: StructureFor<S>,
 ): SafeResult<Uint8Array>;
 export function safeEncode(
-  schema: StandardSchemaV1,
+  schema: StandardSchemaV1 | Schema<unknown>,
   value: unknown,
   structure?: Structure,
 ): SafeResult<Uint8Array> {
-  return safely(() => getCompiled(schema, structure).encode(value));
+  return safely(() => codecOf(schema, structure).encode(value));
 }
 
+export function safeDecode<T>(codec: Schema<T>, value: Uint8Array): SafeResult<T>;
 export function safeDecode<S extends EncodableStandardSchema>(
   schema: S,
   value: Uint8Array,
@@ -1431,11 +1436,11 @@ export function safeDecode<S extends StandardSchemaV1>(
   structure: StructureFor<S>,
 ): SafeResult<StandardSchemaV1.InferOutput<S>>;
 export function safeDecode(
-  schema: StandardSchemaV1,
+  schema: StandardSchemaV1 | Schema<unknown>,
   value: Uint8Array,
   structure?: Structure,
 ): SafeResult<unknown> {
-  return safely(() => getCompiled(schema, structure).decode(value));
+  return safely(() => codecOf(schema, structure).decode(value));
 }
 
 /**
@@ -1449,8 +1454,7 @@ function asyncParts(
   schemaOrCodec: StandardSchemaV1 | Schema<unknown>,
   jsonSchema: Structure | undefined,
 ): readonly [source: StandardSchemaV1<unknown, unknown>, structure: Schema<unknown>] {
-  const codec =
-    schemaOrCodec instanceof Schema ? schemaOrCodec : getCompiled(schemaOrCodec, jsonSchema);
+  const codec = codecOf(schemaOrCodec, jsonSchema);
   const source = codec._source;
   const structure = codec._structural;
   if (source === undefined || structure === undefined) {

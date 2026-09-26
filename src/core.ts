@@ -574,6 +574,12 @@ interface OpenWriter {
  * `Uint8Array` view, so a reader hands it `frame.subarray(start, end)`.
  */
 export function encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, offset = 0): number {
+  // A Standard Schema arrives here by habit from `encode(schema, value)`, and failed deep
+  // inside as `codec._encode is not a function`. Tested by shape, not `instanceof`, so a
+  // codec from a second installed copy of shorn keeps working as it always has.
+  if (typeof (codec as { _encode?: unknown } | null)?._encode !== "function") {
+    throw new EncodeError("encodeInto() takes a codec, not a schema");
+  }
   if (!isUint8Array(target)) {
     throw new EncodeError(`Expected a Uint8Array target, received ${typeof target}`);
   }
