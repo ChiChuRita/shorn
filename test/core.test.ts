@@ -2,6 +2,7 @@ import { runInNewContext } from "node:vm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ObjectSchema } from "../src/core.js";
 import { DecodeError, EncodeError, encodeInto, m, Writer } from "../src/index.js";
+import { buildUnderCsp } from "./csp.js";
 
 /**
  * `Writer`'s buffer and offset, which are `private` to callers and erased at runtime.
@@ -665,25 +666,11 @@ describe("shorn core", () => {
     });
   });
 
-  // An object schema with no optionals compiles its record decoder with
-  // `new Function`, so a Content Security Policy without `unsafe-eval` sends
-  // every such schema down the interpreted path instead. That path is now
-  // unreachable in a normal run and would rot silently without this.
+  // An object schema compiles its record encoder and decoder with `new Function`, so a
+  // Content Security Policy without `unsafe-eval` sends every one down the interpreted
+  // path instead. That path is unreachable in a normal run and would rot silently
+  // without this.
   describe("without new Function, as under a strict CSP", () => {
-    function buildUnderCsp<T>(build: () => T): T {
-      const realFunction = globalThis.Function;
-      globalThis.Function = new Proxy(realFunction, {
-        construct() {
-          throw new EvalError("Refused to evaluate a string as JavaScript");
-        },
-      }) as FunctionConstructor;
-      try {
-        return build();
-      } finally {
-        globalThis.Function = realFunction;
-      }
-    }
-
     const shape = () =>
       m.object({
         active: m.boolean(),
