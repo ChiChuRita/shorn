@@ -12,10 +12,10 @@ import { decode, encode } from "@chichurita/shorn";
 const Person = type({
   name: "string",
   age: "number.integer >= 0",
-  sex: "'M' | 'F' | 'X'",
+  role: "'viewer' | 'editor' | 'admin'",
 });
 
-const person = { name: "Grace", age: 45, sex: "F" } as const;
+const person = { name: "Grace", age: 45, role: "admin" } as const;
 const bytes = encode(Person, person); // 8 bytes
 const decoded = decode(Person, bytes);
 ```

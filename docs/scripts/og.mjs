@@ -16,7 +16,7 @@ const SANS = "Helvetica Neue, Helvetica, Arial, sans-serif";
 // The same comparison the landing figure makes, at the two ends that matter.
 const rows = [
   { label: "shorn", bytes: 8, self: true },
-  { label: "JSON", bytes: 35, self: false },
+  { label: "JSON", bytes: 40, self: false },
 ];
 
 const cells = (row, y) =>

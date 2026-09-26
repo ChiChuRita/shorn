@@ -12,10 +12,10 @@ import { compile, decode, encode, fingerprinted, safeDecode } from "@chichurita/
 const Person = z.object({
   name: z.string(),
   age: z.int().nonnegative(),
-  sex: z.enum(["M", "F", "X"]),
+  role: z.enum(["viewer", "editor", "admin"]),
 });
 
-const person = { name: "Grace", age: 45, sex: "F" } as const;
+const person = { name: "Grace", age: 45, role: "admin" } as const;
 
 const bytes = encode(Person, person);
 const back = decode(Person, bytes); // typed and validated

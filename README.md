@@ -3,7 +3,7 @@
     <source media="(prefers-color-scheme: dark)"
             srcset="https://raw.githubusercontent.com/ChiChuRita/shorn/main/assets/hero-dark.svg">
     <img width="720"
-         alt='{"name":"Grace","age":45,"sex":"F"} is 35 bytes as JSON, 16 as a positional array, and 8 bytes through shorn: 2d is age 45, 05 is the string length, 47 to 65 is Grace, 00 is the enum index of "F"'
+         alt='{"name":"Grace","age":45,"role":"admin"} is 40 bytes as JSON, 20 as a positional array, and 8 bytes through shorn: 2d is age 45, 05 is the string length, 47 to 65 is Grace, 00 is the enum index of "admin"'
          src="https://raw.githubusercontent.com/ChiChuRita/shorn/main/assets/hero-light.svg">
   </picture>
 </p>
@@ -35,10 +35,10 @@ import { decode, encode } from "@chichurita/shorn";
 const Person = z.object({
   name: z.string(),
   age: z.int().nonnegative(),
-  sex: z.enum(["M", "F", "X"]),
+  role: z.enum(["viewer", "editor", "admin"]),
 });
 
-const person = { name: "Grace", age: 45, sex: "F" } as const;
+const person = { name: "Grace", age: 45, role: "admin" } as const;
 
 const bytes = encode(Person, person); // Uint8Array(8)
 const back = decode(Person, bytes);   // typed and validated

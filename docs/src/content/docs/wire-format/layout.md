@@ -125,8 +125,8 @@ m.literal("x") with "x" -> []
 The index of the value in sorted order, as a varint. Members are deduplicated and sorted first, so declaration order does not matter.
 
 ```text
-m.enum(["M", "F", "X"])  // sorted to ["F", "M", "X"]
-"X" -> [2]
+m.enum(["viewer", "editor", "admin"])  // sorted to ["admin", "editor", "viewer"]
+"viewer" -> [2]
 ```
 
 Members do not have to be strings. An all-string enum sorts by value. Any other enum sorts by each member's JSON text, because `<` cannot order mixed types consistently. Either way a member costs one byte until there are 128 of them: a numeric enum is an index, not a number.
