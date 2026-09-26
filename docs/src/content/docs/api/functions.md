@@ -5,7 +5,7 @@ description: Signatures and behavior for encode, decode, the safe and async vari
 
 Each function has two overloads. One takes a schema that implements both Standard interfaces. The other takes a Standard Schema plus a `structure` that describes the same shape.
 
-`structure` is either a Standard JSON Schema implementation (`toStandardJsonSchema(schema)` for Valibot) or a plain JSON Schema document, typed as `JsonSchemaDocument`. One document describes one shape, so it serves as both the input and the output side. That is why a schema with a default or a transform needs the two-method form instead.
+`structure` is either a Standard JSON Schema implementation (`toStandardJsonSchema(schema)` for Valibot) or a plain JSON Schema document, typed as `JsonSchemaDocument`. One document describes one shape, so it serves as both the input and the output side. That is why a schema with a transform needs the two-method form instead. A default does not: write its field as optional, which is the shape shorn gives a default either way.
 
 A plain object counts as a document when it has `$schema`, `$ref`, `type`, `anyOf`, `oneOf`, `const`, `enum`, `properties` or `x-shorn`. Anything else is refused, so a validator passed twice by mistake does not read as an empty schema and appear to work.
 
