@@ -35,6 +35,12 @@ Use `z.int().nonnegative()` wherever a value cannot be negative. shorn then writ
 
 `z.object` and `z.strictObject` produce the same bytes and fingerprint, because both emit `additionalProperties: false`. `z.looseObject` and `z.record` are open shapes whose keys go on the wire; see [Supported types](/schemas/supported-types/#records-open-objects-and-dynamic-values).
 
+## Defaults
+
+`.default()` compiles to an optional field. Zod describes a defaulted field as optional on the input side and required on the output side, and shorn takes the input side's optionality. Valibot's `v.optional(T, x)` and ArkType's `"string = 'x'"` compile to the same shape, so all three produce the same bytes and fingerprint. `.prefault()` compiles the same way.
+
+The field costs one bit in the object's presence bitmap. Encode validates first, so the value always carries the field and the bit is always set. A payload with the bit clear still decodes, with the default filled in, because decode validates too. `unchecked()` runs no validator, so under it a missing field goes out missing and comes back missing.
+
 ## Rich types
 
 `z.date()`, `z.bigint()`, `z.set()` and `z.map()` all encode natively. Pass the schema and nothing else:

@@ -862,6 +862,123 @@ describe("Standard Schema adapter", () => {
     expect(decoded.__proto__).toBe("safe");
   });
 
+  describe("defaults", () => {
+    // Zod and ArkType describe a defaulted field as optional going in and required coming
+    // out. That pair was refused as two wire shapes, while Valibot's one-document spelling
+    // of the same schema compiled, so the promise of one schema, one set of bytes from
+    // every validator broke on one of Zod's commonest idioms. The field now compiles as
+    // the input side has it: optional, which is the shape Valibot's document already has.
+    const vint = v.pipe(v.number(), v.integer());
+    const flat: Record<string, EncodableStandardSchema> = {
+      zod: z.object({ a: z.string().default("x"), b: z.int() }),
+      arktype: type({ a: "string = 'x'", b: "number.integer" }),
+      valibot: toStandardJsonSchema(
+        v.object({ a: v.optional(v.string(), "x"), b: vint }),
+      ) as EncodableStandardSchema,
+    };
+
+    it("compiles a Zod or ArkType default to Valibot's bytes and fingerprint", () => {
+      const hex = fingerprinted(compile(flat.valibot!)).fingerprintHex;
+      for (const [vendor, schema] of Object.entries(flat)) {
+        // The validator fills the field before a byte is written, so its bit is set.
+        const bytes = [...compile(schema).encode({ b: 1 } as never)];
+        expect({ vendor, bytes }).toEqual({ vendor, bytes: [1, 1, 120, 2] });
+        expect({ vendor, hex: fingerprinted(compile(schema)).fingerprintHex }).toEqual({
+          vendor,
+          hex,
+        });
+      }
+    });
+
+    it("fills a default nested in an object, an array element, and an optional or nullable field", () => {
+      const nested: Record<string, EncodableStandardSchema> = {
+        zod: z.object({
+          inner: z.object({ a: z.string().default("x") }),
+          list: z.array(z.object({ a: z.string().default("x") })),
+          opt: z.object({ n: z.int().default(7) }).optional(),
+          nul: z.object({ f: z.boolean().default(true) }).nullable(),
+        }),
+        arktype: type({
+          inner: { a: "string = 'x'" },
+          list: type({ a: "string = 'x'" }).array(),
+          "opt?": { n: "number.integer = 7" },
+          nul: type({ f: "boolean = true" }).or("null"),
+        }),
+        valibot: toStandardJsonSchema(
+          v.object({
+            inner: v.object({ a: v.optional(v.string(), "x") }),
+            list: v.array(v.object({ a: v.optional(v.string(), "x") })),
+            opt: v.optional(v.object({ n: v.optional(vint, 7) })),
+            nul: v.nullable(v.object({ f: v.optional(v.boolean(), true) })),
+          }),
+        ) as EncodableStandardSchema,
+      };
+      const input = { inner: {}, list: [{}, { a: "y" }], opt: {}, nul: {} };
+      const filled = { inner: { a: "x" }, list: [{ a: "x" }, { a: "y" }], opt: { n: 7 }, nul: { f: true } };
+      const reference = compile(nested.valibot!);
+      for (const [vendor, schema] of Object.entries(nested)) {
+        const codec = compile(schema);
+        const bytes = codec.encode(input as never);
+        expect({ vendor, decoded: codec.decode(bytes) }).toEqual({ vendor, decoded: filled });
+        expect({ vendor, bytes: [...bytes] }).toEqual({
+          vendor,
+          bytes: [...reference.encode(input as never)],
+        });
+        expect(codec.signature).toBe(reference.signature);
+      }
+    });
+
+    it("decodes a payload with the bit clear to the default, through the validator", () => {
+      // No validated encoder writes one, since the field is always filled by then, but
+      // `unchecked()` does: it runs no validator, so an absent field goes out absent.
+      for (const [vendor, schema] of Object.entries(flat)) {
+        const bytes = unchecked(schema).encode({ b: 1 } as never);
+        expect({ vendor, bytes: [...bytes] }).toEqual({ vendor, bytes: [0, 2] });
+        expect({ vendor, decoded: decode(schema, bytes) }).toEqual({
+          vendor,
+          decoded: { a: "x", b: 1 },
+        });
+      }
+    });
+
+    it("keeps refusing a difference between the two sides that is not a default", () => {
+      // What makes a default safe to encode is that the output fits the input's wire
+      // shape with one presence bit to spare. Nothing below fits: a narrower wire type on
+      // the way out, the same under a default, an ArkType morph from a numeric string to
+      // a number, and a field optional only on the way out, written by hand because no
+      // vendor's types let a schema say it.
+      const uuid = "0192e4c6-3c0e-7000-8000-0000000000ff";
+      const field = { type: "object", properties: { a: { type: "string" } } };
+      const optionalOnTheWayOut = {
+        "~standard": {
+          version: 1,
+          vendor: "test",
+          validate: (value: unknown) => ({ value }),
+          jsonSchema: { input: () => ({ ...field, required: ["a"] }), output: () => field },
+        },
+      } as unknown as EncodableStandardSchema;
+      for (const schema of [
+        z.object({ a: z.string().pipe(z.uuid()) }),
+        z.object({ a: z.string().pipe(z.uuid()).default(uuid) }),
+        type({ a: "string.numeric.parse" }),
+        optionalOnTheWayOut,
+      ]) {
+        expect(() => compile(schema)).toThrow(EncodeError);
+        expect(() => compile(schema)).toThrow(
+          "Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported",
+        );
+      }
+      // A `z.codec()` keeps the refusal of its own, with a default beside it or without.
+      const Seconds = z.codec(z.int(), z.int(), {
+        decode: (seconds) => seconds * 1000,
+        encode: (milliseconds) => milliseconds / 1000,
+      });
+      expect(() => compile(z.object({ a: z.string().default("x"), at: Seconds }))).toThrow(
+        /A z\.codec\(\) would transform twice/,
+      );
+    });
+  });
+
   describe("unions with no discriminant", () => {
     it("dispatches on the JSON type when no two branches share one", () => {
       const Value = compile(z.union([z.string(), z.number()]));

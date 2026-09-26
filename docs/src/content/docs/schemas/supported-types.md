@@ -142,8 +142,11 @@ An open object combines the two. The declared fields are written bare in their p
 | Closed | `z.object({...})` | `v.object({...})` | `type({...})` |
 | Strict | `z.strictObject({...})` | `v.strictObject({...})` | `"+": "reject"` |
 | Optional field | `z.optional(T)` | `v.optional(T)` | `"key?": "string"` |
+| Field with a default | `T.default(x)` | `v.optional(T, x)` | `"key": "string = 'x'"` |
 
 An object writes a presence bitmap for its optional fields, `ceil(n / 8)` bytes, left out entirely when there are none. Then come the values in canonical key order. Field names are never written. The validator and shorn may handle extra properties differently; see [Zod](/validators/zod/), [Valibot](/validators/valibot/), and [ArkType](/validators/arktype/).
+
+A field with a default is an optional field on the wire. The validator fills it before encoding, so its bit is always set, and fills it again on decode if a payload leaves it out. See [Zod defaults](/validators/zod/#defaults).
 
 ## Nullable and nesting
 

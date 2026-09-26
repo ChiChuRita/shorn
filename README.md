@@ -81,7 +81,7 @@ const codec = compile(schema, structure);
 
 shorn encodes strings, booleans, integers, floats, literals, enums, nullable values, arrays, tuples, records, recursive schemas, `z.any()`, and objects, closed or open, with optional fields. Unions need a literal tag in every branch, or branches that share no JSON type. `Date`, `bigint`, `Map`, and `Set` are supported natively.
 
-Not supported: overlapping unions, one-way transforms, streaming, and schema migration. A field with a default in Zod or ArkType throws too, because its input and output shapes differ. `undefined`, symbols, `RegExp`, and class instances have no wire form, so convert those first.
+Not supported: overlapping unions, one-way transforms, streaming, and schema migration. `undefined`, symbols, `RegExp`, and class instances have no wire form, so convert those first.
 
 Against JSON bytes, encoding is up to 6.7× faster and decoding up to 13.0×, with no compressor involved. The `m` API is 6.45 KB gzip; `compile` with validation is 11.52 KB.
 

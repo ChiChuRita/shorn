@@ -5,7 +5,7 @@ description: Signatures and behavior for encode, decode, the safe and async vari
 
 Each function has two overloads. One takes a schema that implements both Standard interfaces. The other takes a Standard Schema plus a `structure` that describes the same shape.
 
-`structure` is either a Standard JSON Schema implementation (`toStandardJsonSchema(schema)` for Valibot) or a plain JSON Schema document, typed as `JsonSchemaDocument`. One document describes one shape, so it serves as both the input and the output side. That is why a schema with a default or a transform needs the two-method form instead.
+`structure` is either a Standard JSON Schema implementation (`toStandardJsonSchema(schema)` for Valibot) or a plain JSON Schema document, typed as `JsonSchemaDocument`. One document describes one shape, so it serves as both the input and the output side. That is why a schema with a transform needs the two-method form instead. A default does not: write its field as optional, which is the shape shorn gives a default either way.
 
 A plain object counts as a document when it has `$schema`, `$ref`, `type`, `anyOf`, `oneOf`, `const`, `enum`, `properties` or `x-shorn`. Anything else is refused, so a validator passed twice by mistake does not read as an empty schema and appear to work.
 
@@ -24,11 +24,13 @@ const codec = compile(schema, structure); // cached by the identity of both obje
 ## `encode`
 
 ```ts
-encode<S extends EncodableStandardSchema>(schema: S, value: InferOutput<S>): Uint8Array;
-encode<S extends StandardSchemaV1>(schema: S, value: InferOutput<S>, structure: StandardJSONSchemaV1 | JsonSchemaDocument): Uint8Array;
+encode<S extends EncodableStandardSchema>(schema: S, value: InferInput<S>): Uint8Array;
+encode<S extends StandardSchemaV1>(schema: S, value: InferInput<S>, structure: StandardJSONSchemaV1 | JsonSchemaDocument): Uint8Array;
 ```
 
 Validates, then writes bytes. Throws `EncodeError` if validation fails or the schema cannot be encoded.
+
+`value` has the validator's input type, because the validator runs before a byte is written. A field with a default can be left out, and a branded field takes a plain string. `safeEncode` and `encodeAsync` type a schema's value the same way. A codec from `compile()` carries only the output type, so `codec.encode()` wants every field filled in.
 
 The returned `Uint8Array` is an exact-size copy, not a view into a reused buffer, so you can keep it as long as you like. The wire plan is cached per schema object.
 
@@ -41,7 +43,9 @@ decode<S extends StandardSchemaV1>(schema: S, bytes: Uint8Array, structure: Stan
 
 Reads the structure, then validates. Throws `DecodeError` for malformed bytes and for a validation failure on the way out.
 
-Bytes left over after a complete value are an error. Input that is not a `Uint8Array` produces a `DecodeError` rather than a raw `TypeError`. An array from another realm, such as `node:vm`, an iframe, or jsdom, is accepted through a tag check when `instanceof` fails.
+Bytes left over after a complete value are an error. Input that is not a `Uint8Array` produces a `DecodeError` rather than a raw `TypeError`, and the message names what arrived instead. An array from another realm, such as `node:vm`, an iframe, or jsdom, is accepted through a tag check when `instanceof` fails.
+
+An `ArrayBuffer` is refused too. `fetch().arrayBuffer()` returns one, and so does a WebSocket with `binaryType = "arraybuffer"`, where `event.data` is typed `any`, so TypeScript does not catch it. Wrap it first: `decode(schema, new Uint8Array(event.data))`.
 
 ## `encodeInto`
 

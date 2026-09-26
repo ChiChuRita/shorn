@@ -36,6 +36,10 @@ Use `"+": "delete"` to strip extras you expect, or `"+": "reject"` to get ArkTyp
 
 The [fingerprint](/versioning/fingerprinting/) leaves out `rejectUnknown`, so equivalent ArkType and Zod schemas still agree even though they handle extra properties differently.
 
+## Defaults
+
+A default, `{ theme: "string = 'light'" }`, compiles to an optional field. ArkType describes the field as optional on the input side and required on the output side, and shorn takes the input side's optionality. An equivalent Zod or Valibot schema produces the same bytes and fingerprint. Encode validates first, so ArkType has filled the field and its presence bit is always set. [Zod defaults](/validators/zod/#defaults) covers what a payload without the field decodes to.
+
 ## Rich types
 
 `Date` and `bigint` encode natively:

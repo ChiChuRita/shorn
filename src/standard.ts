@@ -35,17 +35,17 @@ type JsonSchema = Record<string, unknown>;
 
 /**
  * A JSON Schema as a plain object, the form `structure` accepts beside a Standard JSON
- * Schema implementation. One document serves both sides, so a default or a transform
- * cannot be expressed this way, which is what Standard JSON Schema's two methods are for.
- *
- * Optional keywords and no index signature, deliberately. A converter's own document
- * type is an interface, and an interface never satisfies an index signature, so
- * `Record<string, unknown>` would refuse exactly the object the Valibot recipe hands
- * over. Listing the keywords instead lets any document sharing one of them through,
- * and still turns away a `{ structure }` wrapper, which shares none. The runtime gate
- * in `getCompiled` does the real checking.
+ * Schema implementation. One document serves both sides, so a transform cannot be
+ * expressed this way, which is what Standard JSON Schema's two methods are for. A default
+ * can: its field is optional in the document, the shape shorn gives a default either way.
  */
 export interface JsonSchemaDocument {
+  // Optional keywords and no index signature, deliberately. A converter's own document
+  // type is an interface, and an interface never satisfies an index signature, so
+  // `Record<string, unknown>` would refuse exactly the object the Valibot recipe hands
+  // over. Listing the keywords instead lets any document sharing one of them through,
+  // and still turns away a `{ structure }` wrapper, which shares none. The runtime gate
+  // in `getCompiled` does the real checking.
   readonly $schema?: unknown;
   readonly $id?: unknown;
   readonly $ref?: unknown;
@@ -154,9 +154,9 @@ export type EncodableStandardSchema<Input = unknown, Output = Input> =
 
 /**
  * The structure half a validator that carries no JSON Schema of its own has to be handed
- * separately: the extra argument on the second overload of every entry point below. One
- * alias rather than the same four lines nine times.
+ * separately: the extra argument on the second overload of every entry point below.
  */
+// One alias rather than the same four lines nine times.
 type StructureFor<S extends StandardSchemaV1> =
   | StandardJSONSchemaV1<StandardSchemaV1.InferInput<S>, StandardSchemaV1.InferOutput<S>>
   | JsonSchemaDocument;
@@ -943,6 +943,40 @@ function wireSignature(shape: WireDocument): string {
   return JSON.stringify(shape, (key, value) => (key === "rejectUnknown" ? undefined : value));
 }
 
+/**
+ * The output side's shape, with every object field the input side leaves optional made
+ * optional here too, at any depth. That is the whole of what a default changes:
+ * `z.string().default("x")` and ArkType's `"string = 'x'"` are optional going in and
+ * required coming out, while Valibot's `v.optional(v.string(), "x")` writes one document
+ * with the field optional on both sides. Taking the input side's optionality gives all
+ * three one shape, and so one signature and one set of bytes.
+ *
+ * Nothing is lost by it but a presence bit. Encode validates first, so the value always
+ * carries the field and the bit is always set; decode reads a missing field as absent and
+ * the validator fills it, as it would for any input without it.
+ *
+ * Everything else comes from the output side, `rejectUnknown` included: Zod's input side
+ * leaves out the `additionalProperties: false` its output side declares, and taking it
+ * from there would make an `unchecked()` codec refuse the extras it has always ignored.
+ * This walk decides nothing: the caller compares its result with the input side's
+ * signature, and any other difference, a field required going in and optional coming out
+ * among them, survives the walk and fails that comparison.
+ */
+function optionalAsInput(input: unknown, output: unknown): unknown {
+  if (!output || typeof output !== "object") return output;
+  // `Object()` so that a leaf, or a missing branch, on the input side reads as having no
+  // children: wherever the two sides disagree, the comparison refuses the result anyway.
+  const from = Object(input) as Record<string, unknown>;
+  const merged = (Array.isArray(output) ? [] : {}) as Record<string, unknown>;
+  for (const key of Object.keys(output)) {
+    const node = (output as Record<string, unknown>)[key];
+    // Optional if either side says so. A field optional only on the output side stays
+    // optional here, where the input side's signature then refuses it.
+    merged[key] = key === "optional" ? node || from[key] : optionalAsInput(from[key], node);
+  }
+  return merged;
+}
+
 function hasJsonSchema(value: StandardSchemaV1): value is EncodableStandardSchema {
   return "jsonSchema" in value["~standard"];
 }
@@ -1125,10 +1159,9 @@ export interface ValibotOverrideContext {
  *
  *     compile(schema, toJsonSchema(schema, { overrideSchema: valibotOverride(toJsonSchema) }))
  *
- * The converter is an argument rather than an import: shorn depends on no validator, and
- * the element of a set has to be converted through the same hook, or a set inside a set
- * would throw where the outer one did not. `J` is the converter's own document type, so
- * the returned function fits the slot without shorn having to name that type.
+ * The hook throws `EncodeError` for a recursive type reached through a Set or Map.
+ *
+ * @see https://shorn.dev/api/functions/#valibotoverride
  */
 export function valibotOverride<J>(
   convert: (
@@ -1136,6 +1169,11 @@ export function valibotOverride<J>(
     config: { readonly overrideSchema: (context: ValibotOverrideContext) => J | undefined },
   ) => J,
 ): (context: ValibotOverrideContext) => J | undefined {
+  // The converter is an argument rather than an import: shorn depends on no validator, and
+  // the element of a set has to be converted through the same hook, or a set inside a set
+  // would throw where the outer one did not. `J` is the converter's own document type, so
+  // the returned function fits the slot without shorn having to name that type.
+  //
   // The recursion guard `childJsonSchema` keeps for Zod, by depth rather than identity:
   // a Valibot object getter builds a fresh `v.set(v.lazy(...))` on every access, so no
   // schema object ever recurs, and the converter would be asked for the enclosing type
@@ -1223,17 +1261,22 @@ function buildCodec(
     inputJsonSchema = outputJsonSchema = structuralSchema;
   }
   const inputShape = toWireShape(asSchema(inputJsonSchema));
-  const outputShape = toWireShape(asSchema(outputJsonSchema));
-  const signature = wireSignature(outputShape);
+  const shape = optionalAsInput(
+    inputShape,
+    toWireShape(asSchema(outputJsonSchema)),
+  ) as WireDocument;
+  const signature = wireSignature(shape);
   if (wireSignature(inputShape) !== signature) {
-    // Rarely reached: zod's `z.codec()` has a rich output type, so the conversion above
-    // throws before the shapes are compared. What survives here is a schema whose two
-    // sides are both JSON Schema representable and still differ: a default, say.
+    // A default no longer reaches this, and a `z.codec()` does not: Zod's hook refuses it
+    // by name during the conversion above. What is left is a schema whose two sides are
+    // both representable and differ in a way `optionalAsInput` does not reconcile: a pipe
+    // into a narrower wire type, `z.string().pipe(z.uuid())`, an ArkType morph from a
+    // numeric string to a number, a field that is optional only on the way out.
     throw new EncodeError(
       "Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported",
     );
   }
-  return new StandardBackedSchema(schema, compileShape(outputShape), signature);
+  return new StandardBackedSchema(schema, compileShape(shape), signature);
 }
 
 const directCache = new WeakMap<object, StandardBackedSchema<unknown>>();
@@ -1316,6 +1359,13 @@ function getCompiled(schema: StandardSchemaV1, structure?: Structure): StandardB
   return compiled;
 }
 
+/**
+ * The codec for a schema, with `.encode()` and `.decode()` that validate on both sides,
+ * built once and cached per schema object. Throws `EncodeError` for a shape shorn cannot
+ * encode. Pass `structure` for a validator with no JSON Schema of its own, like Valibot.
+ *
+ * @see https://shorn.dev/api/functions/#compile
+ */
 export function compile<S extends EncodableStandardSchema>(
   schema: S,
 ): Schema<StandardSchemaV1.InferOutput<S>>;
@@ -1337,9 +1387,7 @@ function codecOf(schemaOrCodec: StandardSchemaV1 | Schema<unknown>, structure?: 
 
 /**
  * The same codec with the validator taken out. Identical bytes on the wire; the
- * refinements are simply not run, on either side. On the three-field zod person fixture
- * in `bench/regression.mjs` that is 2.3x on encode and 3.7x on decode: once the
- * structural half is generated code, validation is most of what is left.
+ * refinements are simply not run, on either side.
  *
  * For a producer you own, at both ends of a link you own. It removes everything the
  * validator did, not only the checks that were going to pass: a transform such as
@@ -1351,7 +1399,10 @@ function codecOf(schemaOrCodec: StandardSchemaV1 | Schema<unknown>, structure?: 
  * codec at any boundary you do not own.
  *
  * Takes a schema or a codec, and is cached the same way `compile()` is, so calling it
- * per message is a WeakMap hit rather than a rebuild.
+ * per message is a WeakMap hit rather than a rebuild. Throws `EncodeError` for a codec
+ * with no validator to remove.
+ *
+ * @see https://shorn.dev/api/functions/#unchecked
  */
 export function unchecked<T>(codec: Schema<T>): Schema<T>;
 export function unchecked<S extends EncodableStandardSchema>(
@@ -1365,6 +1416,9 @@ export function unchecked(
   schemaOrCodec: StandardSchemaV1 | Schema<unknown>,
   structure?: Structure,
 ): Schema<unknown> {
+  // On the three-field zod person fixture in `bench/regression.mjs` that is 2.3x on
+  // encode and 3.7x on decode: once the structural half is generated code, validation is
+  // most of what is left.
   const bare = codecOf(schemaOrCodec, structure)._structural;
   if (bare === undefined) {
     // Not a no-op return of the argument: an `m` schema really is already unchecked, but
@@ -1377,15 +1431,27 @@ export function unchecked(
   return bare;
 }
 
+/**
+ * Validates the value, then writes it as bytes, in an exact-size array you can keep.
+ * Throws `EncodeError` if validation fails or shorn cannot encode the schema. Pass
+ * `structure` for a validator with no JSON Schema of its own, like Valibot.
+ *
+ * @see https://shorn.dev/api/functions/#encode
+ */
 export function encode<S extends EncodableStandardSchema>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
 ): Uint8Array;
 export function encode<S extends StandardSchemaV1>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
   structure: StructureFor<S>,
 ): Uint8Array;
+// The validator's input type, not its output, here and on the schema overloads of
+// `safeEncode` and `encodeAsync`: the value is validated before a byte is written, so
+// whatever the validator accepts is a valid argument, a branded field as a plain string,
+// a coerced field as its raw text, a defaulted field left out. A codec overload keeps
+// its output type, since that is the only type a `Schema<T>` carries.
 export function encode(
   schema: StandardSchemaV1,
   value: unknown,
@@ -1394,6 +1460,13 @@ export function encode(
   return getCompiled(schema, structure).encode(value);
 }
 
+/**
+ * Reads a value back from its bytes, then validates it. Throws `DecodeError` for
+ * malformed bytes or a value the validator refuses, and `EncodeError` if shorn cannot
+ * encode the schema. Pass `structure` for a validator with no JSON Schema of its own.
+ *
+ * @see https://shorn.dev/api/functions/#decode
+ */
 export function decode<S extends EncodableStandardSchema>(
   schema: S,
   value: Uint8Array,
@@ -1411,14 +1484,21 @@ export function decode(
   return getCompiled(schema, structure).decode(value);
 }
 
+/**
+ * `encode` that returns `{ success: false, error }` for a value that fails, instead of
+ * throwing. Takes a schema or a codec. A schema shorn cannot encode still throws
+ * `EncodeError`, from the first call, since that is a bug in the program.
+ *
+ * @see https://shorn.dev/api/functions/#safeencode--safedecode
+ */
 export function safeEncode<T>(codec: Schema<T>, value: T): SafeResult<Uint8Array>;
 export function safeEncode<S extends EncodableStandardSchema>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
 ): SafeResult<Uint8Array>;
 export function safeEncode<S extends StandardSchemaV1>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
   structure: StructureFor<S>,
 ): SafeResult<Uint8Array>;
 export function safeEncode(
@@ -1432,6 +1512,13 @@ export function safeEncode(
   return safely(() => codec.encode(value));
 }
 
+/**
+ * `decode` that returns `{ success: false, error }` for bytes that fail, instead of
+ * throwing. Takes a schema or a codec. A schema shorn cannot encode still throws
+ * `EncodeError`, from the first call, since that is a bug in the program.
+ *
+ * @see https://shorn.dev/api/functions/#safeencode--safedecode
+ */
 export function safeDecode<T>(codec: Schema<T>, value: Uint8Array): SafeResult<T>;
 export function safeDecode<S extends EncodableStandardSchema>(
   schema: S,
@@ -1477,14 +1564,21 @@ function asyncParts(
   return [source, structure];
 }
 
+/**
+ * `encode` for a schema with asynchronous refinements. Takes a schema or a codec built
+ * from one, `fingerprinted()` included. Rejects as `encode` throws, and with
+ * `EncodeError` for a codec with no validator to await.
+ *
+ * @see https://shorn.dev/api/functions/#encodeasync--decodeasync
+ */
 export async function encodeAsync<T>(codec: Schema<T>, value: T): Promise<Uint8Array>;
 export async function encodeAsync<S extends EncodableStandardSchema>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
 ): Promise<Uint8Array>;
 export async function encodeAsync<S extends StandardSchemaV1>(
   schema: S,
-  value: StandardSchemaV1.InferOutput<S>,
+  value: StandardSchemaV1.InferInput<S>,
   structure: StructureFor<S>,
 ): Promise<Uint8Array>;
 export async function encodeAsync(
@@ -1496,6 +1590,13 @@ export async function encodeAsync(
   return structure.encode(await validateAsync(source, value));
 }
 
+/**
+ * `decode` for a schema with asynchronous refinements. Takes a schema or a codec built
+ * from one, `fingerprinted()` included. Rejects as `decode` throws, and with
+ * `EncodeError` for a codec with no validator to await.
+ *
+ * @see https://shorn.dev/api/functions/#encodeasync--decodeasync
+ */
 export async function decodeAsync<T>(codec: Schema<T>, value: Uint8Array): Promise<T>;
 export async function decodeAsync<S extends EncodableStandardSchema>(
   schema: S,

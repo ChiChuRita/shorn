@@ -460,6 +460,37 @@ describe("fuzz: input and entry-point contracts", () => {
     }
   });
 
+  it("names what it was handed instead of bytes, an ArrayBuffer above all", () => {
+    // `fetch().arrayBuffer()` and a WebSocket with `binaryType = "arraybuffer"` both hand
+    // over an ArrayBuffer, and `MessageEvent.data` is `any`, so no type error stops one.
+    // The message said "received object" for it, as it did for a DataView and for null,
+    // which pointed nowhere. An object now goes by its tag; a primitive reads as before.
+    const refusal = (input: unknown): string => {
+      try {
+        m.uint().decode(input as never);
+      } catch (error) {
+        expect(error).toBeInstanceOf(DecodeError);
+        return (error as DecodeError).message;
+      }
+      throw new Error("decode accepted a value that is not a Uint8Array");
+    };
+    for (const [input, kind] of [
+      [new ArrayBuffer(4), "ArrayBuffer"],
+      [new DataView(new ArrayBuffer(4)), "DataView"],
+      [null, "null"],
+      [[1, 2, 3], "Array"],
+      [{}, "Object"],
+      [Promise.resolve(Uint8Array.of(1)), "Promise"],
+      [undefined, "undefined"],
+      [42, "number"],
+      ["bytes", "string"],
+      [1n, "bigint"],
+      [true, "boolean"],
+    ] as const) {
+      expect(refusal(input)).toBe(`Expected a Uint8Array, received ${kind} at byte 0`);
+    }
+  });
+
   it("accepts every structurally valid byte view, whatever realm or subclass minted it", () => {
     const schema = m.string();
     const payload = [2, 104, 105];

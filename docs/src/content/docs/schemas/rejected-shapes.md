@@ -8,7 +8,7 @@ shorn refuses any schema it cannot encode exactly. Unless a section says otherwi
 | Shape | Refused at | Instead |
 | --- | --- | --- |
 | Union with two branches of one JSON type | build | a `const` discriminant in every branch |
-| Input ≠ output wire shape | build | make both sides agree |
+| Input ≠ output wire shape, other than by a default | build | make both sides agree |
 | `$ref` to another document | build | inline the definition |
 | Recursion past 256 levels, or with no way out | encode and decode | a nullable back-edge, or an array |
 | A recursive type inside a `Set` or `Map` | build | hold the cycle in an array or an object |
@@ -76,7 +76,9 @@ An intersection that arrives as `allOf` would need the merged shape, which the v
 
 > Schemas with different input and output wire shapes require a bidirectional codec and are not yet supported
 
-shorn converts and compares both `jsonSchema.input()` and `.output()`. A default or a widening refinement that makes the two wire shapes differ is refused, because shorn cannot reverse that change while encoding. A `z.codec()` is refused by name before this check is reached, [below](#values-with-no-wire-form-and-transforms).
+shorn converts and compares both `jsonSchema.input()` and `.output()`. A difference between the two wire shapes is refused, because shorn cannot reverse that change while encoding. A pipe into a narrower wire type does this, such as `z.string().pipe(z.uuid())`, and so does an ArkType morph from a numeric string to a number. A `z.codec()` is refused by name before this check is reached, [below](#values-with-no-wire-form-and-transforms).
+
+A default is the one difference shorn accepts. `z.string().default("x")` and ArkType's `"string = 'x'"` describe a field that is optional going in and required coming out. shorn compiles that field as optional, the shape Valibot's `v.optional(v.string(), "x")` already has, so all three produce the same bytes and fingerprint. See [Zod defaults](/validators/zod/#defaults).
 
 ## Values with no wire form, and transforms
 
