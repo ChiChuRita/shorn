@@ -53,7 +53,7 @@ Both interfaces are vendor-neutral, which is why shorn needs no code specific to
 
 ## The wire plan
 
-The JSON Schema becomes a `WireShape`, a small closed set of cases. Most of them are the obvious ones: one per scalar wire type (`uint`, `int`, `float64`, `string`, `boolean`, `uuid`, `any`), and one each for arrays, tuples, objects, records, enums, literals and nullables. Three cases carry a decision worth spelling out:
+The JSON Schema becomes a `WireShape`, a small closed set of cases. Most of them are the obvious ones: one per scalar wire type (`uint`, `int`, `float64`, `string`, `boolean`, `uuid`, `date`, `datetime`, `bigint`, `any`), and one each for arrays, tuples, objects, records, sets, maps, enums, literals and nullables. Three cases carry a decision worth spelling out:
 
 ```text
 { union, on, cases } | { union, types } | { ref }

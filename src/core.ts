@@ -1378,11 +1378,12 @@ export class UuidSchema extends Schema<string> {
 const MAX_DATE_MS = 8.64e15;
 
 /**
- * A `Date` as its epoch milliseconds, ZigZag varint like an `int`: 6 bytes for any date
- * this century, fewer near 1970, and exact, since a Date holds nothing finer than a
- * millisecond. Delegated to `IntSchema` rather than to `writer.varuint` directly because
- * the ZigZag of a date near either end of the range leaves the safe-integer range, and
- * that class already has the BigInt tail for it.
+ * A `Date` as its epoch milliseconds, ZigZag varint like an `int`: at most 6 bytes from
+ * 1900-04-26T08:12:24.448Z through 2039-09-07T15:47:35.551Z, where the ZigZag stays
+ * under 2^42, fewer near 1970, 7 or more outside that range, and exact, since a Date
+ * holds nothing finer than a millisecond. Delegated to `IntSchema` rather than to
+ * `writer.varuint` directly because the ZigZag of a date near either end of the range
+ * leaves the safe-integer range, and that class already has the BigInt tail for it.
  *
  * Invalid Date is refused: its time value is NaN, which no integer holds.
  */

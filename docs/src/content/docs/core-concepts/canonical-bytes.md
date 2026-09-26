@@ -1,9 +1,9 @@
 ---
 title: Canonical bytes
-description: Every supported value has exactly one encoding, with one documented exception for low-level NaN values.
+description: Every supported value has exactly one encoding, with one documented exception for NaN values.
 ---
 
-For any value a validator-backed schema accepts, there is exactly one valid encoding. Field order, enum order, integer spelling, and byte order are all derived from the schema. None of them is configurable.
+For any value a validator-backed schema accepts, `NaN` aside, there is exactly one valid encoding. Field order, enum order, integer spelling, and byte order are all derived from the schema. None of them is configurable.
 
 ## Field order is derived
 
@@ -52,7 +52,7 @@ The decoder rejects overlong varints. `1` must be `0x01`, never `0x81 0x00`. Thi
 
 ## What canonical does not cover
 
-- **Floats**: `-0` and `0` are different byte strings. Validator-backed schemas refuse `NaN`. The low-level `m.float32()` and `m.float64()` accept it, and several NaN bit patterns decode without error. Do not use low-level NaN values for content addressing.
+- **Floats**: `-0` and `0` are different byte strings. The number schemas of Zod, Valibot and ArkType all refuse `NaN`. A dynamic value such as `z.any()` accepts it, and so do the low-level `m.float32()` and `m.float64()`. Through any of those, several NaN bit patterns decode without error. Do not use NaN values for content addressing.
 - **String normalization**: `"é"` as one code point and as `e` plus a combining accent are two different strings, and both encode faithfully. Normalize first if you need them to be equal.
 - **Decoded key order**: a decoded object has shorn's key order, not the order of your original object. It is the same *value*, so `toEqual` and `isDeepStrictEqual` pass. But `JSON.stringify(decoded) === JSON.stringify(original)` fails, because `JSON.stringify` is sensitive to key order. Compare values, not serialized strings. (We measured restoring declaration order and rejected it: it cost 6 to 15% of decode speed.)
 

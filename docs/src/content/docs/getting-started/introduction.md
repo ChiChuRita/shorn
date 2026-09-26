@@ -21,7 +21,7 @@ const bytes = encode(Person, { name: "Grace", age: 45, role: "admin" }); // 8 by
 const decoded = decode(Person, bytes);
 ```
 
-As minified JSON, that value is 40 bytes. shorn writes 8, because the field names and type markers stay in the schema instead of being repeated in every payload. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) walks from 35 down to 8 in three steps.
+As minified JSON, that value is 40 bytes. shorn writes 8, because the field names and type markers stay in the schema instead of being repeated in every payload. [Where the bytes go](/core-concepts/how-it-works/#where-the-bytes-go) walks from 40 down to 8 in three steps.
 
 In every case:
 
