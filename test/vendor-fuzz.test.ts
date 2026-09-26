@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type, scope } from "arktype";
 import { describe, expect, it } from "vitest";
 import * as v from "valibot";
@@ -981,6 +982,46 @@ describe("cross-vendor fuzz", () => {
       }
     });
   }
+});
+
+describe("wire digest over the whole matrix", () => {
+  /**
+   * Every case, through every vendor that spells it, hashed into one value: the case name,
+   * the vendor, the fingerprint signature, and the bytes of each value. `WIRE_DIGEST` in
+   * `regression.test.ts` does the same for generated `m` schemas.
+   *
+   * The comparisons above only hold the vendors of a case equal to one another, so a
+   * change that moves all of them alike, or the one vendor a case has, passes every one.
+   * This does not, and the "Vendors at latest" CI job runs it against whatever the
+   * registry serves, so a vendor release that changes a signature turns that job red.
+   * That is the point: decide whether any byte moved, then update the digest in the same
+   * commit as whatever answers it.
+   */
+  const VENDOR_WIRE_DIGEST = "938a0bed05d5d9c5";
+
+  it("hashes to a pinned value", () => {
+    const lines: string[] = [];
+    for (const c of cases) {
+      for (const [vendor, schema] of listVendors(c)) {
+        const codec = compile(schema);
+        const bytes = c.values.map((value) => [...codec.encode(value as never)].join(","));
+        lines.push(`${c.name}|${vendor}|${codec.signature}|${bytes.join(";")}`);
+      }
+    }
+    const actual = createHash("sha256").update(lines.join("\n")).digest("hex").slice(0, 16);
+    if (actual !== VENDOR_WIRE_DIGEST) {
+      // Every signature rather than a sample: a vendor release usually moves one case, and
+      // nothing here knows which. A case whose vendors now disagree also fails its own
+      // "agrees on bytes" test above, which names it; one that moved alike, or has a
+      // single vendor, shows up only in a diff of this listing against the previous one.
+      const listing = lines.map((line) => line.slice(0, line.lastIndexOf("|"))).join("\n");
+      throw new Error(
+        `Cross-vendor wire digest changed: expected ${VENDOR_WIRE_DIGEST}, got ${actual}.\n` +
+          `If this is intentional, update VENDOR_WIRE_DIGEST in this file in the same commit.\n` +
+          `Signatures, as case|vendor|signature:\n${listing}`,
+      );
+    }
+  });
 });
 
 describe("refusals are the same from every vendor", () => {
