@@ -1,6 +1,7 @@
 ---
-// Zod and shorn load only when the playground approaches the viewport.
-import { DEFAULT_PAYLOAD, DEFAULT_SCHEMA } from "./toy";
+// Zod and shorn load only when the playground approaches the viewport, and ArkType or
+// Valibot only when a reader picks one.
+import { DEFAULT_PAYLOAD, VALIDATORS } from "./toy";
 // The same two strips the hero draws, here fed by whatever you type.
 import "../styles/strips.css";
 
@@ -11,41 +12,79 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
 
 <section data-playground aria-labelledby="toy">
   <h2 id="toy">Try it</h2>
-  <p>Edit the Zod schema and the payload. The real encoder runs in your browser tab, and nothing you type leaves it.</p>
+  <p>Pick a validator, then edit its schema and the payload. The real encoder runs in your browser tab, and nothing you type leaves it.</p>
+
+  {/* Radios rather than buttons: one of three is always chosen, and arrow keys move
+      between them for free. Shown only once the script runs, since without it the
+      choice would do nothing. */}
+  <fieldset class="pick" data-pick>
+    <legend>Validator</legend>
+    {
+      Object.entries(VALIDATORS).map(([name, { label }]) => (
+        <label>
+          <input type="radio" name="toy-validator" value={name} checked={name === "zod"} />
+          {label}
+        </label>
+      ))
+    }
+  </fieldset>
 
   <div class="io">
     {/* Each box is a stack: the real text box, and over it a mirror of its text in the
         docs' colours. The mirror only takes over once the script has run (`lit` on the
         section), so without JS the box shows its own text as before. `aria-hidden`
-        because the text box already is the text. */}
-    <label>
-      Zod schema
+        because the text box already is the text.
+
+        A `<label for>` rather than a wrapping label, so the suggestion list can sit beside
+        the box without its text joining the box's accessible name.
+
+        The list after each box is its suggestions. The box keeps focus while you move
+        through them, and `aria-activedescendant` (set by the script) is how a screen
+        reader hears which one is picked. */}
+    <div class="field">
+      <label for="toy-schema" data-schema-label>Zod schema</label>
       <span class="editor"><span class="mirror" aria-hidden="true" data-mirror="ts"></span><textarea
+        id="toy-schema"
         data-schema
         aria-describedby="toy-keys"
+        aria-autocomplete="list"
+        aria-controls="toy-complete-schema"
         spellcheck="false"
         rows="8"
         autocomplete="off"
         autocorrect="off"
-        autocapitalize="off">{DEFAULT_SCHEMA}</textarea></span>
-    </label>
-    <label>
-      payload
+        autocapitalize="off">{VALIDATORS.zod.schema}</textarea><ul
+        class="complete"
+        id="toy-complete-schema"
+        role="listbox"
+        aria-label="Suggestions"
+        hidden></ul></span>
+    </div>
+    <div class="field">
+      <label for="toy-payload">payload</label>
       <span class="editor"><span class="mirror" aria-hidden="true" data-mirror="json"></span><textarea
+        id="toy-payload"
         data-payload
         aria-describedby="toy-keys"
+        aria-autocomplete="list"
+        aria-controls="toy-complete-payload"
         spellcheck="false"
         rows="8"
         autocomplete="off"
         autocorrect="off"
-        autocapitalize="off">{DEFAULT_PAYLOAD}</textarea></span>
-    </label>
+        autocapitalize="off">{DEFAULT_PAYLOAD}</textarea><ul
+        class="complete"
+        id="toy-complete-payload"
+        role="listbox"
+        aria-label="Suggestions"
+        hidden></ul></span>
+    </div>
   </div>
 
   {/* `id` so both boxes can point at it: the hint sits after the inputs in DOM order, so
       a screen reader tabbing in announced "Zod schema, edit text, multiline" and nothing
       about Escape. `aria-describedby` reads it out regardless of where it sits. */}
-  <p class="hint" id="toy-keys">Tab indents. Press Escape first to tab out of the box.</p>
+  <p class="hint" id="toy-keys">Suggestions appear as you type: arrows move, Enter or Tab picks. Otherwise Tab indents, and Escape first lets it leave the box.</p>
 
   {/* Same figure as the hero, live. Hidden until the first successful run so a failed
       parse leaves the last good drawing up rather than an empty frame.
@@ -82,7 +121,19 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
 </section>
 
 <script>
-  import { compare, measure, tokenize, type Codec } from "./toy";
+  import {
+    compare,
+    completePayload,
+    completeSchema,
+    fieldsOf,
+    measure,
+    tokenize,
+    VALIDATORS,
+    type Codec,
+    type Completion,
+    type Lib,
+    type Validator,
+  } from "./toy";
 
   const section = document.querySelector<HTMLElement>("[data-playground]");
   if (section) {
@@ -136,11 +187,131 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
       }
     };
 
+    /**
+     * The open suggestion list, if any. One at a time: only the focused box can have one.
+     *
+     * Placed at the caret by asking the mirror where it is. The mirror holds the box's
+     * text glyph for glyph and wraps identically, so a range over the character before
+     * the caret lands exactly where the box draws it, scroll included.
+     */
+    let open: { el: HTMLTextAreaElement; list: HTMLElement; hit: Completion; active: number } | null = null;
+
+    const listOf = (el: HTMLTextAreaElement) => el.nextElementSibling as HTMLElement;
+
+    const close = () => {
+      if (!open) return;
+      open.list.hidden = true;
+      open.el.removeAttribute("aria-activedescendant");
+      open = null;
+    };
+
+    const highlight = (index: number) => {
+      if (!open) return;
+      const items = open.list.children;
+      open.active = (index + items.length) % items.length;
+      for (const [i, item] of [...items].entries()) item.setAttribute("aria-selected", String(i === open.active));
+      const current = items[open.active] as HTMLElement;
+      open.el.setAttribute("aria-activedescendant", current.id);
+      current.scrollIntoView({ block: "nearest" });
+    };
+
+    const accept = (index = open?.active ?? 0) => {
+      if (!open) return;
+      const { el, hit } = open;
+      const item = hit.items[index];
+      close();
+      el.setSelectionRange(hit.from, el.selectionStart);
+      type(el, hit.call ? `${item}()` : item);
+      // Between the parentheses, where the arguments go. `z.string()` then needs only a
+      // step right, which is cheaper than typing `(` and `)` for every builder.
+      if (hit.call) el.setSelectionRange(el.selectionStart - 1, el.selectionStart - 1);
+    };
+
+    /** Where the caret is drawn, relative to the box's editor wrapper. */
+    const caretAt = (el: HTMLTextAreaElement) => {
+      const mirror = el.previousElementSibling as HTMLElement;
+      const target = Math.max(el.selectionStart - 1, 0);
+      const walker = document.createTreeWalker(mirror, NodeFilter.SHOW_TEXT);
+      let seen = 0;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const length = node.textContent!.length;
+        if (seen + length > target) {
+          const range = document.createRange();
+          range.setStart(node, target - seen);
+          range.setEnd(node, target - seen + 1);
+          const rect = [...range.getClientRects()].at(-1) ?? range.getBoundingClientRect();
+          const box = el.parentElement!.getBoundingClientRect();
+          return { left: rect.right - box.left, top: rect.bottom - box.top };
+        }
+        seen += length;
+      }
+      return { left: 14, top: 12 };
+    };
+
+    const suggest = (el: HTMLTextAreaElement) => {
+      const caret = el.selectionStart;
+      const hit =
+        caret !== el.selectionEnd
+          ? null
+          : el === schemaEl
+            ? completeSchema(el.value, caret, validator)
+            : completePayload(el.value, caret, fields);
+      if (!hit) return close();
+
+      const list = listOf(el);
+      if (open && open.el !== el) close();
+      list.replaceChildren(
+        ...hit.items.map((label, i) => {
+          const item = document.createElement("li");
+          item.id = `${list.id}-${i}`;
+          item.setAttribute("role", "option");
+          item.textContent = label;
+          // `mousedown`, not `click`: a click would blur the box first and close the list.
+          item.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            accept(i);
+          });
+          return item;
+        }),
+      );
+      list.hidden = false;
+      open = { el, list, hit, active: 0 };
+      highlight(0);
+
+      // Below the caret, pulled back in if it would run past the box's right edge.
+      const { left, top } = caretAt(el);
+      const room = el.parentElement!.clientWidth - list.offsetWidth;
+      list.style.left = `${Math.max(0, Math.min(left, room))}px`;
+      list.style.top = `${top + 2}px`;
+    };
+
     // Trapping Tab inside a text box strands keyboard users, so Escape releases it: the
     // next Tab then moves focus as usual. That pairing is the accessible version of this
     // affordance, and the hint above the box says so.
     const onKeydown = (event: KeyboardEvent) => {
       const el = event.currentTarget as HTMLTextAreaElement;
+      // An open list takes the keys first, so Escape closes it rather than leaving the
+      // box, and Tab picks rather than indents.
+      if (open?.el === el) {
+        const plain = !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          highlight(open.active + (event.key === "ArrowDown" ? 1 : -1));
+          return;
+        }
+        if ((event.key === "Enter" || event.key === "Tab") && plain) {
+          event.preventDefault();
+          accept();
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          close();
+          return;
+        }
+        // The caret is about to move somewhere the list was not computed for.
+        if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) close();
+      }
       if (event.key === "Escape") {
         el.blur();
         return;
@@ -214,25 +385,56 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
       mirror.scrollLeft = el.scrollLeft;
     };
 
-    let deps: ReturnType<typeof load> | null = null;
+    /** Load once, but forget a failure, or one network blip would fail every retry too. */
+    const memo = <T,>(load: () => Promise<T>) => {
+      let p: Promise<T> | null = null;
+      return () =>
+        (p ??= load().catch((error) => {
+          p = null;
+          throw error;
+        }));
+    };
 
-    const load = () =>
-      Promise.all([import("zod"), import("@chichurita/shorn")]).then(([zod, shorn]) => ({
-        z: zod.z as unknown,
-        codec: { encode: shorn.encode, decode: shorn.decode } satisfies Codec,
-      }));
+    // One dynamic import per validator, so a reader who never leaves Zod never
+    // downloads ArkType or Valibot.
+    const libs: Record<Validator, () => Promise<Lib>> = {
+      zod: memo(() => import("zod").then((m) => ({ binding: "z", ns: m.z }))),
+      arktype: memo(() => import("arktype").then((m) => ({ binding: "type", ns: m.type }))),
+      valibot: memo(() =>
+        Promise.all([import("valibot"), import("@valibot/to-json-schema")]).then(([v, j]) => ({
+          binding: "v",
+          ns: v,
+          structure: (schema: any) => j.toStandardJsonSchema(schema),
+        })),
+      ),
+    };
+    const codec = memo(() =>
+      import("@chichurita/shorn").then((s): Codec => ({ encode: s.encode, decode: s.decode })),
+    );
+    const ready = new Set<Validator>();
+
+    let validator: Validator = "zod";
+    /** The schema text as each validator last had it, so switching back loses nothing. */
+    const drafts: Partial<Record<Validator, string>> = {};
+    /** The current schema's fields, for the payload box's suggestions. */
+    let fields = new Map<string, string[]>();
 
     const run = async () => {
+      // Read before awaiting: a switch during the load must not have this run draw the
+      // new validator's name over the old validator's result.
+      const current = validator;
       try {
-        // Inside the try: a failed dynamic import would otherwise escape, and the
-        // rejected promise cached in `deps` would keep every retry failing too.
-        const { z, codec } = await (deps ??= load()).catch((error) => {
-          deps = null;
-          throw error;
-        });
+        if (!ready.has(current)) out.textContent = `loading ${VALIDATORS[current].label}…`;
+        // Inside the try: a failed dynamic import would otherwise escape.
+        const [lib, shorn] = await Promise.all([libs[current](), codec()]);
+        ready.add(current);
+        if (current !== validator) return;
+        // Before `measure`, which throws on a half-typed payload: that is exactly when
+        // the payload box needs the field names.
+        fields = fieldsOf(lib, schemaEl.value);
         const { bytes, json, lines, jsonSize, roundTrips } = measure(
-          z,
-          codec,
+          lib,
+          shorn,
           schemaEl.value,
           payloadEl.value,
         );
@@ -289,6 +491,7 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
           roundTrips ? "Round-trips to identical bytes." : "Round-trip mismatch, please report it."
         }`;
       } catch (error) {
+        if (current !== validator) return;
         // The last good drawing stays up, dimmed, so you can see what you broke against
         // what worked. The message is the one red thing on the page.
         out.dataset.error = "";
@@ -308,9 +511,32 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
       el.addEventListener("keydown", onKeydown);
       el.addEventListener("input", fit);
       el.addEventListener("input", () => paint(el));
-      el.addEventListener("scroll", () => follow(el));
+      // After `paint`: the list is placed by measuring the mirror, so it must be current.
+      el.addEventListener("input", () => suggest(el));
+      el.addEventListener("scroll", () => {
+        follow(el);
+        // Re-placed rather than closed: a box at its height cap scrolls as you type.
+        if (open?.el === el) suggest(el);
+      });
+      el.addEventListener("blur", close);
+      el.addEventListener("pointerdown", close);
       paint(el);
     }
+
+    const label = section.querySelector<HTMLElement>("[data-schema-label]")!;
+    section.querySelector("[data-pick]")!.addEventListener("change", (event) => {
+      const next = (event.target as HTMLInputElement).value as Validator;
+      drafts[validator] = schemaEl.value;
+      validator = next;
+      fields = new Map();
+      close();
+      label.textContent = `${VALIDATORS[next].label} schema`;
+      // A switch, not an edit, so assigned directly rather than through the undo stack.
+      schemaEl.value = drafts[next] ?? VALIDATORS[next].schema;
+      paint(schemaEl);
+      fit();
+      void run();
+    });
     section.classList.add("lit");
     fit();
     // Wrapping changes with the width, so a resize changes how tall "fits" is.
@@ -358,11 +584,105 @@ const sizeResults = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/performance/
     max-width: var(--measure);
   }
 
-  label {
+  .field > label {
     display: block;
     font-family: var(--mono);
     font-size: 12px;
     color: var(--shorn-ink-3);
+  }
+
+  /* A segmented control made of radios: the input stays in the page, focusable and
+     announced, and only its dot is hidden, so the label is what you see and press. */
+  .pick {
+    display: none;
+    gap: 4px;
+    margin: 0 0 16px;
+    padding: 0;
+    border: 0;
+  }
+
+  .lit .pick {
+    display: flex;
+  }
+
+  /* Read out as the group's name, not drawn: the three names say what they are. */
+  .pick legend {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .pick label {
+    position: relative;
+    padding: 6px 12px;
+    border: 1px solid transparent;
+    border-radius: var(--shorn-radius);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--shorn-ink-3);
+    cursor: pointer;
+  }
+
+  .pick label:hover {
+    color: var(--shorn-ink);
+  }
+
+  .pick label:has(:checked) {
+    background: var(--shorn-surface);
+    border-color: var(--shorn-rule);
+    color: var(--shorn-ink);
+  }
+
+  .pick label:has(:focus-visible) {
+    outline: 2px solid var(--shorn-ink);
+    outline-offset: 2px;
+  }
+
+  .pick input {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  /* Above the mirrors (z-index 1), including the other box's when it spills over. */
+  .complete {
+    position: absolute;
+    z-index: 2;
+    min-width: 14ch;
+    max-height: 196px;
+    margin: 0;
+    padding: 4px 0;
+    overflow-y: auto;
+    list-style: none;
+    background: var(--shorn-surface);
+    border: 1px solid var(--shorn-rule);
+    border-radius: var(--shorn-radius);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--shorn-ink-2);
+  }
+
+  .complete[hidden] {
+    display: none;
+  }
+
+  /* The options are made by the script, so Astro's scoping would match none of them. */
+  .complete :global(li) {
+    padding: 2px 12px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .complete :global(li[aria-selected="true"]) {
+    background: var(--shorn-rule);
+    color: var(--shorn-ink);
   }
 
   /* Plain bordered box. */

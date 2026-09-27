@@ -2,18 +2,90 @@
 // the real validator and codec.
 
 export interface Codec {
-  encode(schema: any, value: any): Uint8Array;
-  decode(schema: any, bytes: Uint8Array): unknown;
+  encode(schema: any, value: any, structure?: any): Uint8Array;
+  decode(schema: any, bytes: Uint8Array, structure?: any): unknown;
 }
 
-export const DEFAULT_SCHEMA = `z.object({
+export type Validator = "zod" | "arktype" | "valibot";
+
+/** A loaded validator: what the schema text calls it, and how shorn reads its structure. */
+export interface Lib {
+  /** The one name the typed schema can refer to: `z`, `type`, or `v`. */
+  binding: string;
+  ns: unknown;
+  /** Valibot's JSON Schema conversion is a separate package, so shorn takes its output
+      as a third argument. Zod and ArkType carry it on the schema and need nothing. */
+  structure?: (schema: any) => unknown;
+}
+
+/**
+ * What the playground knows about each validator. The three default schemas describe
+ * the same record, so switching shows the same bytes: that is the claim the docs make
+ * for all three, and the test file checks it rather than trusting this comment.
+ *
+ * `builders` is what completion offers after `z.` or `v.`, and for ArkType, inside a
+ * definition string. Only shapes shorn can encode, as listed on Supported types, so a
+ * suggestion never leads to a refusal. Not the validators' whole API on purpose.
+ */
+export const VALIDATORS: Record<
+  Validator,
+  { label: string; binding: string; schema: string; builders: string[]; chain?: string[] }
+> = {
+  zod: {
+    label: "Zod",
+    binding: "z",
+    schema: `z.object({
   memberId: z.int().nonnegative(),
   role: z.enum(["viewer", "editor", "admin"]),
   canRead: z.boolean(),
   canWrite: z.boolean(),
   canDelete: z.boolean(),
   suspended: z.boolean(),
-})`;
+})`,
+    builders: [
+      "object", "strictObject", "looseObject", "string", "boolean", "int", "number",
+      "literal", "null", "enum", "uuid", "iso.datetime", "date", "bigint", "array",
+      "tuple", "set", "map", "record", "union", "discriminatedUnion", "optional",
+      "nullable", "lazy", "any", "unknown",
+    ],
+    // After `).`: the refinements that change the bytes, and the two wrappers.
+    chain: ["nonnegative", "length", "optional", "nullable", "catchall"],
+  },
+  arktype: {
+    label: "ArkType",
+    binding: "type",
+    schema: `type({
+  memberId: "number.integer >= 0",
+  role: "'viewer' | 'editor' | 'admin'",
+  canRead: "boolean",
+  canWrite: "boolean",
+  canDelete: "boolean",
+  suspended: "boolean",
+})`,
+    builders: [
+      "string", "boolean", "number", "number.integer", "null", "string.uuid", "Date",
+      "bigint", "unknown",
+    ],
+  },
+  valibot: {
+    label: "Valibot",
+    binding: "v",
+    schema: `v.object({
+  memberId: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  role: v.picklist(["viewer", "editor", "admin"]),
+  canRead: v.boolean(),
+  canWrite: v.boolean(),
+  canDelete: v.boolean(),
+  suspended: v.boolean(),
+})`,
+    builders: [
+      "object", "strictObject", "looseObject", "string", "boolean", "number", "integer",
+      "minValue", "literal", "null", "picklist", "uuid", "isoTimestamp", "date",
+      "bigint", "array", "length", "tuple", "tupleWithRest", "set", "map", "record",
+      "union", "variant", "optional", "nullable", "pipe", "lazy", "any", "unknown",
+    ],
+  },
+};
 
 export const DEFAULT_PAYLOAD = `{
   "memberId": 42,
@@ -25,13 +97,36 @@ export const DEFAULT_PAYLOAD = `{
 }`;
 
 // Accept either an expression or a pasted `const Name = expression` declaration.
-export function evaluate(z: unknown, src: string): unknown {
+export function evaluate(lib: Lib, src: string): unknown {
   const expression = src
     .trim()
     .replace(/^(?:export\s+)?(?:const|let|var)\s+[\w$]+\s*=\s*/, "")
     .replace(/;+$/, "");
   if (expression === "") throw new SyntaxError("Nothing to evaluate.");
-  return new Function("z", `return (${expression})`)(z);
+  return new Function(lib.binding, `return (${expression})`)(lib.ns);
+}
+
+/**
+ * The top-level fields of the schema in `src`, each with its enum members if it is an
+ * enum, for the payload box to complete. Read from the same JSON Schema shorn reads, so
+ * it is one path for all three validators. Empty rather than throwing: while the schema
+ * is half-typed there is simply nothing to suggest.
+ */
+export function fieldsOf(lib: Lib, src: string): Map<string, string[]> {
+  const fields = new Map<string, string[]>();
+  try {
+    const schema = evaluate(lib, src) as any;
+    const std = ((lib.structure ? lib.structure(schema) : schema) as any)["~standard"];
+    const doc = std.jsonSchema.input({ target: "draft-2020-12" });
+    for (const [key, prop] of Object.entries<any>(doc.properties ?? {})) {
+      // Zod and Valibot write an enum as `enum`, ArkType as an `anyOf` of `const`s.
+      const members: unknown[] = prop.enum ?? (prop.anyOf ?? prop.oneOf ?? []).map((b: any) => b.const);
+      fields.set(key, members.filter((m): m is string => typeof m === "string"));
+    }
+  } catch {
+    // Unparseable or unconvertible: no suggestions, and `run()` reports the real error.
+  }
+  return fields;
 }
 
 export function compare(shornSize: number, jsonSize: number) {
@@ -89,13 +184,16 @@ export function jsonLines(value: unknown, json: string): JsonLine[] {
   return flat === json ? lines : whole;
 }
 
-export function measure(z: unknown, codec: Codec, schemaSrc: string, payloadSrc: string) {
-  const schema = evaluate(z, schemaSrc);
-  const value = evaluate(z, payloadSrc);
-  const bytes = codec.encode(schema, value);
+export function measure(lib: Lib, codec: Codec, schemaSrc: string, payloadSrc: string) {
+  const schema = evaluate(lib, schemaSrc);
+  const value = evaluate(lib, payloadSrc);
+  // Converted once per run and passed to both calls: shorn caches the plan by the
+  // identity of the structure object, so converting twice would build it twice.
+  const structure = lib.structure?.(schema);
+  const bytes = codec.encode(schema, value, structure);
   // Byte equality rather than a deep compare: shorn decodes keys in canonical order,
   // so comparing JSON strings would report a false mismatch on key order alone.
-  const again = codec.encode(schema, codec.decode(schema, bytes));
+  const again = codec.encode(schema, codec.decode(schema, bytes, structure), structure);
   const json = JSON.stringify(value);
   return {
     bytes,
@@ -184,4 +282,87 @@ export function tokenize(src: string, lang: "ts" | "json"): Token[] {
   }
   push(src.slice(at), "plain");
   return out;
+}
+
+/** What to offer at the caret: replace `from..caret` with one of `items`. */
+export interface Completion {
+  from: number;
+  items: string[];
+  /** A builder: insert `()` after it and leave the caret between the two. */
+  call: boolean;
+}
+
+/** Keep the ones the typed prefix starts, minus an exact match, which is already done. */
+const narrow = (items: Iterable<string>, prefix: string) => {
+  const p = prefix.toLowerCase();
+  return [...items].filter((item) => item.toLowerCase().startsWith(p) && item !== prefix);
+};
+
+/**
+ * Suggestions for the schema box at `caret`, or null for none.
+ *
+ * Deliberately a few patterns rather than a parser: after `z.` or `v.`, the builders;
+ * after `).` in Zod, the refinements; and for ArkType, inside a definition string,
+ * the keywords. The tokenizer decides whether the caret sits in a string or a comment,
+ * so a `z.` inside `"..."` offers nothing, and an ArkType keyword is offered only there.
+ */
+export function completeSchema(src: string, caret: number, validator: Validator): Completion | null {
+  const before = src.slice(0, caret);
+  const { binding, builders, chain } = VALIDATORS[validator];
+  const last = tokenize(before, "ts").at(-1);
+  const inString = last?.kind === "string" && isOpen(last.text);
+  if (last?.kind === "comment") return null;
+
+  if (validator === "arktype") {
+    if (!inString) return null;
+    // `.` is part of the word here: `number.in` is a prefix of `number.integer`.
+    const prefix = /[\w$.]*$/.exec(before)![0];
+    const items = narrow(builders, prefix);
+    return items.length ? { from: caret - prefix.length, items, call: false } : null;
+  }
+  if (inString) return null;
+
+  const builder = new RegExp(`(?:^|[^\\w$.])${binding}\\.([\\w$.]*)$`).exec(before);
+  const chained = chain && /\)\s*\.([\w$]*)$/.exec(before);
+  const match = builder ?? chained;
+  if (!match) return null;
+  const [, prefix = ""] = match;
+  const items = narrow(builder ? builders : chain!, prefix);
+  return items.length ? { from: caret - prefix.length, items, call: true } : null;
+}
+
+/**
+ * Suggestions for the payload box: a field name when the caret is in a key the payload
+ * does not have yet, and an enum member when it is in the value of an enum field.
+ * `fields` comes from `fieldsOf`.
+ */
+export function completePayload(
+  src: string,
+  caret: number,
+  fields: Map<string, string[]>,
+): Completion | null {
+  const before = src.slice(0, caret);
+  const key = /[{,]\s*"([^"\\\n]*)$/.exec(before);
+  if (key) {
+    const [, prefix = ""] = key;
+    const present = new Set([...src.matchAll(/"([^"\\\n]*)"\s*:/g)].map((m) => m[1]));
+    const items = narrow(fields.keys(), prefix).filter((k) => !present.has(k));
+    return items.length ? { from: caret - prefix.length, items, call: false } : null;
+  }
+  const value = /"([^"\\\n]*)"\s*:\s*"([^"\\\n]*)$/.exec(before);
+  if (value) {
+    const [, name = "", prefix = ""] = value;
+    const items = narrow(fields.get(name) ?? [], prefix);
+    return items.length ? { from: caret - prefix.length, items, call: false } : null;
+  }
+  return null;
+}
+
+/** A string token the caret is still inside: its closing quote has not been typed. */
+function isOpen(text: string) {
+  const quote = text.charAt(0);
+  if (text.length === 1) return true;
+  // An escaped final quote does not close it: count the backslashes before it.
+  const tail = /\\*$/.exec(text.slice(0, -1))![0].length;
+  return !(text.endsWith(quote) && tail % 2 === 0);
 }
