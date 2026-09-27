@@ -5,12 +5,18 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Weekly, so "Vendors at latest" meets a vendor release within days rather than on the
+  # next push, however long that is. Off the hour, when scheduled runs queue longest.
+  schedule:
+    - cron: "23 5 * * 1"
 
 permissions:
   contents: read
 
+# Keyed by event as well as ref: a scheduled run is on main, so without the event name it
+# would cancel a push run in progress there, or be cancelled by one.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 # Actions are pinned to commit SHAs. A major tag like @v4 moves, and a compromised
@@ -60,6 +66,26 @@ jobs:
       - run: pnpm ls zod valibot arktype @valibot/to-json-schema --depth 0
       - run: pnpm test
 
+  vendors-floor:
+    # The other end of the same promise. The README and the installation page each name a
+    # lowest supported version, and nothing else in CI installs one, so this pins every
+    # vendor at its floor and runs the suite. Valibot's is the lowest release that the
+    # lockfile's @valibot/to-json-schema accepts as a peer, since that converter is how
+    # Valibot reaches shorn at all. Raise a pin here in the same change that moves a floor.
+    name: Vendors at floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm add -w -D zod@4.2.0 arktype@2.1.28 valibot@1.5.0
+      - run: pnpm ls zod valibot arktype @valibot/to-json-schema --depth 0
+      - run: pnpm test
+
   engines-floor:
     # `engines` says Node 20, and a floor CI cannot exercise is a claim rather than
     # a fact. pnpm 11 needs Node 22.13 to install, so the build runs on 22 and the
@@ -93,9 +119,76 @@ jobs:
             console.log("Node", process.version, "ok");
           '
 
+  bun:
+    # The build is platform-neutral ESM, and the library looks two runtime facilities up
+    # rather than importing them: `Buffer.prototype.utf8Slice` and
+    # `String.prototype.isWellFormed`. Bun and Deno provide both through compatibility
+    # layers of their own, so each gets the floor job's treatment: built on Node, then the
+    # same round trip on the runtime's latest release.
+    name: Built artifact on Bun
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+      - name: Round-trip on Bun
+        run: |
+          bun --eval '
+            import { m } from "./dist/index.js";
+            const s = m.object({ id: m.uint(), name: m.string(), tags: m.array(m.string()) });
+            const value = { id: 7, name: "Ada", tags: ["x", "y"] };
+            const got = s.decode(s.encode(value));
+            if (JSON.stringify(got) !== JSON.stringify(value)) throw new Error("round-trip mismatch");
+            try { m.uint().encode(-1); throw new Error("expected a throw"); } catch (e) {
+              if (e.name !== "EncodeError") throw e;
+            }
+            console.log("Bun", Bun.version, "ok");
+          '
+
+  deno:
+    # As the Bun job, under Deno.
+    name: Built artifact on Deno
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: 2.x
+      - name: Round-trip on Deno
+        run: |
+          deno eval '
+            import { m } from "./dist/index.js";
+            const s = m.object({ id: m.uint(), name: m.string(), tags: m.array(m.string()) });
+            const value = { id: 7, name: "Ada", tags: ["x", "y"] };
+            const got = s.decode(s.encode(value));
+            if (JSON.stringify(got) !== JSON.stringify(value)) throw new Error("round-trip mismatch");
+            try { m.uint().encode(-1); throw new Error("expected a throw"); } catch (e) {
+              if (e.name !== "EncodeError") throw e;
+            }
+            console.log("Deno", Deno.version.deno, "ok");
+          '
+
   soak:
-    # The deep property run: 50k generated schemas against every invariant. Too slow
-    # for `pnpm check` on every save, cheap enough to run on every push.
+    # The deep property run: 50k generated schemas against every invariant, through `m` and
+    # through `compile`. Too slow for `pnpm check` on every save, cheap enough to run on
+    # every push. A push run draws the same seeds every time, so a red one reproduces from
+    # the commit alone; the weekly run offsets them by its run id and explores cases no run
+    # has drawn. Every failure names its seed, and the titles name the offset.
     name: Property soak
     runs-on: ubuntu-latest
     steps:
@@ -106,4 +199,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:soak
+      - name: pnpm test:soak
+        # Below a million: the suites multiply each seed by a constant, and the product has
+        # to stay exact, which a raw run id would not.
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            export SHORN_PROPERTY_SEED=$((GITHUB_RUN_ID % 1000000))
+            echo "SHORN_PROPERTY_SEED=$SHORN_PROPERTY_SEED"
+          fi
+          pnpm test:soak

@@ -26,6 +26,21 @@ jobs:
     name: Publish to npm
     runs-on: ubuntu-latest
     steps:
+      # First, before anything is installed or run. A manual run dispatched from a branch
+      # would otherwise publish whatever version that branch's package.json names, with no
+      # tag marking the commit. A v* tag passes whether it was pushed or the run was
+      # dispatched on it, which is how a failed publish is retried. A shell pattern rather
+      # than `startsWith`, which ignores case.
+      - name: Only a v* tag publishes
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) echo "releasing from $GITHUB_REF" ;;
+            *)
+              echo "::error::A release runs only on a v* tag, not on $GITHUB_REF. To retry one, dispatch this workflow on its tag."
+              exit 1
+              ;;
+          esac
+
       # Pinned to commit SHAs, not major tags. Everything that runs in this job runs
       # one step before a publish signed with its OIDC identity, so a moved upstream
       # tag here would mean an artifact under this package's name with valid
@@ -67,9 +82,9 @@ jobs:
 
       # The tag says which version this is meant to be. If package.json disagrees, the
       # tag was cut by hand instead of by `npm version` and something is wrong, so better
-      # to stop here than to publish a version nobody asked for.
+      # to stop here than to publish a version nobody asked for. Every run that gets this
+      # far is on a tag, so this runs every time.
       - name: Tag must match package.json
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           PKG="$(node -p "require('./package.json').version")"

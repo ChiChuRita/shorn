@@ -1,7 +1,8 @@
 import { runInNewContext } from "node:vm";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ObjectSchema } from "../src/core.js";
 import { DecodeError, EncodeError, encodeInto, m, Writer } from "../src/index.js";
+import { buildUnderCsp } from "./csp.js";
 
 /**
  * `Writer`'s buffer and offset, which are `private` to callers and erased at runtime.
@@ -180,6 +181,11 @@ describe("shorn core", () => {
     }
   });
 
+  // Bug: the U+FFFD re-decode goes through a TextDecoder that strips a leading U+FEFF.
+  it.fails("keeps a leading U+FEFF in a string that also holds U+FFFD", () => {
+    expect(m.string().decode(m.string().encode("\uFEFF\uFFFD"))).toBe("\uFEFF\uFFFD");
+  });
+
   it("rejects unpaired UTF-16 surrogates instead of changing the string", () => {
     expect(() => m.string().encode("\ud800")).toThrow(/unpaired surrogate/);
     expect(() => m.string().encode("\udc00")).toThrow(/unpaired surrogate/);
@@ -285,6 +291,25 @@ describe("shorn core", () => {
         /Invalid variable-length integer/,
       );
     }
+  });
+
+  it("refuses to encode an array the decoder would refuse, and only that", () => {
+    // The decoder stops at a million elements, so the encoder has to stop there too, or it
+    // writes a payload no reader will accept. Both sides of the limit, so the two halves
+    // cannot drift apart by one.
+    const schema = m.array(m.uint());
+    const atLimit = new Array<number>(1_000_000).fill(0);
+    expect(schema.decode(schema.encode(atLimit))).toHaveLength(1_000_000);
+    // Caught once rather than asserted twice: every refusal walks the million elements
+    // looking for one to blame, and the exact message says it found none.
+    let thrown: unknown;
+    try {
+      schema.encode([...atLimit, 0]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(EncodeError);
+    expect((thrown as EncodeError).message).toBe("Array is too large");
   });
 
   it("bounds the slots a fixed-count array of zero-width elements can allocate", () => {
@@ -660,25 +685,11 @@ describe("shorn core", () => {
     });
   });
 
-  // An object schema with no optionals compiles its record decoder with
-  // `new Function`, so a Content Security Policy without `unsafe-eval` sends
-  // every such schema down the interpreted path instead. That path is now
-  // unreachable in a normal run and would rot silently without this.
+  // An object schema compiles its record encoder and decoder with `new Function`, so a
+  // Content Security Policy without `unsafe-eval` sends every one down the interpreted
+  // path instead. That path is unreachable in a normal run and would rot silently
+  // without this.
   describe("without new Function, as under a strict CSP", () => {
-    function buildUnderCsp<T>(build: () => T): T {
-      const realFunction = globalThis.Function;
-      globalThis.Function = new Proxy(realFunction, {
-        construct() {
-          throw new EvalError("Refused to evaluate a string as JavaScript");
-        },
-      }) as FunctionConstructor;
-      try {
-        return build();
-      } finally {
-        globalThis.Function = realFunction;
-      }
-    }
-
     const shape = () =>
       m.object({
         active: m.boolean(),
@@ -1054,5 +1065,145 @@ describe("Date, bigint, Set and Map", () => {
       },
     });
     expect(schema.decode(schema.encode(set)).size).toBe(1);
+  });
+
+  it("refuses a Set that an element getter shrinks mid-encode", () => {
+    // The mirror of the case above. The count is written first, so a Set that loses an
+    // element partway through leaves a payload one element short of what it declares,
+    // which would decode as a truncated one or swallow the next field's bytes.
+    const schema = m.set(m.object({ n: m.uint() }));
+    const shrinking = () => {
+      const second = { n: 2 };
+      const set = new Set<{ n: number }>([
+        {
+          get n() {
+            set.delete(second);
+            return 1;
+          },
+        },
+        second,
+      ]);
+      return set;
+    };
+    expect(() => schema.encode(shrinking())).toThrow(EncodeError);
+    expect(() => schema.encode(shrinking())).toThrow("Set changed size during encode");
+  });
+
+  it("refuses to encode a Set past the collection limit", () => {
+    // The decoder refuses a count over a million for a Set as for an array, so a larger
+    // Set has to be refused before it is written.
+    const set = new Set(Array.from({ length: 1_000_001 }, (_, index) => index));
+    let thrown: unknown;
+    try {
+      m.set(m.uint()).encode(set);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(EncodeError);
+    expect((thrown as EncodeError).message).toBe("Set is too large");
+  });
+});
+
+// A browser, a worker, or Deno without its Node shim has no `Buffer.prototype.utf8Slice`,
+// so strings decode through `TextDecoder` alone; a runtime older than
+// `String.prototype.isWellFormed` checks for lone surrogates with a regex instead. Both
+// are chosen once, when the module loads, so a Node run never reaches either. This loads
+// a second copy of the library with both missing for the length of the import.
+describe("without Buffer or String.prototype.isWellFormed, as in a browser", () => {
+  let fresh: typeof import("../src/index.js");
+
+  beforeAll(async () => {
+    const isWellFormed = Object.getOwnPropertyDescriptor(String.prototype, "isWellFormed");
+    // Hidden rather than removed. vite-node, which loads the copy, calls `Buffer.from` to
+    // attach a source map to every module it runs, and with the global gone the worker ran
+    // out of memory. The library reads `Buffer.prototype.utf8Slice` and nothing else, so an
+    // empty `prototype` leaves it exactly where a missing `Buffer` would.
+    vi.stubGlobal(
+      "Buffer",
+      new Proxy(Buffer, {
+        get: (target, key, receiver) =>
+          key === "prototype" ? {} : Reflect.get(target, key, receiver),
+      }),
+    );
+    delete (String.prototype as { isWellFormed?: unknown }).isWellFormed;
+    try {
+      vi.resetModules();
+      fresh = await import("../src/index.js");
+    } finally {
+      vi.unstubAllGlobals();
+      if (isWellFormed !== undefined) {
+        Object.defineProperty(String.prototype, "isWellFormed", isWellFormed);
+      }
+    }
+  });
+
+  it("really runs on the two fallbacks, not on what Node provides", () => {
+    // Without this, a stub that failed to take would leave every test below passing
+    // against the Node paths. On Node a well-formed non-ASCII string never reaches
+    // `TextDecoder`, and the surrogate check calls the native method.
+    const decode = vi.spyOn(TextDecoder.prototype, "decode");
+    const wellFormed = vi.spyOn(
+      String.prototype as unknown as { isWellFormed(): boolean },
+      "isWellFormed",
+    );
+    try {
+      const value = "héllo wörld";
+      fresh.m.string().decode(fresh.m.string().encode(value));
+      expect(decode).toHaveBeenCalled();
+      expect(wellFormed).not.toHaveBeenCalled();
+
+      decode.mockClear();
+      m.string().decode(m.string().encode(value));
+      expect(decode).not.toHaveBeenCalled();
+      expect(wellFormed).toHaveBeenCalled();
+    } finally {
+      decode.mockRestore();
+      wellFormed.mockRestore();
+    }
+  });
+
+  it("round-trips ASCII, non-ASCII, surrogate pairs and U+FFFD", () => {
+    const string = fresh.m.string();
+    for (const value of [
+      "",
+      "hi",
+      "x".repeat(200),
+      "héllo",
+      "Grüße 👋 राहुल",
+      "\u{1F600}\u{10FFFF}",
+      "\uFFFD",
+      `a\uFFFDb${"\uFFFD".repeat(40)}`,
+    ]) {
+      expect(string.decode(string.encode(value))).toBe(value);
+      // The same bytes the Node path writes, which is what lets either read the other.
+      expect([...string.encode(value)]).toEqual([...m.string().encode(value)]);
+    }
+  });
+
+  it("refuses malformed UTF-8 rather than substituting a replacement character", () => {
+    for (const bad of [
+      [0xff],
+      [0x61, 0xff, 0x62],
+      [0xc3], // truncated two-byte sequence
+      [0xe2, 0x82], // truncated three-byte sequence
+      [0xed, 0xa0, 0x80], // surrogate half encoded as UTF-8
+      [0xc0, 0x80], // overlong NUL
+    ]) {
+      const payload = new Uint8Array([bad.length, ...bad]);
+      expect(() => fresh.m.string().decode(payload)).toThrow(fresh.DecodeError);
+      expect(() => fresh.m.string().decode(payload)).toThrow(/Invalid UTF-8/);
+    }
+  });
+
+  it("refuses a lone surrogate, alone, paired wrongly, or after a long ASCII run", () => {
+    for (const value of ["\ud800", "\udc00", "\udc00\ud800", `${"a".repeat(100)}\ud800`]) {
+      expect(() => fresh.m.string().encode(value)).toThrow(fresh.EncodeError);
+      expect(() => fresh.m.string().encode(value)).toThrow(/unpaired surrogate/);
+    }
+  });
+
+  // Bug: TextDecoder strips a leading U+FEFF by default, and here every string goes through it.
+  it.fails("keeps a leading U+FEFF", () => {
+    expect(fresh.m.string().decode(fresh.m.string().encode("\uFEFFabc"))).toBe("\uFEFFabc");
   });
 });

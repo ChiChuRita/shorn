@@ -18,11 +18,11 @@ git push --follow-tags          # this is the publish
 gh run list --limit 3           # confirm the Release run went green
 ```
 
-**Do not run `pnpm release` or `npm publish`.** The `release` script predates the workflow
-and survives only for a registry outage. Publishing from a laptop produces an artifact with
-no provenance, and without credentials it fails as **`E404` on the `PUT`**, which reads as
-"this package does not exist" and sends you hunting for the wrong problem. `npm whoami`
-returning 401 is the honest signal that you have no publish auth, and you do not need any.
+**Do not run `npm publish`.** A publish from a laptop is for a registry outage only. It
+produces an artifact with no provenance, and without credentials it fails as **`E404` on
+the `PUT`**, which reads as "this package does not exist" and sends you hunting for the
+wrong problem. `npm whoami` returning 401 is the honest signal that you have no publish
+auth, and you do not need any.
 
 Never hand-edit the `version` field in `package.json` or an existing `CHANGELOG.md` entry.
 `npm version` owns the first. The second is written once, before the bump.

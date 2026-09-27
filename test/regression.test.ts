@@ -10,6 +10,7 @@ import {
   type Schema,
 } from "../src/index.js";
 import * as shorn from "../src/index.js";
+import { buildUnderCsp } from "./csp.js";
 import { mulberry32, schemaGen } from "./generate.js";
 
 /**
@@ -33,36 +34,10 @@ describe("wire format digest over generated shapes", () => {
    * 2,000 seeded (schema, value) pairs hashed into one string.
    *
    * Deliberately not a per-case snapshot: the point is a single value that changes
-   * if and only if some byte, somewhere, changed. `WIRE_DIGEST_SAMPLE` below turns
-   * a failure into a diffable list, so the digest costs nothing to diagnose.
+   * if and only if some byte, somewhere, changed. The failure prints the first few
+   * encodings, so the digest costs nothing to diagnose.
    */
   const WIRE_DIGEST = "b6072d833e3ee48a";
-
-  function corpus(count: number): string[] {
-    const lines: string[] = [];
-    for (let seed = 1; seed <= count; seed++) {
-      const rng = mulberry32(seed * 2_654_435_761);
-      const gen = schemaGen(rng, 4);
-      const value = gen.sample(rng);
-      lines.push(`${seed}:${[...gen.schema.encode(value)].join(",")}`);
-    }
-    return lines;
-  }
-
-  it("hashes to a pinned value", () => {
-    const lines = corpus(2000);
-    const actual = digest(lines.join("\n"));
-    if (actual !== WIRE_DIGEST) {
-      // Name the first divergence rather than only the hash, so the failure says
-      // which shape moved instead of "some byte changed somewhere".
-      const sample = lines.slice(0, 5).join("\n  ");
-      throw new Error(
-        `Wire format digest changed: expected ${WIRE_DIGEST}, got ${actual}.\n` +
-          `If this is intentional, update WIRE_DIGEST in this file in the same commit.\n` +
-          `First encodings for reference:\n  ${sample}`,
-      );
-    }
-  });
 
   /**
    * The same corpus with Date, bigint, Set and Map drawn too. A second digest rather
@@ -72,24 +47,59 @@ describe("wire format digest over generated shapes", () => {
    */
   const RICH_WIRE_DIGEST = "1a10b804ac2078d6";
 
-  it("hashes to a pinned value with rich types included", () => {
-    const lines: string[] = [];
-    for (let seed = 1; seed <= 2000; seed++) {
+  /** `count` seeded pairs, each schema kept beside its value's bytes. */
+  function corpus(count: number, rich = false) {
+    const cases: { seed: number; schema: Schema<unknown>; bytes: Uint8Array }[] = [];
+    for (let seed = 1; seed <= count; seed++) {
       const rng = mulberry32(seed * 2_654_435_761);
-      const gen = schemaGen(rng, 4, false, true);
+      const gen = schemaGen(rng, 4, false, rich);
       const value = gen.sample(rng);
-      lines.push(`${seed}:${[...gen.schema.encode(value)].join(",")}`);
+      cases.push({ seed, schema: gen.schema, bytes: gen.schema.encode(value) });
     }
+    return cases;
+  }
+
+  function expectDigest(name: string, expected: string, cases: ReturnType<typeof corpus>): void {
+    const lines = cases.map(({ seed, bytes }) => `${seed}:${[...bytes].join(",")}`);
     const actual = digest(lines.join("\n"));
-    if (actual !== RICH_WIRE_DIGEST) {
+    if (actual !== expected) {
+      // Name the first divergence rather than only the hash, so the failure says
+      // which shape moved instead of "some byte changed somewhere".
       const sample = lines.slice(0, 5).join("\n  ");
       throw new Error(
-        `Rich wire format digest changed: expected ${RICH_WIRE_DIGEST}, got ${actual}.\n` +
-          `If this is intentional, update RICH_WIRE_DIGEST in this file in the same commit.\n` +
+        `${name} changed: expected ${expected}, got ${actual}.\n` +
+          `If this is intentional, update ${name} in this file in the same commit.\n` +
           `First encodings for reference:\n  ${sample}`,
       );
     }
+  }
+
+  it("hashes to a pinned value", () => {
+    expectDigest("WIRE_DIGEST", WIRE_DIGEST, corpus(2000));
   });
+
+  it("hashes to a pinned value with rich types included", () => {
+    expectDigest("RICH_WIRE_DIGEST", RICH_WIRE_DIGEST, corpus(2000, true));
+  });
+
+  // Both corpora again with `new Function` refused, as a Content Security Policy without
+  // `unsafe-eval` refuses it, so every object schema in them encodes and decodes through
+  // the interpreted fallback. `core.test.ts` holds that path to the generated one on a few
+  // chosen shapes; this holds it to the same two digests over four thousand generated ones.
+  // Re-encoding what the fallback decoded is the round trip, since only bytes compare NaN
+  // and -0 exactly: an object it misread would not write the same payload back.
+  for (const [name, expected, rich] of [
+    ["WIRE_DIGEST", WIRE_DIGEST, false],
+    ["RICH_WIRE_DIGEST", RICH_WIRE_DIGEST, true],
+  ] as const) {
+    it(`hashes to ${name} with code generation refused, and decodes back through the fallback`, () => {
+      const cases = buildUnderCsp(() => corpus(2000, rich));
+      expectDigest(name, expected, cases);
+      for (const { seed, schema, bytes } of cases) {
+        expect([...schema.encode(schema.decode(bytes))], `seed ${seed}`).toEqual([...bytes]);
+      }
+    });
+  }
 });
 
 describe("payload size is pinned per documented schema", () => {

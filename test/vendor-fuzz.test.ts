@@ -1,25 +1,28 @@
+import { createHash } from "node:crypto";
 import { type, scope } from "arktype";
 import { describe, expect, it } from "vitest";
 import * as v from "valibot";
-import { toStandardJsonSchema } from "@valibot/to-json-schema";
+import { toJsonSchema, toStandardJsonSchema } from "@valibot/to-json-schema";
 import { z } from "zod";
 import {
   DecodeError,
   EncodeError,
   compile,
   type EncodableStandardSchema,
+  valibotOverride,
 } from "../src/index.js";
 import { containsNaN } from "./generate.js";
 
 /**
  * The cross-vendor fuzz matrix.
  *
- * `vendors.test.ts` proves one case per wire shape agrees across vendors; this file is
- * the wide version: every shape a vendor can spell, especially the ones whose bytes
- * depend on the payload rather than on the schema (unions, `any`, records, recursion) , 
- * crossed with the decoder contract from `fuzz.test.ts`: truncate it, extend it, flip
- * every byte, and it either throws a `DecodeError` or decodes to something that
- * re-encodes to exactly those bytes.
+ * Each vendor spells the same JSON Schema its own way (valibot through
+ * @valibot/to-json-schema, arktype through its own emitter), so a shape can compile from
+ * zod's output and still fail from another's. This is every shape a vendor can spell,
+ * especially the ones whose bytes depend on the payload rather than on the schema
+ * (unions, `any`, records, recursion), crossed with the decoder contract from
+ * `fuzz.test.ts`: truncate it, extend it, flip every byte, and it either throws a
+ * `DecodeError` or decodes to something that re-encodes to exactly those bytes.
  *
  * A missing vendor on a case means that vendor cannot spell the shape, and the comment
  * on the case says which and why. Do not fill one in without checking it emits the same
@@ -155,6 +158,16 @@ const cases: readonly Case[] = [
     arktype: type("string.uuid"),
     values: [UUID, "00000000-0000-0000-0000-000000000000"],
     invalid: ["not-a-uuid", ""],
+  },
+  {
+    // ArkType spells `string.uuid` as three branches and adds `null` as a fourth, so this
+    // reaches the nullable end of the uuid collapse, which the case above cannot.
+    name: "nullable uuid",
+    zod: z.uuid().nullable(),
+    valibot: val(v.nullable(v.pipe(v.string(), v.uuid()))),
+    arktype: type("string.uuid | null"),
+    values: [UUID, null, "00000000-0000-0000-0000-000000000000"],
+    invalid: ["not-a-uuid", undefined],
   },
   {
     name: "any",
@@ -419,6 +432,23 @@ const cases: readonly Case[] = [
       meta: { n: "number.integer", inner: { f: "boolean" } },
     }),
     values: [{ user: { name: "r", tags: [] }, meta: { n: 0, inner: { f: false } } }],
+  },
+  {
+    name: "every scalar side by side in an object",
+    zod: z.object({ s: z.string(), i: z.int(), u: z.int().nonnegative(), f: z.number(), b: z.boolean() }),
+    valibot: val(v.object({ s: v.string(), i: vint, u: vuint, f: v.number(), b: v.boolean() })),
+    arktype: type({ s: "string", i: "number.integer", u: "number.integer >= 0", f: "number", b: "boolean" }),
+    values: [
+      { s: "hi", i: -3, u: 7, f: 1.5, b: true },
+      { s: "", i: 0, u: 0, f: -0.25, b: false },
+    ],
+  },
+  {
+    name: "a null field beside an int",
+    zod: z.object({ error: z.null(), n: z.int() }),
+    valibot: val(v.object({ error: v.null(), n: vint })),
+    arktype: type({ error: "null", n: "number.integer" }),
+    values: [{ error: null, n: 7 }],
   },
   {
     name: "object whose only field is a literal, so it writes no bytes",
@@ -954,6 +984,46 @@ describe("cross-vendor fuzz", () => {
   }
 });
 
+describe("wire digest over the whole matrix", () => {
+  /**
+   * Every case, through every vendor that spells it, hashed into one value: the case name,
+   * the vendor, the fingerprint signature, and the bytes of each value. `WIRE_DIGEST` in
+   * `regression.test.ts` does the same for generated `m` schemas.
+   *
+   * The comparisons above only hold the vendors of a case equal to one another, so a
+   * change that moves all of them alike, or the one vendor a case has, passes every one.
+   * This does not, and the "Vendors at latest" CI job runs it against whatever the
+   * registry serves, so a vendor release that changes a signature turns that job red.
+   * That is the point: decide whether any byte moved, then update the digest in the same
+   * commit as whatever answers it.
+   */
+  const VENDOR_WIRE_DIGEST = "938a0bed05d5d9c5";
+
+  it("hashes to a pinned value", () => {
+    const lines: string[] = [];
+    for (const c of cases) {
+      for (const [vendor, schema] of listVendors(c)) {
+        const codec = compile(schema);
+        const bytes = c.values.map((value) => [...codec.encode(value as never)].join(","));
+        lines.push(`${c.name}|${vendor}|${codec.signature}|${bytes.join(";")}`);
+      }
+    }
+    const actual = createHash("sha256").update(lines.join("\n")).digest("hex").slice(0, 16);
+    if (actual !== VENDOR_WIRE_DIGEST) {
+      // Every signature rather than a sample: a vendor release usually moves one case, and
+      // nothing here knows which. A case whose vendors now disagree also fails its own
+      // "agrees on bytes" test above, which names it; one that moved alike, or has a
+      // single vendor, shows up only in a diff of this listing against the previous one.
+      const listing = lines.map((line) => line.slice(0, line.lastIndexOf("|"))).join("\n");
+      throw new Error(
+        `Cross-vendor wire digest changed: expected ${VENDOR_WIRE_DIGEST}, got ${actual}.\n` +
+          `If this is intentional, update VENDOR_WIRE_DIGEST in this file in the same commit.\n` +
+          `Signatures, as case|vendor|signature:\n${listing}`,
+      );
+    }
+  });
+});
+
 describe("refusals are the same from every vendor", () => {
   const refusals: ReadonlyArray<{
     readonly name: string;
@@ -1022,38 +1092,114 @@ describe("refusals are the same from every vendor", () => {
   }
 });
 
+// The rich types cannot join `cases` above: Valibot reaches them only through the raw
+// converter and a plain structure, not through `toStandardJsonSchema`, and ArkType has
+// element types for none of its Set or Map. So each vendor gets the pairing it supports,
+// and the bytes are still held equal across all of them.
+describe("Date, bigint, Set and Map agree across vendors", () => {
+  const when = new Date("2026-09-03T12:00:00.000Z");
+  const valibotRich = (schema: v.GenericSchema) =>
+    toJsonSchema(schema, { overrideSchema: valibotOverride(toJsonSchema) });
+
+  it("Zod and ArkType write the same bytes for a Date and a bigint", () => {
+    const value = { when, id: 5n };
+    const zod = compile(z.object({ when: z.date(), id: z.bigint() }));
+    const ark = compile(type({ when: "Date", id: "bigint" }));
+    expect([...ark.encode(value)]).toEqual([...zod.encode(value)]);
+    expect(ark.decode(ark.encode(value))).toEqual(value);
+  });
+
+  it("Valibot reaches all four through valibotOverride and a plain structure", () => {
+    const schema = v.object({
+      when: v.date(),
+      id: v.bigint(),
+      tags: v.set(v.string()),
+      scores: v.map(v.string(), v.number()),
+      nested: v.set(v.set(v.string())),
+    });
+    const codec = compile(schema, valibotRich(schema));
+    const value = {
+      when,
+      id: -7n,
+      tags: new Set(["a"]),
+      scores: new Map([["k", 1.5]]),
+      nested: new Set([new Set(["x"])]),
+    };
+    expect(codec.decode(codec.encode(value))).toEqual(value);
+    const zod = compile(
+      z.object({
+        when: z.date(),
+        id: z.bigint(),
+        tags: z.set(z.string()),
+        scores: z.map(z.string(), z.number()),
+        nested: z.set(z.set(z.string())),
+      }),
+    );
+    expect([...codec.encode(value)]).toEqual([...zod.encode(value)]);
+  });
+
+  it("refuses a Valibot lazy type reached through a Set as a refusal, not a stack overflow", () => {
+    const Node: v.GenericSchema = v.object({
+      get kids() {
+        return v.set(v.lazy(() => Node));
+      },
+    });
+    expect(() => valibotRich(Node)).toThrow(/recursive type inside a Set or Map/);
+  });
+
+  it("refuses ArkType's untyped Set and Map by name", () => {
+    expect(() => compile(type({ s: "Set" }))).toThrow(/ArkType's Set carries no element type/);
+    expect(() => compile(type({ m: "Map" }))).toThrow(/ArkType's Map carries no element type/);
+  });
+
+  it("keeps Valibot's rich types refused without the override, with the remedy appended", () => {
+    const schema = v.object({ d: v.date() });
+    expect(() => compile(schema, toStandardJsonSchema(schema))).toThrow(/convert it at the edge/);
+  });
+});
+
 /**
- * Known gaps, pinned with `it.fails` so the suite stays green today and turns red the
- * moment one is fixed: at which point flip the test to a normal `it`. Each one is a
- * disagreement between vendors over a shape shorn otherwise supports.
+ * Disagreements between vendors that have been fixed, each a shape that compiled from one
+ * validator and not another, or compiled to a different fingerprint. Kept as named pins
+ * beside the matrix cases that also cover them, so a regression names the bug it brings
+ * back rather than one case among hundreds.
  */
-describe("known gaps", () => {
+describe("fixed vendor disagreements", () => {
   it("compiles an arktype array of unknown, which carries no `items`", () => {
-    // `type("unknown[]")` emits a bare `{type:"array"}`. JSON Schema leaves the items
-    // unconstrained there, which is what `any` already means to shorn: zod and valibot
-    // both write `items: {}` and compile. Refusing it makes `unknown[]` vendor-specific.
+    // `type("unknown[]")` emits a bare `{type:"array"}` where zod and valibot write
+    // `items: {}`, and it used to be refused, so `unknown[]` compiled from two vendors and
+    // not the third. Absent `items` leaves the elements unconstrained, which is what `any`
+    // already means, so it compiles to an array of dynamic values. The "array of any" case
+    // holds its bytes equal to the other two.
     const codec = compile(type("unknown[]") as unknown as EncodableStandardSchema);
     expect(codec.decode(codec.encode([1, "x"] as never))).toEqual([1, "x"]);
   });
 
+  it("gives one recursive type one fingerprint, whichever vendor wrote it", () => {
+    // zod points a `$ref` at its definition from the use site, while valibot inlines one
+    // unrolling there and refers back from inside it. The bytes were always equal and the
+    // signatures were not, so `fingerprinted()` rejected payloads it could decode, the
+    // false positive it exists to not produce. A child equal to a definition now folds onto
+    // that definition. The "recursion under an array of objects" case covers it too.
+    const zodCodec = compile(z.object({ roots: z.array(zodTree) }));
+    const valibotCodec = compile(val(v.object({ roots: v.array(valibotTree) })));
+    const value = { roots: [{ value: "a", children: [{ value: "b", children: [] }] }] };
+    expect([...valibotCodec.encode(value as never)]).toEqual([...zodCodec.encode(value as never)]);
+    expect(valibotCodec.signature).toBe(zodCodec.signature);
+  });
+});
+
+/**
+ * Known gaps, pinned with `it.fails` so the suite stays green today and turns red the
+ * moment one is fixed: at which point make it a normal `it` in the block above. Each one
+ * is a disagreement between vendors over a shape shorn otherwise supports.
+ */
+describe("known gaps", () => {
   it.fails("carries extra properties out of a valibot looseObject", () => {
     // valibot emits no `additionalProperties`, which shorn reads as a closed object, so
     // the extras a `looseObject` exists to keep are refused. Zod's `looseObject` emits
     // `additionalProperties: {}` and keeps them. One intent, two wire shapes.
     const codec = compile(val(v.looseObject({ a: v.string() })));
     expect(codec.decode(codec.encode({ a: "x", b: 1 } as never))).toEqual({ a: "x", b: 1 });
-  });
-
-  it("gives one recursive type one fingerprint, whichever vendor wrote it", () => {
-    // Same bytes, different signature: zod refs its definition from the use site while
-    // valibot inlines one unrolling there and refs from inside it. `toWireShape` folds
-    // only a *root* that duplicates a definition, so a recursive type reached through a
-    // wrapper keeps two spellings, and `fingerprinted()` then rejects bytes it can
-    // decode, which is the false positive it exists to not produce.
-    const zodCodec = compile(z.object({ roots: z.array(zodTree) }));
-    const valibotCodec = compile(val(v.object({ roots: v.array(valibotTree) })));
-    const value = { roots: [{ value: "a", children: [{ value: "b", children: [] }] }] };
-    expect([...valibotCodec.encode(value as never)]).toEqual([...zodCodec.encode(value as never)]);
-    expect(valibotCodec.signature).toBe(zodCodec.signature);
   });
 });
