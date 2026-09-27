@@ -15,6 +15,17 @@ const mdUrl = ids.has(slug) ? `${import.meta.env.BASE_URL}${slug}.md` : null;
 {/* Siblings, not children: Starlight's Head renders `starlightRoute.head` and has no
     slot, so anything passed inside it is dropped without warning. */}
 <Default {...Astro.props} />
+{/* Cascade layer order is fixed by whichever stylesheet names a layer first, and the
+    build links a shared chunk (the Starlight components the landing page imports)
+    ahead of Starlight's own CSS. That chunk names `starlight.components` and
+    `starlight.content` first, which ranked `starlight.reset` above the content layer
+    and zeroed every gap between paragraphs, code blocks, and headings. Astro puts the
+    stylesheet links after this, so declaring the order here makes it independent of
+    how the chunks are split. Same two statements Starlight and the theme ship. */}
+<style is:inline>
+  @layer starlight, nextjs;
+  @layer starlight.base, starlight.reset, starlight.core, starlight.content, starlight.components, starlight.utils;
+</style>
 {mdUrl && <link rel="alternate" type="text/markdown" href={mdUrl} title="Markdown" />}
 <link rel="alternate" type="text/markdown" href={llmsUrl} title="LLMs.txt" />
 <script is:inline>
