@@ -14,13 +14,13 @@ An esbuild-minified browser bundle for each codec API as imported. Validation li
 | @msgpack/msgpack | 21.20 KB | 5.93 KB |
 | **shorn `m`** (wire codec) | **21.19 KB** | **6.48 KB** |
 | msgpackr | 27.59 KB | 10.39 KB |
-| cbor-x | 29.24 KB | 10.86 KB |
-| shorn `compile` (validating) | 39.92 KB | 12.58 KB |
+| cbor-x | 29.61 KB | 10.99 KB |
+| shorn `compile` (validating) | 40.05 KB | 12.63 KB |
 | protobufjs/light | 89.15 KB | 26.08 KB |
 
-`@msgpack/msgpack` is the smallest measured gzipped. shorn's wire codec is 9% larger gzipped, 555 bytes, though 10 bytes smaller minified. What that 555 bytes buys is native `Date`, `bigint`, `Set` and `Map` on the `m` namespace, which no other row has. What those four builders cost on their own was not measured in this run, so no figure for them is published here.
+`@msgpack/msgpack` is the smallest measured gzipped. shorn's wire codec is 9% larger gzipped, 554 bytes, though 10 bytes smaller minified. What that 554 bytes buys is native `Date`, `bigint`, `Set` and `Map` on the `m` namespace, which no other row has. What those four builders cost on their own was not measured in this run, so no figure for them is published here.
 
-`compile` is 94% larger than `m` gzipped because it validates on encode and decode, which no other row does, and it sits about 2.2 KB over msgpackr and 1.7 KB over cbor-x, which validate nothing. Compare the row that matches what you ship.
+`compile` is 95% larger than `m` gzipped because it validates on encode and decode, which no other row does, and it sits about 2.2 KB over msgpackr and 1.6 KB over cbor-x, which validate nothing. Compare the row that matches what you ship.
 
 `avsc` needs a browser `stream` polyfill and SchemaPack needs a `buffer` polyfill, so neither has a comparable zero-polyfill result.
 
@@ -28,15 +28,15 @@ An esbuild-minified browser bundle for each codec API as imported. Validation li
 
 | import set | minified | gzip | this row adds |
 | --- | ---: | ---: | ---: |
-| `compile` | 39,925 | 12,585 | |
-| + `m` | 40,590 | 12,761 | 176 gzip |
-| + `safeEncode` / `safeDecode` | 40,889 | 12,852 | 91 gzip |
-| + `encodeAsync` / `decodeAsync` | 41,444 | 13,024 | 172 gzip |
-| + `fingerprinted` | 42,937 | 13,503 | 479 gzip |
-| + `encodeInto` | 43,582 | 13,726 | 223 gzip |
-| everything | 44,765 | 14,069 | 343 gzip |
+| `compile` | 40,050 | 12,628 | |
+| + `m` | 40,715 | 12,803 | 175 gzip |
+| + `safeEncode` / `safeDecode` | 41,014 | 12,894 | 91 gzip |
+| + `encodeAsync` / `decodeAsync` | 41,569 | 13,066 | 172 gzip |
+| + `fingerprinted` | 43,062 | 13,546 | 480 gzip |
+| + `encodeInto` | 43,707 | 13,769 | 223 gzip |
+| everything | 44,890 | 14,112 | 343 gzip |
 
-**Only code that imports a feature pays for it.** Fingerprinting is the most expensive single import at 479 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it. `valibotOverride` is in the last row only. `m` is one object, so importing it keeps all of its builders.
+**Only code that imports a feature pays for it.** Fingerprinting is the most expensive single import at 480 gzip bytes, and a bundle that never calls `fingerprinted()` never carries it. `valibotOverride` is in the last row only. `m` is one object, so importing it keeps all of its builders.
 
 These numbers grow as schema coverage grows. What each release spent, and on what, is in the [changelog](https://github.com/ChiChuRita/shorn/blob/main/CHANGELOG.md). Add the size of your validator if it is not already part of the application.
 
