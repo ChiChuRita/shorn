@@ -545,6 +545,14 @@ let pooledWriterBusy = false;
  */
 let targetWriter: Writer | undefined;
 let targetWriterBusy = false;
+/**
+ * Whether `targetWriter`'s current target is small enough to keep between calls, decided
+ * once when the target arrives. Reading `target.buffer` on every call cost a small encode
+ * a third of its time: 24 ns to 37 ns on the Person fixture, because V8 has to give a
+ * small typed array an ArrayBuffer of its own before it can return one. A view's buffer
+ * never changes, so the answer cannot go stale.
+ */
+let targetRetained = false;
 
 /**
  * `Writer`'s private fields, reached from `encodeInto` by cast. Two small methods on
@@ -598,6 +606,10 @@ export function encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, of
   if (open.buffer !== target) {
     open.buffer = target;
     open.view = undefined;
+    // Measured by its ArrayBuffer, not its own length: a 16-byte view of a 256 MB buffer
+    // held all 256 MB until the next call brought a different target. Only the pooled
+    // Writer outlives the call, so only its target is judged.
+    if (pooled) targetRetained = target.buffer.byteLength <= MAX_RETAINED_BUFFER_BYTES;
   }
   open.offset = offset;
   try {
@@ -614,9 +626,7 @@ export function encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, of
   } finally {
     // A target larger than the pool keeps, or a buffer grown past one, is let go for
     // `reset`'s reason: a one-off frame must not stay pinned to a module-level Writer.
-    // Measured by its ArrayBuffer, not its own length: a 16-byte view of a 256 MB buffer
-    // held all 256 MB here until the next call brought a different target.
-    if (open.buffer !== target || target.buffer.byteLength > MAX_RETAINED_BUFFER_BYTES) {
+    if (open.buffer !== target || !targetRetained) {
       open.buffer = new Uint8Array(0);
       open.view = undefined;
     }
