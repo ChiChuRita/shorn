@@ -83,7 +83,7 @@ shorn encodes strings, booleans, integers, floats, literals, enums, nullable val
 
 Not supported: overlapping unions, one-way transforms, streaming, and schema migration. `undefined`, symbols, `RegExp`, and class instances have no wire form, so convert those first.
 
-Against JSON bytes, encoding is up to 6.7× faster and decoding up to 13.0×, with no compressor involved. The `m` API is 6.48 KB gzip; `compile` with validation is 12.63 KB.
+Against JSON bytes, encoding is up to 6.7× faster and decoding up to 13.0×, with no compressor involved. The `m` API is 6.48 KB gzip; `compile` with validation is 12.64 KB.
 
 ## Documentation
 

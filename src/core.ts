@@ -580,7 +580,7 @@ interface OpenWriter {
  */
 export function encodeInto<T>(codec: Schema<T>, value: T, target: Uint8Array, offset = 0): number {
   // What is saved is the output array and the copy into the frame that follows it. The
-  // array alone was 39% of a small encode, 46 ns to 28 ns on the Person fixture, per the
+  // array alone was 41% of a small encode, 44 ns to 26 ns on the Person fixture, per the
   // `person encode` and `person encodeInto` rows of `bench/baseline.json`. A free function
   // rather than a method on `Schema`, for `encodeAsync`'s reason: a method is never
   // tree-shaken, and most callers hand `encode()`'s array straight to a send.
