@@ -1310,20 +1310,22 @@ function zodOverride(io: Side, converting: Set<unknown>): (context: ZodOverrideC
 }
 
 /**
- * ArkType's hook, keyed by the code it would otherwise throw for. `Set` and `Map` are
- * keywords there but carry no element type, so there is nothing to write under `items`,
- * and they are refused by name rather than encoded as empty containers.
+ * ArkType's hook, keyed by ArkType's code for a constraint JSON Schema cannot say. `Set`
+ * and `Map` are keywords there but carry no element type, so there is nothing to write
+ * under `items`, and they are refused by name rather than encoded as empty containers.
  *
  * `default` covers every code not named. Through 2.2.8 ArkType threw for those itself;
  * from 2.2.9 its Standard JSON Schema method keeps whatever part JSON Schema can say and
- * drops the rest, so `undefined` became `{}`, a postfix tuple lost its tail, and an array
- * with a property lost the property. Each compiled to a codec that could not round-trip
- * its own values. The throw is a plain Error so the caller appends the remedy and keeps it
- * as the cause, as it did for ArkType's own.
+ * drops the rest, so `undefined` became `{}` and a postfix tuple lost its tail, codecs that
+ * threw on every encode, and an array with a property or a symbol key lost it, codecs
+ * whose decode refused their own bytes. The throw is a plain Error, not an EncodeError, so the caller appends
+ * the remedy and keeps it as the cause, as it did for ArkType's own throw.
  */
 const ARKTYPE_FALLBACK = {
   default: (context: { readonly code: string; readonly unit?: unknown }) => {
-    const what = context.code === "unit" ? `unit ${String(context.unit)}` : context.code;
+    // A bigint unit reads with its suffix, so `1n` is not mistaken for the number 1.
+    const unit = typeof context.unit === "bigint" ? `${context.unit}n` : String(context.unit);
+    const what = context.code === "unit" ? `unit ${unit}` : context.code;
     throw new Error(`ArkType's ${what} has no JSON Schema form`);
   },
   date: (context: { readonly base: JsonSchema }) => ({ ...context.base, [RICH_KEYWORD]: "date" }),

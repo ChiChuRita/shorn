@@ -725,15 +725,14 @@ describe("Standard Schema adapter", () => {
         expect(() => compile(schema)).toThrow(EncodeError);
         expect(() => compile(schema)).toThrow(reason);
       }
-      // A throw the vendor makes on its own, outside any shorn hook, still gets the remedy.
-      expect(() => compile(type({ v: "undefined" }))).toThrow(/convert it at the edge/);
     });
 
     it("refuses an ArkType constraint shorn has no hook for, rather than let it degrade", () => {
       // From ArkType 2.2.9 its Standard JSON Schema method no longer throws for these: it
-      // keeps the part JSON Schema can say and drops the rest. Each one then compiled to a
-      // codec that threw on every encode, or, for the array with a property, wrote bytes
-      // without the property that its own decode refused.
+      // keeps the part JSON Schema can say and drops the rest. `undefined` and the postfix
+      // tuple then compiled to codecs that threw on every encode; the array with a property
+      // and the symbol key wrote bytes without it that their own decode refused. The
+      // predicate would round-trip, and stays refused as every earlier ArkType refused it.
       const key = Symbol("key");
       for (const schema of [
         type({ v: "undefined" }),
@@ -742,9 +741,11 @@ describe("Standard Schema adapter", () => {
         type({ [key]: "string", a: "string" }),
         type({ v: type("string").narrow((s) => s.length > 1) }),
       ]) {
-        expect(() => compile(schema as never)).toThrow(EncodeError);
-        expect(() => compile(schema as never)).toThrow(/convert it at the edge/);
+        expect(() => compile(schema)).toThrow(EncodeError);
+        expect(() => compile(schema)).toThrow(/convert it at the edge/);
       }
+      // A bigint unit keeps its suffix, so the message does not name the number 1.
+      expect(() => compile(type({ v: "1n" }))).toThrow(/^ArkType's unit 1n has no JSON Schema form/);
     });
 
     it("refuses a recursive type reached through a Set or Map element", () => {
@@ -1798,10 +1799,13 @@ describe("Standard Schema adapter", () => {
     });
 
     it("keeps the vendor's own error reachable behind a type with no wire form", () => {
-      // ArkType throws its own error for `undefined`, outside any hook shorn installs.
-      const error = thrown(() => compile(type({ when: "undefined" }) as never));
+      // Valibot's converter throws its own error for `undefined`, outside any hook shorn
+      // installs, so the remedy is appended and the original kept as the cause.
+      const Row = v.object({ when: v.undefined() });
+      const error = thrown(() => compile(Row, toStandardJsonSchema(Row)));
       expect(error.message).toMatch(/convert it at the edge/);
       expect(error.cause).toBeInstanceOf(Error);
+      expect(error.message.startsWith((error.cause as Error).message)).toBe(true);
     });
   });
 
