@@ -729,6 +729,24 @@ describe("Standard Schema adapter", () => {
       expect(() => compile(type({ v: "undefined" }))).toThrow(/convert it at the edge/);
     });
 
+    it("refuses an ArkType constraint shorn has no hook for, rather than let it degrade", () => {
+      // From ArkType 2.2.9 its Standard JSON Schema method no longer throws for these: it
+      // keeps the part JSON Schema can say and drops the rest. Each one then compiled to a
+      // codec that threw on every encode, or, for the array with a property, wrote bytes
+      // without the property that its own decode refused.
+      const key = Symbol("key");
+      for (const schema of [
+        type({ v: "undefined" }),
+        type(["string", "...", "number[]", "boolean"]),
+        type("string[]").and({ extra: "string" }),
+        type({ [key]: "string", a: "string" }),
+        type({ v: type("string").narrow((s) => s.length > 1) }),
+      ]) {
+        expect(() => compile(schema as never)).toThrow(EncodeError);
+        expect(() => compile(schema as never)).toThrow(/convert it at the edge/);
+      }
+    });
+
     it("refuses a recursive type reached through a Set or Map element", () => {
       const Node = z.object({
         get kids() {

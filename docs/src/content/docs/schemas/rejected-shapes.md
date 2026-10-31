@@ -102,7 +102,7 @@ Where the refusal comes from the validator rather than shorn, the reason is kept
 > \<the vendor's message\> (shorn has no wire form for this value; convert it at
 the edge, see Rejected Shapes)
 
-That is what Valibot's converter produces for `v.undefined()` and `v.pipe(..., v.transform(...))`, and for `v.date()`, `v.bigint()`, `v.set()` and `v.map()` when the [`valibotOverride` recipe](/validators/valibot/#rich-types) is not used. ArkType reaches it through a constraint shorn has no hook for, such as the predicate behind `"string.date"`.
+That is what Valibot's converter produces for `v.undefined()` and `v.pipe(..., v.transform(...))`, and for `v.date()`, `v.bigint()`, `v.set()` and `v.map()` when the [`valibotOverride` recipe](/validators/valibot/#rich-types) is not used. ArkType reaches it through a constraint shorn has no hook for, such as `undefined`, a tuple with elements after a variadic one, or the predicate behind `"string.date"`. There the reason reads `ArkType's predicate has no JSON Schema form`, naming ArkType's own code for the constraint, because from ArkType 2.2.9 its converter no longer refuses these itself and shorn refuses on its behalf.
 
 A one-way transform has no reverse direction in Standard Schema, so shorn cannot undo it on decode. Use `z.codec()` for a declarative pair that runs both ways, applied outside the codec. See [What still needs converting at the edge](/schemas/rich-types/#what-still-needs-converting-at-the-edge).
 
