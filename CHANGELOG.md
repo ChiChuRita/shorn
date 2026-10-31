@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.8.0
+
+**Wire-breaking: every fingerprint moves, and some union shapes write new bytes.** A `fingerprinted()` payload stored under 0.7.x is not recognised by 0.8.0, at any width. Bare payloads, written without `fingerprinted()`, are unchanged except for the union shapes listed below. Pre-1.0, a wire change ships as a minor bump.
+
+### Fingerprints
+
+- **The hash is mixed before it is cut to width.** The low bits of the old FNV-1a hash ignored character order, so two schemas whose signatures differed only by a permutation (two fields swapping types, an `.optional()` moving from one field to another) agreed in their low three bits at every width. The hash now finishes with murmur3's `fmix32`. Every fingerprint changes; no payload byte does.
+- **The default width is 4 bytes, not 3.** The envelope exists for stored data, and the docs already told you to pass `{ bytes: 4 }` for it. A codec that names its width is unaffected by this item, but still gets the new hash. The width is hashed in, so keep one width per registry.
+- **A recursive type has one signature however it is spelled.** Mutually recursive types from Valibot, Zod objects declaring a mutual recursion in the other order, and recursion reached through an array used to carry a signature that depended on where the walk first entered the cycle. They now agree across Zod, Valibot and ArkType. Their bytes do not move. A document whose `$ref`s lead only to each other, such as `{"$ref":"#"}`, is now refused at compile instead of failing on first use.
+
+### Union bytes
+
+A union is now flattened before it is classified, so one union type has one wire shape whatever nesting the validator chose. Before this, Zod 4.4, Zod 4.5 and Valibot could write the same type differently, and neither payload decoded with the other's codec. These shapes write new bytes:
+
+- a nullable union spelled nested: `v.nullable(v.union([a, b]))`, Zod's `.nullable()` on a union whose branch carries a keyword, and any nullable union from Zod 4.4. `string | number | null` now writes `"s"` as `02 01 73` rather than `01 01 01 73`.
+- a literal union of mixed type, `z.union([z.literal("a"), z.literal(1)])`, and Valibot's mixed `v.picklist(["a", 1])`: now the enum `z.literal(["a", 1])` writes.
+- a literal list holding `null`, `z.literal(["a", "b", null])`: now what `z.enum(["a", "b"]).nullable()` writes.
+- a one-member enum, `z.enum(["a"])`: now zero bytes, like `z.literal("a")`. An array, Set or Map of one is therefore refused, as an array of a literal always was.
+- a one-branch union, `v.union([v.string()])`: now the branch itself.
+- `z.literal([true, false])`: same bytes, new fingerprint, as `boolean`.
+
+Flat unions, `.nullable()` on one type, nullable enums, discriminated unions and enums of two or more members are unchanged byte for byte. Newly compiling: unions of same-type literals with or without `null`, ArkType's discriminated union `| null`, literals beside other types, and nested unions.
+
+### Newly compiling
+
+- **A field with a default.** `z.string().default("x")` and ArkType's `"string = 'x'"` used to be refused as having different input and output shapes. They now compile as an optional field, the shape Valibot's `v.optional(v.string(), "x")` already had, so all three write the same bytes and fingerprint.
+- **The safe variants take a codec.** `safeEncode(fingerprinted(compile(S)), value)` and `safeDecode(codec, bytes)` work, as `encodeAsync` and `decodeAsync` already did.
+
+### Behaviour changes
+
+- **`safeEncode` and `safeDecode` throw for a broken schema.** A schema `compile()` refuses, or an argument that is not a schema, now throws from the first call instead of coming back as `{ success: false }`. A bad value or bad bytes is still a result. This is the line Zod's own `safeParse` draws.
+- **Newly refused at compile**, each because it compiled to a codec that could not round-trip:
+  - `z.codec()`, whose transform ran a second time on decode. A seconds-to-milliseconds codec came back a thousand times too large. Compile its wire side, and call `z.encode()` and `z.decode()` around it.
+  - A Zod field named `__proto__`, which Zod 4.6's validator drops from every value.
+  - `new OptionalSchema(new OptionalSchema(...))` and the nullable equivalent, which `.optional()` and `.nullable()` already refused.
+  - An `m` container around a `compile()` codec whose empty-payload allocation passes the ceiling 0.3.0 set. The `compile()` codec now reports the bound its `unchecked()` half always did.
+  - **ArkType 2.2.9**: `undefined`, a tuple with elements after a variadic one, a symbol key, an array carrying a property, and a `.narrow()` predicate. ArkType 2.2.9 stopped refusing these itself and described them partly, so each compiled to a codec that threw on every encode. The array with a property was worse: encode succeeded and dropped the property, and decode refused those bytes. shorn now refuses every ArkType constraint it has no hook for, on every supported ArkType version, with `ArkType's <code> has no JSON Schema form (shorn has no wire form for this value; convert it at the edge, see Rejected Shapes)`.
+
+### Fixes, same bytes
+
+- A string starting with U+FEFF decoded one character short wherever `TextDecoder` was used: browsers, workers and Deno for any such string, and Node when the string also held a U+FFFD.
+- A Zod refinement that throws, under a sync entry point, no longer leaves an unhandled rejection that ends the Node process after the `EncodeError`.
+- `EncodeError.path` names the value that actually failed. A validator failure takes its path from the validator's first issue and writes indexes as `tags[1]`, with no ` at ...` suffix. A container that refuses a value itself no longer blames a child.
+- `decode` names what it was handed, `received ArrayBuffer` or `received null`, instead of `received object`.
+- `encodeInto` with a Standard Schema throws an `EncodeError` naming the fix instead of `codec._encode is not a function`, and no longer keeps a large `ArrayBuffer` alive through a small view of it.
+- `encode(schema, value)` types `value` as the validator's input, so a branded, coerced or defaulted field takes what the validator accepts.
+
+### Cost
+
+`compile` grows from 11.52 KB to 12.63 KB gzip, mostly from union flattening (264 B) and recursive-type minimization (494 B). The `m` bundle grows from 6.45 KB to 6.48 KB. Encode and decode throughput did not regress. The tested ArkType is now 2.2.9 and Zod 4.6.7.
+
 ## 0.7.3
 
 **Same bytes, same code.** README only: the `require()` resolution note and the paragraph on what a fingerprint covers are gone from the README. Both still live in the docs, under [installation](https://shorn.dev/getting-started/installation/) and [fingerprinting](https://shorn.dev/versioning/fingerprinting/).
