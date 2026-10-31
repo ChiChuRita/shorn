@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.1
+
+**Same bytes.** Every payload and fingerprint from 0.8.0 is unchanged. This release wins back a slowdown 0.8.0 shipped, and corrects its notes.
+
+### `encodeInto` is as fast as in 0.7.3 again
+
+0.8.0 made `encodeInto` about a third slower on a small frame: 24 ns to 37 ns for the Person fixture into a 64-byte frame. The 0.8.0 entry below says throughput did not regress, and for `encodeInto` that was wrong. The cost came from 0.8.0's fix that stopped a small view of a large buffer pinning the whole buffer. To decide that, `encodeInto` read `target.buffer` on every call, and for a small typed array V8 has to create an `ArrayBuffer` to answer. The decision is now made once, when a target first arrives, since a view's buffer never changes. The memory fix still holds: a 16-byte view of a 256 MB buffer is released once your code drops it.
+
+### ArkType
+
+- A bigint literal such as `type({ v: "1n" })` is refused as `ArkType's unit 1n has no JSON Schema form`, where 0.8.0 wrote `unit 1`.
+- **Missing from 0.8.0's notes:** if you set ArkType's JSON Schema fallback globally, for instance `configure({ toJsonSchema: { fallback: { predicate: ctx => ctx.base } } })`, shorn's own fallback takes precedence for every constraint shorn has no hook for. A `.narrow()` field that compiled under 0.7.x with that setting is refused from 0.8.0 on. ArkType applies a library's `default` ahead of a global per-constraint setting, and shorn needs that `default` to refuse what ArkType 2.2.9 no longer does. Convert such a field at the edge.
+- **0.8.0's notes overstated one item:** a `.narrow()` predicate and an intersection of two patterns would have round-tripped under ArkType 2.2.9. They stay refused because every earlier ArkType refused them. A symbol key behaved like the array with a property: encode succeeded and decode refused the bytes.
+
+### Also missing from 0.8.0's notes
+
+The published type declarations no longer list shorn's undocumented internal members: `_slots`, `_yieldsNull`, `_yieldsUndefined`, `_source`, `_structural`, `_failingChild` and the `FailingChild` interface. They are still there at runtime, but code that read them, or a subclass that overrode `_failingChild`, no longer typechecks. The members the `m` reference documents for subclassing (`_minWidth`, `_encode`, `_decode`, `Reader`, `Writer`) are unchanged. The entry points now carry hover documentation.
+
+### Docs
+
+The `unchecked()` speedup quoted on the validation and throughput pages was from before 0.8.0 made Zod-validated encode and decode 25 to 45% faster. It is now 1.7× on encode and 2.5× on decode, not 2.1× and 3.8×. `compile` is 12.64 KB gzip.
+
 ## 0.8.0
 
 **Wire-breaking: every fingerprint moves, and some union shapes write new bytes.** A `fingerprinted()` payload stored under 0.7.x is not recognised by 0.8.0, at any width. Bare payloads, written without `fingerprinted()`, are unchanged except for the union shapes listed below. Pre-1.0, a wire change ships as a minor bump.
